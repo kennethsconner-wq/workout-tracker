@@ -1,6 +1,7 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -14,134 +15,118 @@ import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { newId } from '@/lib/ids';
-import type { LoggedWorkoutExercise, LoggedWorkoutSet } from '@/lib/types';
-import { addLoggedWorkout } from '@/lib/workoutsStorage';
+import type { LoggedWorkoutExercise, Workout } from '@/lib/types';
+import { addLoggedWorkout, loadWorkouts } from '@/lib/workoutsStorage';
 
-type DraftSet = { clientId: string; reps: string; weightKg: string };
-type DraftExercise = { clientId: string; name: string; sets: DraftSet[] };
+type DraftExercise = LoggedWorkoutExercise & {
+  actualSetsInput: string;
+  actualRepsInput: string;
+  actualWeightKgInput: string;
+};
 
-function emptySet(): DraftSet {
-  return { clientId: newId(), reps: '', weightKg: '' };
-}
-
-function emptyExercise(): DraftExercise {
-  return { clientId: newId(), name: '', sets: [emptySet()] };
+function toDraftExercises(workout: Workout): DraftExercise[] {
+  return workout.exercises.map((exercise) => ({
+    id: newId(),
+    workoutExerciseId: exercise.id,
+    name: exercise.name,
+    sets: exercise.sets,
+    reps: exercise.reps,
+    weightKg: exercise.weightKg,
+    actualSets: exercise.sets,
+    actualReps: exercise.reps,
+    actualWeightKg: exercise.weightKg,
+    actualSetsInput: String(exercise.sets),
+    actualRepsInput: String(exercise.reps),
+    actualWeightKgInput: String(exercise.weightKg),
+  }));
 }
 
 export default function LogWorkoutScreen() {
+  const params = useLocalSearchParams<{ workoutId?: string | string[] }>();
   const colorScheme = useColorScheme();
-  const textColor = Colors[colorScheme].text;
-  const borderColor = colorScheme === 'dark' ? '#404040' : '#d4d4d4';
-  const inputBackground = colorScheme === 'dark' ? '#171717' : '#fafafa';
+  const activeScheme = colorScheme ?? 'light';
+  const textColor = Colors[activeScheme].text;
+  const borderColor = activeScheme === 'dark' ? '#404040' : '#d4d4d4';
+  const inputBackground = activeScheme === 'dark' ? '#171717' : '#fafafa';
 
-  const [title, setTitle] = useState('');
-  const [exercises, setExercises] = useState<DraftExercise[]>([emptyExercise()]);
+  const [loading, setLoading] = useState(true);
+  const [workout, setWorkout] = useState<Workout | null>(null);
+  const [exercises, setExercises] = useState<DraftExercise[]>([]);
 
   const inputStyle = [styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }];
 
-  const addExercise = () => {
-    setExercises((prev) => [...prev, emptyExercise()]);
-  };
+  useEffect(() => {
+    const workoutId = Array.isArray(params.workoutId) ? params.workoutId[0] : params.workoutId;
+    if (!workoutId) {
+      Alert.alert('Workout not found', 'Please start from a workout card to log this session.');
+      router.replace('/');
+      return;
+    }
 
-  const addSet = (exerciseId: string) => {
+    void (async () => {
+      const allWorkouts = await loadWorkouts();
+      const selectedWorkout = allWorkouts.find((entry) => entry.id === workoutId);
+      if (!selectedWorkout) {
+        Alert.alert('Workout not found', 'Could not find the workout template for this log.');
+        router.replace('/');
+        return;
+      }
+      setWorkout(selectedWorkout);
+      setExercises(toDraftExercises(selectedWorkout));
+      setLoading(false);
+    })();
+  }, [params.workoutId]);
+
+  const updateExerciseField = (
+    exerciseId: string,
+    field: keyof Pick<DraftExercise, 'actualSetsInput' | 'actualRepsInput' | 'actualWeightKgInput'>,
+    value: string,
+  ) => {
     setExercises((prev) =>
-      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, sets: [...ex.sets, emptySet()] } : ex)),
+      prev.map((ex) => (ex.id === exerciseId ? { ...ex, [field]: value } : ex)),
     );
   };
 
-  const updateExerciseName = (exerciseId: string, name: string) => {
-    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, name } : ex)));
-  };
-
-  const updateSet = (exerciseId: string, setId: string, field: keyof Pick<DraftSet, 'reps' | 'weightKg'>, value: string) => {
-    setExercises((prev) =>
-      prev.map((ex) => {
-        if (ex.clientId !== exerciseId) {
-          return ex;
-        }
-        return {
-          ...ex,
-          sets: ex.sets.map((s) => (s.clientId === setId ? { ...s, [field]: value } : s)),
-        };
-      }),
-    );
-  };
-
-  const removeSet = (exerciseId: string, setId: string) => {
-    setExercises((prev) =>
-      prev.map((ex) => {
-        if (ex.clientId !== exerciseId) {
-          return ex;
-        }
-        if (ex.sets.length <= 1) {
-          return ex;
-        }
-        return { ...ex, sets: ex.sets.filter((s) => s.clientId !== setId) };
-      }),
-    );
-  };
-
-  const parseWorkout = (): { title: string; exercises: LoggedWorkoutExercise[] } | null => {
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle) {
-      Alert.alert('Missing title', 'Give this session a short name (for example, “Upper body”).');
+  const parseWorkout = (): { workout: Workout; exercises: LoggedWorkoutExercise[] } | null => {
+    if (!workout) {
       return null;
     }
 
     const parsedExercises: LoggedWorkoutExercise[] = [];
 
     for (const ex of exercises) {
-      const name = ex.name.trim();
-      const sets: LoggedWorkoutSet[] = [];
+      const actualSets = Number.parseInt(ex.actualSetsInput.trim(), 10);
+      const actualReps = Number.parseInt(ex.actualRepsInput.trim(), 10);
+      const actualWeightKg = Number.parseFloat(ex.actualWeightKgInput.trim().replace(',', '.'));
 
-      for (const s of ex.sets) {
-        const repsRaw = s.reps.trim();
-        const weightRaw = s.weightKg.trim().replace(',', '.');
-
-        if (!repsRaw && !weightRaw) {
-          continue;
-        }
-
-        const reps = Number.parseInt(repsRaw, 10);
-        const weightKg = Number.parseFloat(weightRaw);
-
-        if (!Number.isFinite(reps) || reps <= 0 || !Number.isFinite(weightKg) || weightKg < 0) {
-          Alert.alert(
-            'Check your numbers',
-            'Each filled-in set needs a positive rep count and a weight (use 0 for bodyweight).',
-          );
-          return null;
-        }
-
-        sets.push({ reps, weightKg });
+      if (!Number.isFinite(actualSets) || actualSets <= 0 || !Number.isFinite(actualReps) || actualReps <= 0) {
+        Alert.alert('Check your numbers', `Enter positive actual sets and reps for "${ex.name}".`);
+        return null;
       }
-
-      if (!name) {
-        if (sets.length > 0) {
-          Alert.alert('Name your exercise', 'One of your sets is missing an exercise name.');
-          return null;
-        }
-        continue;
-      }
-
-      if (sets.length === 0) {
-        Alert.alert('Add sets', `Add at least one complete set for “${name}”.`);
+      if (!Number.isFinite(actualWeightKg) || actualWeightKg < 0) {
+        Alert.alert('Check your numbers', `Enter a valid actual weight (0 for bodyweight) for "${ex.name}".`);
         return null;
       }
 
       parsedExercises.push({
-        id: newId(),
-        name,
-        sets,
+        id: ex.id,
+        workoutExerciseId: ex.workoutExerciseId,
+        name: ex.name,
+        sets: ex.sets,
+        reps: ex.reps,
+        weightKg: ex.weightKg,
+        actualSets,
+        actualReps,
+        actualWeightKg,
       });
     }
 
     if (parsedExercises.length === 0) {
-      Alert.alert('Add an exercise', 'Enter at least one exercise name and one complete set.');
+      Alert.alert('No exercises found', 'This workout has no exercises to log.');
       return null;
     }
 
-    return { title: trimmedTitle, exercises: parsedExercises };
+    return { workout, exercises: parsedExercises };
   };
 
   const onSave = () => {
@@ -151,12 +136,24 @@ export default function LogWorkoutScreen() {
     }
 
     void (async () => {
-      await addLoggedWorkout({ title: parsed.title, exercises: parsed.exercises });
-      setTitle('');
-      setExercises([emptyExercise()]);
+      await addLoggedWorkout({
+        workoutId: parsed.workout.id,
+        title: parsed.workout.title,
+        daysOfWeek: parsed.workout.daysOfWeek,
+        iconId: parsed.workout.iconId,
+        exercises: parsed.exercises,
+      });
       router.replace('/');
     })();
   };
+
+  if (loading || !workout) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color={Colors[activeScheme].tint} />
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -164,68 +161,48 @@ export default function LogWorkoutScreen() {
       behavior={Platform.select({ ios: 'padding', android: undefined })}
       keyboardVerticalOffset={80}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={styles.label}>Session name</Text>
-        <TextInput
-          value={title}
-          onChangeText={setTitle}
-          placeholder="e.g. Push day"
-          placeholderTextColor={colorScheme === 'dark' ? '#737373' : '#a3a3a3'}
-          style={inputStyle}
-        />
+        <Text style={styles.label}>Workout</Text>
+        <Text style={[styles.workoutTitle, { color: textColor }]}>{workout.title}</Text>
 
         {exercises.map((exercise, exIndex) => (
-          <View key={exercise.clientId} style={[styles.card, { borderColor }]}>
+          <View key={exercise.id} style={[styles.card, { borderColor }]}>
             <Text style={styles.cardHeading}>Exercise {exIndex + 1}</Text>
-            <TextInput
-              value={exercise.name}
-              onChangeText={(value) => updateExerciseName(exercise.clientId, value)}
-              placeholder="Exercise name"
-              placeholderTextColor={colorScheme === 'dark' ? '#737373' : '#a3a3a3'}
-              style={inputStyle}
-            />
-
-            {exercise.sets.map((set, setIndex) => (
-              <View key={set.clientId} style={styles.setRow}>
-                <Text style={styles.setLabel}>Set {setIndex + 1}</Text>
-                <TextInput
-                  value={set.reps}
-                  onChangeText={(value) => updateSet(exercise.clientId, set.clientId, 'reps', value)}
-                  placeholder="Reps"
-                  keyboardType="number-pad"
-                  placeholderTextColor={colorScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                  style={[styles.input, styles.setInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
-                />
-                <TextInput
-                  value={set.weightKg}
-                  onChangeText={(value) => updateSet(exercise.clientId, set.clientId, 'weightKg', value)}
-                  placeholder="kg"
-                  keyboardType="decimal-pad"
-                  placeholderTextColor={colorScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                  style={[styles.input, styles.setInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
-                />
-                {exercise.sets.length > 1 ? (
-                  <Pressable onPress={() => removeSet(exercise.clientId, set.clientId)} hitSlop={6}>
-                    <Text style={styles.linkDanger}>Remove</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            ))}
-
-            <Pressable onPress={() => addSet(exercise.clientId)} style={styles.inlineAction}>
-              <Text style={[styles.link, { color: Colors[colorScheme].tint }]}>Add set</Text>
-            </Pressable>
+            <Text style={[styles.exerciseName, { color: textColor }]}>{exercise.name}</Text>
+            <Text style={styles.plannedLine}>
+              Planned: {exercise.sets} set{exercise.sets === 1 ? '' : 's'} x {exercise.reps} reps @ {exercise.weightKg} lb
+            </Text>
+            <View style={styles.setRow}>
+              <TextInput
+                value={exercise.actualSetsInput}
+                onChangeText={(value) => updateExerciseField(exercise.id, 'actualSetsInput', value)}
+                placeholder="Actual sets"
+                keyboardType="number-pad"
+                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                style={[styles.input, styles.setInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
+              />
+              <TextInput
+                value={exercise.actualRepsInput}
+                onChangeText={(value) => updateExerciseField(exercise.id, 'actualRepsInput', value)}
+                placeholder="Actual reps"
+                keyboardType="number-pad"
+                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                style={[styles.input, styles.setInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
+              />
+              <TextInput
+                value={exercise.actualWeightKgInput}
+                onChangeText={(value) => updateExerciseField(exercise.id, 'actualWeightKgInput', value)}
+                placeholder="Actual lb"
+                keyboardType="decimal-pad"
+                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                style={[styles.input, styles.setInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
+              />
+            </View>
           </View>
         ))}
 
-        <Pressable onPress={addExercise} style={styles.secondaryButton}>
-          <Text style={[styles.secondaryButtonLabel, { color: Colors[colorScheme].tint }]}>
-            Add another exercise
-          </Text>
-        </Pressable>
-
         <Pressable
           onPress={onSave}
-          style={[styles.primaryButton, { backgroundColor: Colors[colorScheme].tint }]}>
+          style={[styles.primaryButton, { backgroundColor: Colors[activeScheme].tint }]}>
           <Text style={styles.primaryButtonLabel}>Save workout</Text>
         </Pressable>
       </ScrollView>
@@ -246,6 +223,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     opacity: 0.8,
+  },
+  workoutTitle: {
+    fontSize: 20,
+    fontWeight: '700',
   },
   input: {
     borderWidth: 1,
@@ -270,32 +251,17 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: 'wrap',
   },
-  setLabel: {
-    width: 56,
-    fontSize: 14,
-    opacity: 0.75,
-  },
   setInput: {
     flexGrow: 1,
-    minWidth: 80,
+    minWidth: 100,
   },
-  link: {
-    fontWeight: '600',
-  },
-  linkDanger: {
-    color: '#ef4444',
-    fontWeight: '600',
-  },
-  inlineAction: {
-    alignSelf: 'flex-start',
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  secondaryButtonLabel: {
+  exerciseName: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  plannedLine: {
+    fontSize: 14,
+    opacity: 0.8,
   },
   primaryButton: {
     paddingVertical: 14,
@@ -306,5 +272,10 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 17,
     fontWeight: '700',
+  },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

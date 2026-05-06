@@ -1,6 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,15 +11,53 @@ import {
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { getExercisePR, getExerciseTrend, getWorkoutSummary } from '@/lib/loggedWorkoutAnalytics';
 import { deleteLoggedWorkout, loadLoggedWorkouts } from '@/lib/workoutsStorage';
 import type { LoggedWorkout } from '@/lib/types';
 
 export function LoggedWorkoutsList() {
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
-  const router = useRouter();
   const [workouts, setWorkouts] = useState<LoggedWorkout[]>([]);
   const [loading, setLoading] = useState(true);
+  const latestWorkoutId = workouts[0]?.workoutId ?? null;
+  const latestWorkoutTitle = workouts[0]?.title ?? null;
+  const workoutSummary = useMemo(
+    () => (latestWorkoutId ? getWorkoutSummary(workouts, latestWorkoutId) : null),
+    [latestWorkoutId, workouts],
+  );
+  const workoutExerciseAnalytics = useMemo(() => {
+    if (!latestWorkoutId) {
+      return [];
+    }
+    const exerciseIds = new Set<string>();
+    for (const log of workouts) {
+      if (log.workoutId !== latestWorkoutId) {
+        continue;
+      }
+      for (const exercise of log.exercises) {
+        exerciseIds.add(exercise.workoutExerciseId);
+      }
+    }
+    return [...exerciseIds]
+      .map((exerciseId) => {
+        const trend = getExerciseTrend(workouts, exerciseId);
+        const pr = getExercisePR(workouts, exerciseId);
+        const last = trend[trend.length - 1];
+        const prev = trend[trend.length - 2];
+        return {
+          exerciseId,
+          name: last?.exerciseName ?? 'Exercise',
+          pr,
+          lastWeight: last?.actualWeightKg ?? 0,
+          deltaWeight: last && prev ? last.actualWeightKg - prev.actualWeightKg : 0,
+          sessions: trend.length,
+        };
+      })
+      .filter((item) => item.pr)
+      .sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name))
+      .slice(0, 3);
+  }, [latestWorkoutId, workouts]);
 
   useFocusEffect(
     useCallback(() => {
@@ -67,13 +104,8 @@ export function LoggedWorkoutsList() {
       <View style={styles.centered}>
         <Text style={styles.emptyTitle}>No workouts yet</Text>
         <Text style={styles.emptySubtitle}>
-          Open the Log workout tab to record your first session. Everything stays on this device.
+          Open a workout and use the Log Workout button to record your first session. Everything stays on this device.
         </Text>
-        <Pressable
-          style={[styles.cta, { backgroundColor: Colors[activeScheme].tint }]}
-          onPress={() => router.push('/add')}>
-          <Text style={styles.ctaLabel}>Log a workout</Text>
-        </Pressable>
       </View>
     );
   }
@@ -83,6 +115,36 @@ export function LoggedWorkoutsList() {
       data={workouts}
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.list}
+      ListHeaderComponent={
+        workoutSummary && latestWorkoutTitle ? (
+          <View style={[styles.analyticsCard, { borderColor: colorScheme === 'dark' ? '#333' : '#e5e5e5' }]}>
+            <Text style={styles.analyticsTitle}>Progress snapshot: {latestWorkoutTitle}</Text>
+            <Text style={styles.meta}>Sessions logged: {workoutSummary.sessions}</Text>
+            <Text style={styles.meta}>Average completion: {(workoutSummary.avgCompletionRate * 100).toFixed(0)}%</Text>
+            {workoutSummary.lastLoggedAt ? (
+              <Text style={styles.meta}>
+                Last session:{' '}
+                {new Date(workoutSummary.lastLoggedAt).toLocaleString(undefined, {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}
+              </Text>
+            ) : null}
+            {workoutExerciseAnalytics.map((item) => (
+              <View key={item.exerciseId} style={styles.exerciseBlock}>
+                <Text style={styles.exerciseName}>{item.name}</Text>
+                <Text style={styles.setLine}>
+                  Last weight: {item.lastWeight} lb ({item.deltaWeight >= 0 ? '+' : ''}
+                  {item.deltaWeight.toFixed(1)} vs prev)
+                </Text>
+                <Text style={styles.setLine}>
+                  PRs: {item.pr?.bestWeightKg} lb | {item.pr?.bestReps} reps | {item.pr?.bestVolume.toFixed(1)} volume
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null
+      }
       renderItem={({ item }) => (
         <View style={[styles.card, { borderColor: colorScheme === 'dark' ? '#333' : '#e5e5e5' }]}>
           <View style={styles.cardHeader}>
@@ -103,11 +165,12 @@ export function LoggedWorkoutsList() {
           {item.exercises.map((ex) => (
             <View key={ex.id} style={styles.exerciseBlock}>
               <Text style={styles.exerciseName}>{ex.name}</Text>
-              {ex.sets.map((set, idx) => (
-                <Text key={`${ex.id}-${idx}`} style={styles.setLine}>
-                  Set {idx + 1}: {set.reps} reps @ {set.weightKg} kg
-                </Text>
-              ))}
+              <Text style={styles.setLine}>
+                Planned: {ex.sets} set{ex.sets === 1 ? '' : 's'} x {ex.reps} reps @ {ex.weightKg} lb
+              </Text>
+              <Text style={styles.setLine}>
+                Actual: {ex.actualSets} set{ex.actualSets === 1 ? '' : 's'} x {ex.actualReps} reps @ {ex.actualWeightKg} lb
+              </Text>
             </View>
           ))}
         </View>
@@ -135,17 +198,6 @@ const styles = StyleSheet.create({
     opacity: 0.75,
     lineHeight: 22,
   },
-  cta: {
-    marginTop: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 10,
-  },
-  ctaLabel: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-  },
   list: {
     padding: 16,
     gap: 12,
@@ -155,6 +207,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     gap: 6,
+  },
+  analyticsCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    gap: 6,
+  },
+  analyticsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
   },
   cardHeader: {
     flexDirection: 'row',

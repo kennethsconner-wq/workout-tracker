@@ -21,7 +21,9 @@ function dayOfWeekSortIndex(day: DayOfWeek): number {
 /** Stable copy sorted by weekday (Sunday–Saturday), then title (case-insensitive). */
 export function sortWorkoutsForDropdown(workouts: Workout[]): Workout[] {
   return [...workouts].sort((a, b) => {
-    const byDay = dayOfWeekSortIndex(a.dayOfWeek) - dayOfWeekSortIndex(b.dayOfWeek);
+    const aFirstDay = a.daysOfWeek[0] ?? 'Monday';
+    const bFirstDay = b.daysOfWeek[0] ?? 'Monday';
+    const byDay = dayOfWeekSortIndex(aFirstDay) - dayOfWeekSortIndex(bFirstDay);
     if (byDay !== 0) {
       return byDay;
     }
@@ -48,7 +50,7 @@ export function pickWorkoutIdForDeviceCalendarDay(
   }
 
   const today = getDeviceDayOfWeek();
-  const matches = workouts.filter((w) => w.dayOfWeek === today);
+  const matches = workouts.filter((w) => w.daysOfWeek.includes(today));
 
   if (matches.length === 1) {
     return matches[0].id;

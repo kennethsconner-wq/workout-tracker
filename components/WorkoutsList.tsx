@@ -25,14 +25,14 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
 import { pickWorkoutIdForDeviceCalendarDay, sortWorkoutsForDropdown } from '@/lib/deviceDayOfWeek';
-import { deleteWorkout, loadWorkouts } from '@/lib/workoutsStorage';
-import type { Workout } from '@/lib/types';
+import { deleteLoggedWorkoutsByWorkoutId, deleteWorkout, loadWorkouts } from '@/lib/workoutsStorage';
+import { DAYS_OF_WEEK, DAY_OF_WEEK_ABBREVIATIONS, type Workout } from '@/lib/types';
 
 /** Matches `@react-navigation/elements` `HeaderTitle` (Workouts screen title). */
 const DROPDOWN_TITLE_FONT_SIZE = Platform.select({ ios: 17, android: 20, default: 18 });
 
 const ACTION_SHEET_SLIDE = 320;
-type CopyWorkoutPayload = Pick<Workout, 'title' | 'dayOfWeek' | 'iconId'> & {
+type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
   exercises: Array<Pick<Workout['exercises'][number], 'name' | 'sets' | 'reps' | 'weightKg'>>;
 };
 
@@ -45,15 +45,25 @@ export function WorkoutsList() {
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [carouselWidth, setCarouselWidth] = useState(0);
+  const [detailWidth, setDetailWidth] = useState(0);
   const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
   const sheetTranslateY = useRef(new Animated.Value(ACTION_SHEET_SLIDE)).current;
   const carouselRef = useRef<FlatList<Workout>>(null);
+  const detailRef = useRef<FlatList<Workout>>(null);
 
   const textColor = Colors[activeScheme].text;
   /** Carousel page border when not selected. */
   const borderColor = '#d4d4d4';
   /** Exercises card: dark tint (`#23D5D5`) in dark mode, neutral in light. */
   const detailBorderColor = activeScheme === 'dark' ? Colors.dark.tint : '#d4d4d4';
+  const formatDays = useCallback(
+    (days: Workout['daysOfWeek']) =>
+      [...days]
+        .sort((a, b) => DAYS_OF_WEEK.indexOf(a) - DAYS_OF_WEEK.indexOf(b))
+        .map((day) => DAY_OF_WEEK_ABBREVIATIONS[day])
+        .join(', '),
+    [],
+  );
 
   const { fonts } = useTheme();
   const headerTitleFontStyle = useMemo(
@@ -114,9 +124,31 @@ export function WorkoutsList() {
     [carouselWidth, dropdownWorkouts],
   );
 
+  const onDetailLayout = useCallback((event: LayoutChangeEvent) => {
+    const next = event.nativeEvent.layout.width;
+    if (next > 0) {
+      setDetailWidth((prev) => (Math.abs(next - prev) < 0.5 ? prev : next));
+    }
+  }, []);
+
+  const scrollDetailToWorkoutId = useCallback(
+    (id: string | null, animated: boolean) => {
+      if (!id || detailWidth <= 0) {
+        return;
+      }
+      const index = dropdownWorkouts.findIndex((w) => w.id === id);
+      if (index < 0) {
+        return;
+      }
+      detailRef.current?.scrollToOffset({ offset: index * detailWidth, animated });
+    },
+    [detailWidth, dropdownWorkouts],
+  );
+
   useEffect(() => {
     scrollCarouselToWorkoutId(selectedId, false);
-  }, [selectedId, scrollCarouselToWorkoutId]);
+    scrollDetailToWorkoutId(selectedId, false);
+  }, [selectedId, scrollCarouselToWorkoutId, scrollDetailToWorkoutId]);
 
   const onCarouselMomentumEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -131,6 +163,21 @@ export function WorkoutsList() {
       }
     },
     [carouselWidth, dropdownWorkouts, selectedId],
+  );
+
+  const onDetailMomentumEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (detailWidth <= 0 || dropdownWorkouts.length === 0) {
+        return;
+      }
+      const page = Math.round(event.nativeEvent.contentOffset.x / detailWidth);
+      const idx = Math.max(0, Math.min(dropdownWorkouts.length - 1, page));
+      const next = dropdownWorkouts[idx];
+      if (next && next.id !== selectedId) {
+        setSelectedId(next.id);
+      }
+    },
+    [detailWidth, dropdownWorkouts, selectedId],
   );
 
   const closeActionSheet = useCallback(
@@ -180,7 +227,10 @@ export function WorkoutsList() {
   }, [isActionSheetOpen, closeActionSheet]);
 
   const onDelete = (workout: Workout) => {
-    Alert.alert('Delete workout?', `Remove “${workout.title}”? This cannot be undone.`, [
+    Alert.alert(
+      'Delete workout?',
+      `Remove “${workout.title}”? This cannot be undone.\n\nAll logged workouts linked to this workout will also be deleted.`,
+      [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -189,19 +239,21 @@ export function WorkoutsList() {
           void (async () => {
             const id = workout.id;
             await deleteWorkout(id);
+            await deleteLoggedWorkoutsByWorkoutId(id);
             const updated = await loadWorkouts();
             setWorkouts(updated);
             setSelectedId((prev) => pickWorkoutIdForDeviceCalendarDay(updated, prev === id ? null : prev));
           })();
         },
       },
-    ]);
+    ],
+    );
   };
 
   const onCopy = (workout: Workout) => {
     const payload: CopyWorkoutPayload = {
       title: workout.title,
-      dayOfWeek: workout.dayOfWeek,
+      daysOfWeek: workout.daysOfWeek,
       iconId: workout.iconId,
       exercises: workout.exercises.map((ex) => ({
         name: ex.name,
@@ -226,9 +278,6 @@ export function WorkoutsList() {
     return (
       <View style={styles.centered}>
         <Text style={styles.emptyTitle}>No workouts yet</Text>
-        <Text style={styles.emptySubtitle}>
-          Open the Create Workout tab to define a workout plan. Everything stays on this device.
-        </Text>
         <Pressable
           style={[styles.cta, { backgroundColor: Colors[activeScheme].tint }]}
           onPress={() => router.push('/workouts')}>
@@ -281,37 +330,15 @@ export function WorkoutsList() {
                       ]}
                       accessibilityRole="button"
                       accessibilityState={{ selected: isSelected }}
-                      accessibilityLabel={`${w.title}, ${w.dayOfWeek}`}>
-                      <View
-                        style={styles.carouselPageInner}
-                        lightColor="transparent"
-                        darkColor="transparent">
-                        <WorkoutIconGlyph iconId={w.iconId} size={24} color="#D40078" />
-                        <View
-                          style={styles.carouselPageText}
-                          lightColor="transparent"
-                          darkColor="transparent">
-                          <View style={styles.carouselTitleRow}>
-                            <Text
-                              style={[styles.carouselTitle, styles.dropdownTextMagenta, headerTitleFontStyle]}
-                              numberOfLines={1}>
-                              {w.title}
-                            </Text>
-                            <Text
-                              style={[styles.titleDayDivider, styles.dropdownTextMagenta, headerTitleFontStyle]}>
-                              |
-                            </Text>
-                            <Text
-                              style={[
-                                styles.carouselDay,
-                                styles.dropdownTextMagenta,
-                                headerTitleFontStyle,
-                                styles.dropdownDayFaded,
-                              ]}
-                              numberOfLines={1}>
-                              {w.dayOfWeek}
-                            </Text>
-                          </View>
+                      accessibilityLabel={w.title}>
+                      <View style={styles.carouselPageInner} lightColor="transparent" darkColor="transparent">
+                        <View style={styles.carouselTitleRow} lightColor="transparent" darkColor="transparent">
+                          <WorkoutIconGlyph iconId={w.iconId} size={22} color="#D40078" />
+                          <Text
+                            style={[styles.carouselTitle, styles.dropdownTextMagenta, headerTitleFontStyle]}
+                            numberOfLines={1}>
+                            {w.title}
+                          </Text>
                         </View>
                       </View>
                     </Pressable>
@@ -347,44 +374,87 @@ export function WorkoutsList() {
           </View>
         ) : null}
 
-        {selected ? (
-          <RNView
-            style={[
-              styles.detail,
-              {
-                borderColor: detailBorderColor,
-                backgroundColor: Colors[activeScheme].background,
-              },
-            ]}>
-            <View style={styles.detailActionsRow} lightColor="transparent" darkColor="transparent">
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Log workout"
-                onPress={() => router.push('/add')}
-                style={({ pressed }) => [styles.logWorkoutButton, pressed && styles.logWorkoutButtonPressed]}
-                hitSlop={8}>
-                <Text style={styles.logWorkoutLabel}>Log Workout</Text>
-              </Pressable>
-              <Pressable
-                accessibilityLabel="Workout actions"
-                onPress={openActionSheet}
-                style={({ pressed }) => [styles.kebabButton, pressed && styles.kebabButtonPressed]}
-                hitSlop={10}>
-                <Ionicons name="ellipsis-vertical" size={22} color="#D40078" />
-              </Pressable>
-            </View>
-            <View style={styles.detailExerciseList}>
-              {selected.exercises.map((ex) => (
-                <View key={ex.id} style={styles.exerciseBlock}>
-                  <Text style={[styles.exerciseName, { color: textColor }]}>{ex.name}</Text>
-                  <Text style={[styles.setLine, { color: textColor }]}>
-                    {ex.sets} set{ex.sets === 1 ? '' : 's'} × {ex.reps} reps @ {ex.weightKg} lb
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </RNView>
-        ) : null}
+        <View style={styles.detailTrack} onLayout={onDetailLayout}>
+          {detailWidth > 0 ? (
+            <FlatList
+              ref={detailRef}
+              data={dropdownWorkouts}
+              keyExtractor={(w) => w.id}
+              horizontal
+              pagingEnabled
+              nestedScrollEnabled
+              removeClippedSubviews={false}
+              showsHorizontalScrollIndicator={hasMultipleWorkouts}
+              keyboardShouldPersistTaps="handled"
+              extraData={selectedId}
+              onMomentumScrollEnd={onDetailMomentumEnd}
+              getItemLayout={(_, index) => ({
+                length: detailWidth,
+                offset: detailWidth * index,
+                index,
+              })}
+              renderItem={({ item: w, index }) => {
+                const isSelected = w.id === selectedId;
+                return (
+                  <RNView
+                    style={[
+                      styles.detail,
+                      {
+                        width: detailWidth,
+                        borderColor: detailBorderColor,
+                        backgroundColor: Colors[activeScheme].background,
+                      },
+                    ]}>
+                    <View style={styles.detailActionsRow} lightColor="transparent" darkColor="transparent">
+                      <View style={styles.detailDaysRow} lightColor="transparent" darkColor="transparent">
+                        <Ionicons name="calendar-outline" size={16} color="#D40078" />
+                        <Text style={[styles.detailDaysText, styles.dropdownTextMagenta]}>{formatDays(w.daysOfWeek)}</Text>
+                      </View>
+                      <Pressable
+                        accessibilityLabel="Workout actions"
+                        onPress={() => {
+                          if (!isSelected) {
+                            setSelectedId(w.id);
+                            carouselRef.current?.scrollToOffset({
+                              offset: index * carouselWidth,
+                              animated: true,
+                            });
+                            detailRef.current?.scrollToOffset({
+                              offset: index * detailWidth,
+                              animated: true,
+                            });
+                          }
+                          openActionSheet();
+                        }}
+                        style={({ pressed }) => [styles.kebabButton, pressed && styles.kebabButtonPressed]}
+                        hitSlop={10}>
+                        <Ionicons name="ellipsis-vertical" size={22} color="#D40078" />
+                      </Pressable>
+                    </View>
+                    <View style={styles.detailExerciseList}>
+                      {w.exercises.map((ex) => (
+                        <View key={ex.id} style={styles.exerciseBlock}>
+                          <Text style={[styles.exerciseName, { color: textColor }]}>{ex.name}</Text>
+                          <Text style={[styles.setLine, { color: textColor }]}>
+                            {ex.sets} set{ex.sets === 1 ? '' : 's'} × {ex.reps} reps @ {ex.weightKg} lb
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Log workout"
+                      onPress={() => router.push({ pathname: '/add', params: { workoutId: w.id } })}
+                      style={({ pressed }) => [styles.logWorkoutButton, pressed && styles.logWorkoutButtonPressed]}
+                      hitSlop={8}>
+                      <Text style={styles.logWorkoutLabel}>Log Workout</Text>
+                    </Pressable>
+                  </RNView>
+                );
+              }}
+            />
+          ) : null}
+        </View>
       </ScrollView>
 
       {isActionSheetOpen ? (
@@ -501,28 +571,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   carouselPageInner: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-  },
-  carouselPageText: {
-    flex: 1,
-    minWidth: 0,
   },
   carouselTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    minWidth: 0,
+    justifyContent: 'center',
+    gap: 8,
+    width: '100%',
   },
   carouselTitle: {
     flexShrink: 1,
-    minWidth: 0,
     fontSize: DROPDOWN_TITLE_FONT_SIZE,
-  },
-  carouselDay: {
-    flexShrink: 0,
-    fontSize: DROPDOWN_TITLE_FONT_SIZE,
+    lineHeight: DROPDOWN_TITLE_FONT_SIZE ? DROPDOWN_TITLE_FONT_SIZE + 2 : undefined,
   },
   kebabButton: {
     paddingHorizontal: 6,
@@ -531,10 +592,6 @@ const styles = StyleSheet.create({
   },
   kebabButtonPressed: {
     opacity: 0.55,
-  },
-  titleDayDivider: {
-    flexShrink: 0,
-    fontSize: DROPDOWN_TITLE_FONT_SIZE,
   },
   dropdownTextMagenta: {
     color: '#D40078',
@@ -550,6 +607,10 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 10,
   },
+  detailTrack: {
+    width: '100%',
+    minHeight: 220,
+  },
   detailActionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -557,10 +618,22 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 2,
   },
+  detailDaysRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 0,
+    flex: 1,
+  },
+  detailDaysText: {
+    fontSize: 16,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
   logWorkoutButton: {
+    alignSelf: 'flex-start',
     paddingVertical: 8,
     paddingHorizontal: 4,
-    marginLeft: -4,
   },
   logWorkoutButtonPressed: {
     opacity: 0.65,
@@ -651,12 +724,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     textAlign: 'center',
-  },
-  emptySubtitle: {
-    fontSize: 16,
-    textAlign: 'center',
-    opacity: 0.75,
-    lineHeight: 22,
   },
   cta: {
     marginTop: 8,

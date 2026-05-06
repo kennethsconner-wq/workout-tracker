@@ -46,6 +46,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="add"
         options={{
+          href: null,
           title: 'Log workout',
           tabBarIcon: ({ color, size }) => <Ionicons name="add-circle-outline" color={color} size={size} />,
         }}

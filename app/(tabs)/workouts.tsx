@@ -15,21 +15,33 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { newId } from '@/lib/ids';
 import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
-import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
+import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
+import { DEFAULT_WORKOUT_ICON_ID, normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { DAYS_OF_WEEK, type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
-import { addWorkout } from '@/lib/workoutsStorage';
+import { addWorkout, propagateExerciseDefinitionsAcrossWorkouts } from '@/lib/workoutsStorage';
 
-type DraftExercise = { clientId: string; name: string; sets: string; reps: string; weightKg: string };
-type CopyWorkoutPayload = Pick<Workout, 'title' | 'dayOfWeek' | 'iconId'> & {
+type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
+type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
   exercises: Array<Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>>;
 };
+type ExerciseDraftSeed = { sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
+type ImportExercisesPayload = {
+  nonce: string;
+  exercises: ExerciseDraftSeed[];
+  /** Preserves Create Workout form when returning from Exercise Library (screen remounts). */
+  createDraft?: { title: string; daysOfWeek: DayOfWeek[]; iconId: WorkoutIconId };
+};
+
+function isDayOfWeekString(value: string): value is DayOfWeek {
+  return (DAYS_OF_WEEK as readonly string[]).includes(value);
+}
 
 function emptyExercise(): DraftExercise {
   return { clientId: newId(), name: '', sets: '', reps: '', weightKg: '' };
 }
 
 export default function LogWorkoutScreen() {
-  const params = useLocalSearchParams<{ copyWorkout?: string | string[] }>();
+  const params = useLocalSearchParams<{ copyWorkout?: string | string[]; importExercises?: string | string[] }>();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
   const textColor = Colors[activeScheme].text;
@@ -37,11 +49,11 @@ export default function LogWorkoutScreen() {
   const inputBackground = activeScheme === 'dark' ? '#171717' : '#fafafa';
 
   const [title, setTitle] = useState('');
-  const [dayOfWeek, setDayOfWeek] = useState<DayOfWeek | null>(null);
-  const [isDayDropdownOpen, setIsDayDropdownOpen] = useState(false);
+  const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>([]);
   const [iconId, setIconId] = useState<WorkoutIconId>(DEFAULT_WORKOUT_ICON_ID);
-  const [exercises, setExercises] = useState<DraftExercise[]>([emptyExercise()]);
+  const [exercises, setExercises] = useState<DraftExercise[]>([]);
   const lastAppliedCopyPayloadRef = useRef<string | null>(null);
+  const lastAppliedImportExercisesRef = useRef<string | null>(null);
 
   const inputStyle = [styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }];
 
@@ -49,17 +61,8 @@ export default function LogWorkoutScreen() {
     setExercises((prev) => [...prev, emptyExercise()]);
   };
   const removeExercise = (exerciseId: string) => {
-    setExercises((prev) => {
-      if (prev.length <= 1) {
-        return prev;
-      }
-      return prev.filter((ex) => ex.clientId !== exerciseId);
-    });
+    setExercises((prev) => prev.filter((ex) => ex.clientId !== exerciseId));
   };
-  const closeDayDropdown = () => {
-    setIsDayDropdownOpen(false);
-  };
-
   const updateExerciseName = (exerciseId: string, name: string) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, name } : ex)));
   };
@@ -78,22 +81,23 @@ export default function LogWorkoutScreen() {
 
     try {
       const parsed = JSON.parse(raw) as CopyWorkoutPayload;
-      if (!parsed.title || !parsed.dayOfWeek || !parsed.iconId || !Array.isArray(parsed.exercises)) {
+      if (!parsed.title || !parsed.iconId || !Array.isArray(parsed.exercises) || !Array.isArray(parsed.daysOfWeek)) {
         return;
       }
 
       setTitle(parsed.title);
-      setDayOfWeek(parsed.dayOfWeek);
+      setDaysOfWeek(parsed.daysOfWeek);
       setIconId(parsed.iconId);
 
       const mappedDrafts = parsed.exercises.map((ex) => ({
         clientId: newId(),
+        sourceExerciseId: undefined,
         name: ex.name,
         sets: String(ex.sets),
         reps: String(ex.reps),
         weightKg: String(ex.weightKg),
       }));
-      setExercises(mappedDrafts.length > 0 ? mappedDrafts : [emptyExercise()]);
+      setExercises(mappedDrafts);
 
       lastAppliedCopyPayloadRef.current = raw;
     } catch {
@@ -101,14 +105,48 @@ export default function LogWorkoutScreen() {
     }
   }, [params.copyWorkout]);
 
+  useEffect(() => {
+    const raw = Array.isArray(params.importExercises) ? params.importExercises[0] : params.importExercises;
+    if (!raw || raw === lastAppliedImportExercisesRef.current) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ImportExercisesPayload;
+      if (!Array.isArray(parsed.exercises)) {
+        return;
+      }
+      if (parsed.createDraft) {
+        setTitle(typeof parsed.createDraft.title === 'string' ? parsed.createDraft.title : '');
+        const restoredDays = Array.isArray(parsed.createDraft.daysOfWeek)
+          ? parsed.createDraft.daysOfWeek.filter((day): day is DayOfWeek => typeof day === 'string' && isDayOfWeekString(day))
+          : [];
+        setDaysOfWeek(restoredDays);
+        setIconId(normalizeWorkoutIconId(parsed.createDraft.iconId));
+      }
+      setExercises(
+        parsed.exercises.map((exercise) => ({
+          clientId: newId(),
+          sourceExerciseId: exercise.sourceExerciseId,
+          name: exercise.name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          weightKg: exercise.weightKg,
+        })),
+      );
+      lastAppliedImportExercisesRef.current = raw;
+    } catch {
+      // Ignore malformed deep-link data and keep the current draft.
+    }
+  }, [params.importExercises]);
+
   const parseWorkout = (): Omit<Workout, 'id' | 'createdAt'> | null => {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       Alert.alert('Missing title', 'Give this session a short name (for example, “Upper body”).');
       return null;
     }
-    if (!dayOfWeek) {
-      Alert.alert('Choose a day', 'Select a day of the week for this workout.');
+    if (daysOfWeek.length === 0) {
+      Alert.alert('Choose at least one day', 'Select one or more days of the week for this workout.');
       return null;
     }
 
@@ -145,7 +183,7 @@ export default function LogWorkoutScreen() {
       }
 
       parsedExercises.push({
-        id: newId(),
+        id: ex.sourceExerciseId ?? newId(),
         name,
         sets: setsCount,
         reps,
@@ -158,7 +196,7 @@ export default function LogWorkoutScreen() {
       return null;
     }
 
-    return { title: trimmedTitle, dayOfWeek, iconId, exercises: parsedExercises };
+    return { title: trimmedTitle, daysOfWeek, iconId, exercises: parsedExercises };
   };
 
   const onSave = () => {
@@ -170,14 +208,15 @@ export default function LogWorkoutScreen() {
     void (async () => {
       await addWorkout({
         title: parsed.title,
-        dayOfWeek: parsed.dayOfWeek,
+        daysOfWeek: parsed.daysOfWeek,
         iconId: parsed.iconId,
         exercises: parsed.exercises,
       });
+      await propagateExerciseDefinitionsAcrossWorkouts(parsed.exercises);
       setTitle('');
-      setDayOfWeek(null);
+      setDaysOfWeek([]);
       setIconId(DEFAULT_WORKOUT_ICON_ID);
-      setExercises([emptyExercise()]);
+      setExercises([]);
       router.replace('/');
     })();
   };
@@ -187,7 +226,7 @@ export default function LogWorkoutScreen() {
       style={styles.flex}
       behavior={Platform.select({ ios: 'padding', android: 'height' })}
       keyboardVerticalOffset={Platform.select({ ios: 80, android: 24 })}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" onTouchStart={closeDayDropdown}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.label}>Workout name</Text>
         <TextInput
           value={title}
@@ -196,44 +235,7 @@ export default function LogWorkoutScreen() {
           placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
           style={inputStyle}
         />
-        <Text style={styles.label}>Day of the Week</Text>
-        <View style={styles.dropdownWrap} onTouchStart={(event) => event.stopPropagation()}>
-          <Pressable
-            onPress={() => setIsDayDropdownOpen((prev) => !prev)}
-            style={[
-              styles.dropdownTrigger,
-              {
-                borderColor,
-                backgroundColor: inputBackground,
-              },
-            ]}>
-            <Text style={[styles.dropdownValue, { color: dayOfWeek ? textColor : activeScheme === 'dark' ? '#737373' : '#a3a3a3' }]}>
-              {dayOfWeek ?? 'Select a day'}
-            </Text>
-            <Text style={[styles.dropdownArrow, { color: textColor }]}>{isDayDropdownOpen ? '^' : 'v'}</Text>
-          </Pressable>
-
-          {isDayDropdownOpen ? (
-            <View style={[styles.dropdownMenu, { borderColor, backgroundColor: inputBackground }]}>
-              {DAYS_OF_WEEK.map((day) => (
-                <Pressable
-                  key={day}
-                  onPress={() => {
-                    setDayOfWeek(day);
-                    setIsDayDropdownOpen(false);
-                  }}
-                  style={[
-                    styles.dropdownOption,
-                    dayOfWeek === day && { backgroundColor: Colors[activeScheme].tint },
-                  ]}>
-                  <Text style={[styles.dropdownOptionLabel, { color: dayOfWeek === day ? '#fff' : textColor }]}>
-                    {day}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-        </View>
+        <WorkoutDaysPicker value={daysOfWeek} onChange={setDaysOfWeek} />
 
         <WorkoutIconPicker value={iconId} onChange={setIconId} />
 
@@ -308,11 +310,34 @@ export default function LogWorkoutScreen() {
           </View>
         ))}
 
-        <Pressable onPress={addExercise} style={styles.secondaryButton}>
-          <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>
-            Add another exercise
-          </Text>
-        </Pressable>
+        <View style={styles.exerciseActionsRow}>
+          <Pressable onPress={addExercise} style={styles.secondaryButton}>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Create Exercise</Text>
+          </Pressable>
+          <Text style={styles.orLabel}>or</Text>
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/exercise-library',
+                params: {
+                  source: 'create',
+                  createDraft: JSON.stringify({ title, daysOfWeek, iconId }),
+                  existingExercises: JSON.stringify(
+                    exercises.map((exercise) => ({
+                      sourceExerciseId: exercise.sourceExerciseId,
+                      name: exercise.name,
+                      sets: exercise.sets,
+                      reps: exercise.reps,
+                      weightKg: exercise.weightKg,
+                    })),
+                  ),
+                },
+              })
+            }
+            style={styles.secondaryButton}>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add Existing Exercise</Text>
+          </Pressable>
+        </View>
 
         <Pressable
           onPress={onSave}
@@ -344,38 +369,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
-  },
-  dropdownWrap: {
-    gap: 8,
-  },
-  dropdownTrigger: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  dropdownValue: {
-    fontSize: 16,
-  },
-  dropdownArrow: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  dropdownMenu: {
-    borderWidth: 1,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  dropdownOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  dropdownOptionLabel: {
-    fontSize: 15,
-    fontWeight: '600',
   },
   card: {
     borderWidth: 1,
@@ -425,6 +418,18 @@ const styles = StyleSheet.create({
   secondaryButton: {
     alignItems: 'center',
     paddingVertical: 10,
+  },
+  exerciseActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  orLabel: {
+    fontSize: 15,
+    opacity: 0.7,
+    fontWeight: '600',
   },
   secondaryButtonLabel: {
     fontSize: 16,
