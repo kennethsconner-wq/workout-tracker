@@ -16,21 +16,32 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { newId } from '@/lib/ids';
 import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
 import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
-import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
-import { type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
-import { addWorkout } from '@/lib/workoutsStorage';
+import { DEFAULT_WORKOUT_ICON_ID, normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
+import { DAYS_OF_WEEK, type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
+import { addWorkout, propagateExerciseDefinitionsAcrossWorkouts } from '@/lib/workoutsStorage';
 
-type DraftExercise = { clientId: string; name: string; sets: string; reps: string; weightKg: string };
+type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
 type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
   exercises: Array<Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>>;
 };
+type ExerciseDraftSeed = { sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
+type ImportExercisesPayload = {
+  nonce: string;
+  exercises: ExerciseDraftSeed[];
+  /** Preserves Create Workout form when returning from Exercise Library (screen remounts). */
+  createDraft?: { title: string; daysOfWeek: DayOfWeek[]; iconId: WorkoutIconId };
+};
+
+function isDayOfWeekString(value: string): value is DayOfWeek {
+  return (DAYS_OF_WEEK as readonly string[]).includes(value);
+}
 
 function emptyExercise(): DraftExercise {
   return { clientId: newId(), name: '', sets: '', reps: '', weightKg: '' };
 }
 
 export default function LogWorkoutScreen() {
-  const params = useLocalSearchParams<{ copyWorkout?: string | string[] }>();
+  const params = useLocalSearchParams<{ copyWorkout?: string | string[]; importExercises?: string | string[] }>();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
   const textColor = Colors[activeScheme].text;
@@ -40,8 +51,9 @@ export default function LogWorkoutScreen() {
   const [title, setTitle] = useState('');
   const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>([]);
   const [iconId, setIconId] = useState<WorkoutIconId>(DEFAULT_WORKOUT_ICON_ID);
-  const [exercises, setExercises] = useState<DraftExercise[]>([emptyExercise()]);
+  const [exercises, setExercises] = useState<DraftExercise[]>([]);
   const lastAppliedCopyPayloadRef = useRef<string | null>(null);
+  const lastAppliedImportExercisesRef = useRef<string | null>(null);
 
   const inputStyle = [styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }];
 
@@ -49,12 +61,7 @@ export default function LogWorkoutScreen() {
     setExercises((prev) => [...prev, emptyExercise()]);
   };
   const removeExercise = (exerciseId: string) => {
-    setExercises((prev) => {
-      if (prev.length <= 1) {
-        return prev;
-      }
-      return prev.filter((ex) => ex.clientId !== exerciseId);
-    });
+    setExercises((prev) => prev.filter((ex) => ex.clientId !== exerciseId));
   };
   const updateExerciseName = (exerciseId: string, name: string) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, name } : ex)));
@@ -84,18 +91,53 @@ export default function LogWorkoutScreen() {
 
       const mappedDrafts = parsed.exercises.map((ex) => ({
         clientId: newId(),
+        sourceExerciseId: undefined,
         name: ex.name,
         sets: String(ex.sets),
         reps: String(ex.reps),
         weightKg: String(ex.weightKg),
       }));
-      setExercises(mappedDrafts.length > 0 ? mappedDrafts : [emptyExercise()]);
+      setExercises(mappedDrafts);
 
       lastAppliedCopyPayloadRef.current = raw;
     } catch {
       // Ignore malformed deep-link data and keep the current draft.
     }
   }, [params.copyWorkout]);
+
+  useEffect(() => {
+    const raw = Array.isArray(params.importExercises) ? params.importExercises[0] : params.importExercises;
+    if (!raw || raw === lastAppliedImportExercisesRef.current) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ImportExercisesPayload;
+      if (!Array.isArray(parsed.exercises)) {
+        return;
+      }
+      if (parsed.createDraft) {
+        setTitle(typeof parsed.createDraft.title === 'string' ? parsed.createDraft.title : '');
+        const restoredDays = Array.isArray(parsed.createDraft.daysOfWeek)
+          ? parsed.createDraft.daysOfWeek.filter((day): day is DayOfWeek => typeof day === 'string' && isDayOfWeekString(day))
+          : [];
+        setDaysOfWeek(restoredDays);
+        setIconId(normalizeWorkoutIconId(parsed.createDraft.iconId));
+      }
+      setExercises(
+        parsed.exercises.map((exercise) => ({
+          clientId: newId(),
+          sourceExerciseId: exercise.sourceExerciseId,
+          name: exercise.name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          weightKg: exercise.weightKg,
+        })),
+      );
+      lastAppliedImportExercisesRef.current = raw;
+    } catch {
+      // Ignore malformed deep-link data and keep the current draft.
+    }
+  }, [params.importExercises]);
 
   const parseWorkout = (): Omit<Workout, 'id' | 'createdAt'> | null => {
     const trimmedTitle = title.trim();
@@ -141,7 +183,7 @@ export default function LogWorkoutScreen() {
       }
 
       parsedExercises.push({
-        id: newId(),
+        id: ex.sourceExerciseId ?? newId(),
         name,
         sets: setsCount,
         reps,
@@ -170,10 +212,11 @@ export default function LogWorkoutScreen() {
         iconId: parsed.iconId,
         exercises: parsed.exercises,
       });
+      await propagateExerciseDefinitionsAcrossWorkouts(parsed.exercises);
       setTitle('');
       setDaysOfWeek([]);
       setIconId(DEFAULT_WORKOUT_ICON_ID);
-      setExercises([emptyExercise()]);
+      setExercises([]);
       router.replace('/');
     })();
   };
@@ -267,11 +310,34 @@ export default function LogWorkoutScreen() {
           </View>
         ))}
 
-        <Pressable onPress={addExercise} style={styles.secondaryButton}>
-          <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>
-            Add another exercise
-          </Text>
-        </Pressable>
+        <View style={styles.exerciseActionsRow}>
+          <Pressable onPress={addExercise} style={styles.secondaryButton}>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Create Exercise</Text>
+          </Pressable>
+          <Text style={styles.orLabel}>or</Text>
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/exercise-library',
+                params: {
+                  source: 'create',
+                  createDraft: JSON.stringify({ title, daysOfWeek, iconId }),
+                  existingExercises: JSON.stringify(
+                    exercises.map((exercise) => ({
+                      sourceExerciseId: exercise.sourceExerciseId,
+                      name: exercise.name,
+                      sets: exercise.sets,
+                      reps: exercise.reps,
+                      weightKg: exercise.weightKg,
+                    })),
+                  ),
+                },
+              })
+            }
+            style={styles.secondaryButton}>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add Existing Exercise</Text>
+          </Pressable>
+        </View>
 
         <Pressable
           onPress={onSave}
@@ -352,6 +418,18 @@ const styles = StyleSheet.create({
   secondaryButton: {
     alignItems: 'center',
     paddingVertical: 10,
+  },
+  exerciseActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  orLabel: {
+    fontSize: 15,
+    opacity: 0.7,
+    fontWeight: '600',
   },
   secondaryButtonLabel: {
     fontSize: 16,

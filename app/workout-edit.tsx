@@ -19,9 +19,11 @@ import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
 import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
-import { loadWorkouts, updateWorkout } from '@/lib/workoutsStorage';
+import { loadWorkouts, propagateExerciseDefinitionsAcrossWorkouts, updateWorkout } from '@/lib/workoutsStorage';
 
-type DraftExercise = { clientId: string; name: string; sets: string; reps: string; weightKg: string };
+type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
+type ExerciseDraftSeed = { sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
+type ImportExercisesPayload = { nonce: string; exercises: ExerciseDraftSeed[] };
 
 function emptyExercise(): DraftExercise {
   return { clientId: newId(), name: '', sets: '', reps: '', weightKg: '' };
@@ -30,6 +32,7 @@ function emptyExercise(): DraftExercise {
 function toDraft(exercise: WorkoutExercise): DraftExercise {
   return {
     clientId: exercise.id,
+    sourceExerciseId: exercise.id,
     name: exercise.name,
     sets: String(exercise.sets),
     reps: String(exercise.reps),
@@ -38,7 +41,7 @@ function toDraft(exercise: WorkoutExercise): DraftExercise {
 }
 
 export default function WorkoutEditScreen() {
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, importExercises } = useLocalSearchParams<{ id?: string; importExercises?: string | string[] }>();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
   const textColor = Colors[activeScheme].text;
@@ -49,10 +52,11 @@ export default function WorkoutEditScreen() {
   const [title, setTitle] = useState('');
   const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>(['Monday']);
   const [iconId, setIconId] = useState<WorkoutIconId>(DEFAULT_WORKOUT_ICON_ID);
-  const [exercises, setExercises] = useState<DraftExercise[]>([emptyExercise()]);
+  const [exercises, setExercises] = useState<DraftExercise[]>([]);
 
   const inputStyle = [styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }];
 
+  /** Load workout and apply Exercise Library imports in one pass so async load cannot overwrite imported exercises. */
   useEffect(() => {
     if (!id) {
       Alert.alert('Workout not found', 'Missing workout id.');
@@ -60,8 +64,13 @@ export default function WorkoutEditScreen() {
       return;
     }
 
+    let cancelled = false;
+
     void (async () => {
       const workouts = await loadWorkouts();
+      if (cancelled) {
+        return;
+      }
       const workout = workouts.find((w) => w.id === id);
       if (!workout) {
         Alert.alert('Workout not found', 'Could not find this workout.');
@@ -72,22 +81,50 @@ export default function WorkoutEditScreen() {
       setTitle(workout.title);
       setDaysOfWeek(workout.daysOfWeek);
       setIconId(workout.iconId);
-      setExercises(workout.exercises.length > 0 ? workout.exercises.map(toDraft) : [emptyExercise()]);
-      setLoading(false);
+
+      const rawImport = Array.isArray(importExercises) ? importExercises[0] : importExercises;
+
+      if (rawImport) {
+        try {
+          const parsed = JSON.parse(rawImport) as ImportExercisesPayload;
+          if (Array.isArray(parsed.exercises)) {
+            setExercises(
+              parsed.exercises.map((exercise) => ({
+                clientId: exercise.sourceExerciseId ?? newId(),
+                sourceExerciseId: exercise.sourceExerciseId,
+                name: exercise.name,
+                sets: exercise.sets,
+                reps: exercise.reps,
+                weightKg: exercise.weightKg,
+              })),
+            );
+            if (!cancelled) {
+              setLoading(false);
+            }
+            return;
+          }
+        } catch {
+          // Ignore malformed payload; fall back to workout from storage below.
+        }
+      }
+
+      setExercises(workout.exercises.map(toDraft));
+      if (!cancelled) {
+        setLoading(false);
+      }
     })();
-  }, [id]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, importExercises]);
 
   const addExercise = () => {
     setExercises((prev) => [...prev, emptyExercise()]);
   };
 
   const removeExercise = (exerciseId: string) => {
-    setExercises((prev) => {
-      if (prev.length <= 1) {
-        return prev;
-      }
-      return prev.filter((ex) => ex.clientId !== exerciseId);
-    });
+    setExercises((prev) => prev.filter((ex) => ex.clientId !== exerciseId));
   };
 
   const updateExerciseName = (exerciseId: string, name: string) => {
@@ -141,7 +178,7 @@ export default function WorkoutEditScreen() {
       }
 
       parsedExercises.push({
-        id: ex.clientId,
+        id: ex.sourceExerciseId ?? ex.clientId,
         name,
         sets: setsCount,
         reps,
@@ -172,7 +209,10 @@ export default function WorkoutEditScreen() {
         Alert.alert('Workout not found', 'Could not update this workout.');
         return;
       }
-      router.back();
+      await propagateExerciseDefinitionsAcrossWorkouts(parsed.exercises);
+      // Don't use router.back() — stack may be workouts → edit → exercise-library → edit, and back()
+      // would reopen the library. Match Create Workout: land on Workouts tab.
+      router.replace('/');
     })();
   };
 
@@ -261,9 +301,34 @@ export default function WorkoutEditScreen() {
           </View>
         ))}
 
-        <Pressable onPress={addExercise} style={styles.secondaryButton}>
-          <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add another exercise</Text>
-        </Pressable>
+        <View style={styles.exerciseActionsRow}>
+          <Pressable onPress={addExercise} style={styles.secondaryButton}>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Create Exercise</Text>
+          </Pressable>
+          <Text style={styles.orLabel}>or</Text>
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/exercise-library',
+                params: {
+                  source: 'edit',
+                  workoutId: id,
+                  existingExercises: JSON.stringify(
+                    exercises.map((exercise) => ({
+                      sourceExerciseId: exercise.sourceExerciseId,
+                      name: exercise.name,
+                      sets: exercise.sets,
+                      reps: exercise.reps,
+                      weightKg: exercise.weightKg,
+                    })),
+                  ),
+                },
+              })
+            }
+            style={styles.secondaryButton}>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add Existing Exercise</Text>
+          </Pressable>
+        </View>
 
         <Pressable onPress={onSave} style={[styles.primaryButton, { backgroundColor: Colors[activeScheme].tint }]}>
           <Text style={styles.primaryButtonLabel}>Save changes</Text>
@@ -345,6 +410,18 @@ const styles = StyleSheet.create({
   secondaryButton: {
     alignItems: 'center',
     paddingVertical: 10,
+  },
+  exerciseActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  orLabel: {
+    fontSize: 15,
+    opacity: 0.7,
+    fontWeight: '600',
   },
   secondaryButtonLabel: {
     fontSize: 16,

@@ -1,20 +1,24 @@
 import type { WorkoutIconId } from '@/lib/workoutIcons';
 
-export type LoggedWorkoutSet = {
-  reps: number;
-  weightKg: number;
-};
-
 export type LoggedWorkoutExercise = {
   id: string;
+  workoutExerciseId: string;
   name: string;
-  sets: LoggedWorkoutSet[];
+  sets: number;
+  reps: number;
+  weightKg: number;
+  actualSets: number;
+  actualReps: number;
+  actualWeightKg: number;
 };
 
 export type LoggedWorkout = {
   id: string;
+  workoutId: string;
   createdAt: string;
   title: string;
+  daysOfWeek: DayOfWeek[];
+  iconId: WorkoutIconId;
   exercises: LoggedWorkoutExercise[];
 };
 

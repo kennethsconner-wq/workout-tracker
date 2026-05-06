@@ -25,7 +25,7 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
 import { pickWorkoutIdForDeviceCalendarDay, sortWorkoutsForDropdown } from '@/lib/deviceDayOfWeek';
-import { deleteWorkout, loadWorkouts } from '@/lib/workoutsStorage';
+import { deleteLoggedWorkoutsByWorkoutId, deleteWorkout, loadWorkouts } from '@/lib/workoutsStorage';
 import { DAYS_OF_WEEK, DAY_OF_WEEK_ABBREVIATIONS, type Workout } from '@/lib/types';
 
 /** Matches `@react-navigation/elements` `HeaderTitle` (Workouts screen title). */
@@ -227,7 +227,10 @@ export function WorkoutsList() {
   }, [isActionSheetOpen, closeActionSheet]);
 
   const onDelete = (workout: Workout) => {
-    Alert.alert('Delete workout?', `Remove “${workout.title}”? This cannot be undone.`, [
+    Alert.alert(
+      'Delete workout?',
+      `Remove “${workout.title}”? This cannot be undone.\n\nAll logged workouts linked to this workout will also be deleted.`,
+      [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -236,13 +239,15 @@ export function WorkoutsList() {
           void (async () => {
             const id = workout.id;
             await deleteWorkout(id);
+            await deleteLoggedWorkoutsByWorkoutId(id);
             const updated = await loadWorkouts();
             setWorkouts(updated);
             setSelectedId((prev) => pickWorkoutIdForDeviceCalendarDay(updated, prev === id ? null : prev));
           })();
         },
       },
-    ]);
+    ],
+    );
   };
 
   const onCopy = (workout: Workout) => {
@@ -273,9 +278,6 @@ export function WorkoutsList() {
     return (
       <View style={styles.centered}>
         <Text style={styles.emptyTitle}>No workouts yet</Text>
-        <Text style={styles.emptySubtitle}>
-          Open the Create Workout tab to define a workout plan. Everything stays on this device.
-        </Text>
         <Pressable
           style={[styles.cta, { backgroundColor: Colors[activeScheme].tint }]}
           onPress={() => router.push('/workouts')}>
@@ -442,7 +444,7 @@ export function WorkoutsList() {
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Log workout"
-                      onPress={() => router.push('/add')}
+                      onPress={() => router.push({ pathname: '/add', params: { workoutId: w.id } })}
                       style={({ pressed }) => [styles.logWorkoutButton, pressed && styles.logWorkoutButtonPressed]}
                       hitSlop={8}>
                       <Text style={styles.logWorkoutLabel}>Log Workout</Text>
@@ -722,12 +724,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     textAlign: 'center',
-  },
-  emptySubtitle: {
-    fontSize: 16,
-    textAlign: 'center',
-    opacity: 0.75,
-    lineHeight: 22,
   },
   cta: {
     marginTop: 8,
