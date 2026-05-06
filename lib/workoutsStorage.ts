@@ -10,26 +10,33 @@ function isDayOfWeek(value: string): value is DayOfWeek {
 
 const LEGACY_TITLE_DAY_RE = new RegExp(`^(.+?)\\s+\\((${DAYS_OF_WEEK.join('|')})\\)$`);
 
-function normalizeStoredWorkout(raw: Workout & { dayOfWeek?: string; iconId?: unknown }): Workout {
+function normalizeStoredWorkout(raw: Workout & { dayOfWeek?: string; iconId?: unknown; daysOfWeek?: unknown }): Workout {
   const { id, createdAt, exercises } = raw;
   let title = raw.title;
+  const daysFromArray = Array.isArray(raw.daysOfWeek)
+    ? raw.daysOfWeek.filter((day): day is DayOfWeek => typeof day === 'string' && isDayOfWeek(day))
+    : [];
   let day = raw.dayOfWeek;
   const iconId = normalizeWorkoutIconId(raw.iconId);
+
+  if (daysFromArray.length > 0) {
+    return { id, createdAt, title, daysOfWeek: Array.from(new Set(daysFromArray)), iconId, exercises };
+  }
 
   if (day && isDayOfWeek(day)) {
     const legacy = title.match(LEGACY_TITLE_DAY_RE);
     if (legacy && legacy[2] === day) {
       title = legacy[1].trim();
     }
-    return { id, createdAt, title, dayOfWeek: day, iconId, exercises };
+    return { id, createdAt, title, daysOfWeek: [day], iconId, exercises };
   }
 
   const m = title.match(LEGACY_TITLE_DAY_RE);
   if (m && isDayOfWeek(m[2])) {
-    return { id, createdAt, title: m[1].trim(), dayOfWeek: m[2], iconId, exercises };
+    return { id, createdAt, title: m[1].trim(), daysOfWeek: [m[2]], iconId, exercises };
   }
 
-  return { id, createdAt, title, dayOfWeek: 'Monday', iconId, exercises };
+  return { id, createdAt, title, daysOfWeek: ['Monday'], iconId, exercises };
 }
 
 const LOGGED_WORKOUTS_STORAGE_KEY = 'workouts@v1';
@@ -99,7 +106,7 @@ export async function addWorkout(
     id: workout.id ?? newId(),
     createdAt: workout.createdAt ?? new Date().toISOString(),
     title: workout.title,
-    dayOfWeek: workout.dayOfWeek,
+    daysOfWeek: Array.from(new Set(workout.daysOfWeek)),
     iconId: normalizeWorkoutIconId(workout.iconId),
     exercises: workout.exercises,
   };
@@ -125,7 +132,7 @@ export async function updateWorkout(
   const nextWorkout: Workout = {
     ...target,
     title: updates.title,
-    dayOfWeek: updates.dayOfWeek,
+    daysOfWeek: Array.from(new Set(updates.daysOfWeek)),
     iconId: normalizeWorkoutIconId(updates.iconId),
     exercises: updates.exercises,
   };

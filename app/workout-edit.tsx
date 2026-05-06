@@ -16,8 +16,9 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { newId } from '@/lib/ids';
 import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
+import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
-import { DAYS_OF_WEEK, type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
+import { type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
 import { loadWorkouts, updateWorkout } from '@/lib/workoutsStorage';
 
 type DraftExercise = { clientId: string; name: string; sets: string; reps: string; weightKg: string };
@@ -46,16 +47,11 @@ export default function WorkoutEditScreen() {
 
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
-  const [dayOfWeek, setDayOfWeek] = useState<DayOfWeek>('Monday');
-  const [isDayDropdownOpen, setIsDayDropdownOpen] = useState(false);
+  const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>(['Monday']);
   const [iconId, setIconId] = useState<WorkoutIconId>(DEFAULT_WORKOUT_ICON_ID);
   const [exercises, setExercises] = useState<DraftExercise[]>([emptyExercise()]);
 
   const inputStyle = [styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }];
-
-  const closeDayDropdown = () => {
-    setIsDayDropdownOpen(false);
-  };
 
   useEffect(() => {
     if (!id) {
@@ -74,7 +70,7 @@ export default function WorkoutEditScreen() {
       }
 
       setTitle(workout.title);
-      setDayOfWeek(workout.dayOfWeek);
+      setDaysOfWeek(workout.daysOfWeek);
       setIconId(workout.iconId);
       setExercises(workout.exercises.length > 0 ? workout.exercises.map(toDraft) : [emptyExercise()]);
       setLoading(false);
@@ -106,6 +102,10 @@ export default function WorkoutEditScreen() {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       Alert.alert('Missing title', 'Give this workout a title.');
+      return null;
+    }
+    if (daysOfWeek.length === 0) {
+      Alert.alert('Choose at least one day', 'Select one or more days of the week for this workout.');
       return null;
     }
 
@@ -154,7 +154,7 @@ export default function WorkoutEditScreen() {
       return null;
     }
 
-    return { title: trimmedTitle, dayOfWeek, iconId, exercises: parsedExercises };
+    return { title: trimmedTitle, daysOfWeek, iconId, exercises: parsedExercises };
   };
 
   const onSave = () => {
@@ -192,8 +192,7 @@ export default function WorkoutEditScreen() {
       <Stack.Screen options={{ title: 'Edit Workout' }} />
       <ScrollView
         contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        onTouchStart={closeDayDropdown}>
+        keyboardShouldPersistTaps="handled">
         <Text style={styles.label}>Workout name</Text>
         <TextInput
           value={title}
@@ -203,39 +202,7 @@ export default function WorkoutEditScreen() {
           style={inputStyle}
         />
 
-        <Text style={styles.label}>Day of the Week</Text>
-        <View style={styles.dropdownWrap} onTouchStart={(event) => event.stopPropagation()}>
-          <Pressable
-            onPress={() => setIsDayDropdownOpen((prev) => !prev)}
-            style={[
-              styles.dropdownTrigger,
-              {
-                borderColor,
-                backgroundColor: inputBackground,
-              },
-            ]}>
-            <Text style={[styles.dropdownValue, { color: textColor }]}>{dayOfWeek}</Text>
-            <Text style={[styles.dropdownArrow, { color: textColor }]}>{isDayDropdownOpen ? '^' : 'v'}</Text>
-          </Pressable>
-
-          {isDayDropdownOpen ? (
-            <View style={[styles.dropdownMenu, { borderColor, backgroundColor: inputBackground }]}>
-              {DAYS_OF_WEEK.map((day) => (
-                <Pressable
-                  key={day}
-                  onPress={() => {
-                    setDayOfWeek(day);
-                    setIsDayDropdownOpen(false);
-                  }}
-                  style={[styles.dropdownOption, dayOfWeek === day && { backgroundColor: Colors[activeScheme].tint }]}>
-                  <Text style={[styles.dropdownOptionLabel, { color: dayOfWeek === day ? '#fff' : textColor }]}>
-                    {day}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-        </View>
+        <WorkoutDaysPicker value={daysOfWeek} onChange={setDaysOfWeek} />
 
         <WorkoutIconPicker value={iconId} onChange={setIconId} />
 
@@ -329,38 +296,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
-  },
-  dropdownWrap: {
-    gap: 8,
-  },
-  dropdownTrigger: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  dropdownValue: {
-    fontSize: 16,
-  },
-  dropdownArrow: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  dropdownMenu: {
-    borderWidth: 1,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  dropdownOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  dropdownOptionLabel: {
-    fontSize: 15,
-    fontWeight: '600',
   },
   card: {
     borderWidth: 1,
