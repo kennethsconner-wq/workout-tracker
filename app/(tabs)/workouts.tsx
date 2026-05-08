@@ -1,5 +1,7 @@
+import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -18,6 +20,7 @@ import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
 import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { DAYS_OF_WEEK, type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
+import { confirmEditLinkedExercise } from '@/lib/linkedExerciseEdit';
 import { addWorkout, propagateExerciseDefinitionsAcrossWorkouts } from '@/lib/workoutsStorage';
 
 type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
@@ -41,6 +44,7 @@ function emptyExercise(): DraftExercise {
 }
 
 export default function LogWorkoutScreen() {
+  const navigation = useNavigation();
   const params = useLocalSearchParams<{ copyWorkout?: string | string[]; importExercises?: string | string[] }>();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
@@ -52,8 +56,50 @@ export default function LogWorkoutScreen() {
   const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>([]);
   const [iconId, setIconId] = useState<WorkoutIconId>(DEFAULT_WORKOUT_ICON_ID);
   const [exercises, setExercises] = useState<DraftExercise[]>([]);
+  /** `clientId`s for linked exercises (`sourceExerciseId`) the user chose to edit after confirmation. */
+  const [unlockedExerciseClientIds, setUnlockedExerciseClientIds] = useState(() => new Set<string>());
   const lastAppliedCopyPayloadRef = useRef<string | null>(null);
   const lastAppliedImportExercisesRef = useRef<string | null>(null);
+
+  const resetCreateWorkoutForm = useCallback(() => {
+    setTitle('');
+    setDaysOfWeek([]);
+    setIconId(DEFAULT_WORKOUT_ICON_ID);
+    setExercises([]);
+    setUnlockedExerciseClientIds(new Set());
+    lastAppliedCopyPayloadRef.current = null;
+    lastAppliedImportExercisesRef.current = null;
+    router.setParams({ copyWorkout: undefined, importExercises: undefined });
+  }, []);
+
+  /** Only when switching bottom tabs away from Create — not when pushing Exercise Library (stack on root). */
+  useEffect(() => {
+    const tabNav = navigation.getParent();
+    if (!tabNav) {
+      return;
+    }
+
+    const activeTabRouteName = (): string | null => {
+      const state = tabNav.getState();
+      if (!state || typeof state.index !== 'number' || !Array.isArray(state.routes)) {
+        return null;
+      }
+      const route = state.routes[state.index];
+      return route && typeof route.name === 'string' ? route.name : null;
+    };
+
+    let previous = activeTabRouteName();
+
+    const unsub = tabNav.addListener('state', () => {
+      const current = activeTabRouteName();
+      if (previous === 'workouts' && current !== 'workouts') {
+        resetCreateWorkoutForm();
+      }
+      previous = current;
+    });
+
+    return unsub;
+  }, [navigation, resetCreateWorkoutForm]);
 
   const inputStyle = [styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }];
 
@@ -61,6 +107,11 @@ export default function LogWorkoutScreen() {
     setExercises((prev) => [...prev, emptyExercise()]);
   };
   const removeExercise = (exerciseId: string) => {
+    setUnlockedExerciseClientIds((prev) => {
+      const next = new Set(prev);
+      next.delete(exerciseId);
+      return next;
+    });
     setExercises((prev) => prev.filter((ex) => ex.clientId !== exerciseId));
   };
   const updateExerciseName = (exerciseId: string, name: string) => {
@@ -98,6 +149,7 @@ export default function LogWorkoutScreen() {
         weightKg: String(ex.weightKg),
       }));
       setExercises(mappedDrafts);
+      setUnlockedExerciseClientIds(new Set());
 
       lastAppliedCopyPayloadRef.current = raw;
     } catch {
@@ -133,6 +185,7 @@ export default function LogWorkoutScreen() {
           weightKg: exercise.weightKg,
         })),
       );
+      setUnlockedExerciseClientIds(new Set());
       lastAppliedImportExercisesRef.current = raw;
     } catch {
       // Ignore malformed deep-link data and keep the current draft.
@@ -213,10 +266,7 @@ export default function LogWorkoutScreen() {
         exercises: parsed.exercises,
       });
       await propagateExerciseDefinitionsAcrossWorkouts(parsed.exercises);
-      setTitle('');
-      setDaysOfWeek([]);
-      setIconId(DEFAULT_WORKOUT_ICON_ID);
-      setExercises([]);
+      resetCreateWorkoutForm();
       router.replace('/');
     })();
   };
@@ -239,22 +289,48 @@ export default function LogWorkoutScreen() {
 
         <WorkoutIconPicker value={iconId} onChange={setIconId} />
 
-        {exercises.map((exercise, exIndex) => (
+        {exercises.map((exercise, exIndex) => {
+          const fieldsLocked =
+            exercise.sourceExerciseId !== undefined && !unlockedExerciseClientIds.has(exercise.clientId);
+          const lockedFieldStyle = fieldsLocked ? { opacity: 0.62 } : null;
+          return (
           <View key={exercise.clientId} style={[styles.card, { borderColor }]}>
             <View style={styles.cardHeader}>
-              <Text style={styles.cardHeading}>Exercise {exIndex + 1}</Text>
-              {exercises.length > 1 ? (
-                <Pressable onPress={() => removeExercise(exercise.clientId)} hitSlop={6}>
-                  <Text style={styles.removeExercise}>Remove</Text>
+              <Text style={[styles.cardHeading, styles.cardHeaderTitle]} numberOfLines={1}>
+                Exercise {exIndex + 1}
+              </Text>
+              <View style={styles.cardHeaderActions}>
+                {exercise.sourceExerciseId !== undefined && fieldsLocked ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit linked exercise"
+                    onPress={() =>
+                      confirmEditLinkedExercise(() =>
+                        setUnlockedExerciseClientIds((prev) => new Set(prev).add(exercise.clientId)),
+                      )
+                    }
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.exerciseHeaderIconPressable, pressed && styles.exerciseHeaderIconPressed]}>
+                    <Ionicons name="pencil-outline" size={22} color={Colors[activeScheme].tint} />
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove exercise"
+                  onPress={() => removeExercise(exercise.clientId)}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.exerciseHeaderIconPressable, pressed && styles.exerciseHeaderIconPressed]}>
+                  <Ionicons name="close-outline" size={26} color="#ef4444" />
                 </Pressable>
-              ) : null}
+              </View>
             </View>
             <TextInput
               value={exercise.name}
               onChangeText={(value) => updateExerciseName(exercise.clientId, value)}
               placeholder="Exercise name"
               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-              style={inputStyle}
+              editable={!fieldsLocked}
+              style={[inputStyle, lockedFieldStyle]}
             />
 
             <View style={styles.setRow}>
@@ -265,11 +341,13 @@ export default function LogWorkoutScreen() {
                   placeholder="0"
                   keyboardType="number-pad"
                   placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                  editable={!fieldsLocked}
                   style={[
                     styles.input,
                     styles.setInput,
                     styles.unitInput,
                     { color: textColor, borderColor, backgroundColor: inputBackground },
+                    lockedFieldStyle,
                   ]}
                 />
                 <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>sets</Text>
@@ -281,11 +359,13 @@ export default function LogWorkoutScreen() {
                   placeholder="0"
                   keyboardType="number-pad"
                   placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                  editable={!fieldsLocked}
                   style={[
                     styles.input,
                     styles.setInput,
                     styles.unitInput,
                     { color: textColor, borderColor, backgroundColor: inputBackground },
+                    lockedFieldStyle,
                   ]}
                 />
                 <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>reps</Text>
@@ -297,18 +377,21 @@ export default function LogWorkoutScreen() {
                   placeholder="Weight"
                   keyboardType="decimal-pad"
                   placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                  editable={!fieldsLocked}
                   style={[
                     styles.input,
                     styles.setInput,
                     styles.unitInput,
                     { color: textColor, borderColor, backgroundColor: inputBackground },
+                    lockedFieldStyle,
                   ]}
                 />
                 <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>lb</Text>
               </View>
             </View>
           </View>
-        ))}
+          );
+        })}
 
         <View style={styles.exerciseActionsRow}>
           <Pressable onPress={addExercise} style={styles.secondaryButton}>
@@ -335,7 +418,7 @@ export default function LogWorkoutScreen() {
               })
             }
             style={styles.secondaryButton}>
-            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add Existing Exercise</Text>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add Existing</Text>
           </Pressable>
         </View>
 
@@ -380,15 +463,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  cardHeaderTitle: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+  },
+  exerciseHeaderIconPressable: {
+    padding: 4,
+  },
+  exerciseHeaderIconPressed: {
+    opacity: 0.55,
+  },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 8,
-  },
-  removeExercise: {
-    color: '#ef4444',
-    fontWeight: '600',
   },
   setRow: {
     flexDirection: 'row',

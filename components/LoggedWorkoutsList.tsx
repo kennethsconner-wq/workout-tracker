@@ -1,20 +1,15 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Pressable,
-  StyleSheet,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { getExercisePR, getExerciseTrend, getWorkoutSummary } from '@/lib/loggedWorkoutAnalytics';
-import { deleteLoggedWorkout, loadLoggedWorkouts } from '@/lib/workoutsStorage';
+import { loadLoggedWorkouts } from '@/lib/workoutsStorage';
 import type { LoggedWorkout } from '@/lib/types';
 
+/** Metrics tab: progress snapshot only (full history is on the Log tab). */
 export function LoggedWorkoutsList() {
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
@@ -75,22 +70,6 @@ export function LoggedWorkoutsList() {
     }, []),
   );
 
-  const onDelete = (workout: LoggedWorkout) => {
-    Alert.alert('Delete workout?', `Remove “${workout.title}”? This cannot be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            await deleteLoggedWorkout(workout.id);
-            setWorkouts(await loadLoggedWorkouts());
-          })();
-        },
-      },
-    ]);
-  };
-
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -104,78 +83,43 @@ export function LoggedWorkoutsList() {
       <View style={styles.centered}>
         <Text style={styles.emptyTitle}>No workouts yet</Text>
         <Text style={styles.emptySubtitle}>
-          Open a workout and use the Log Workout button to record your first session. Everything stays on this device.
+          Open a workout and use Log Workout to record your first session. Full history lives on the Log tab.
         </Text>
       </View>
     );
   }
 
   return (
-    <FlatList
-      data={workouts}
-      keyExtractor={(item) => item.id}
-      contentContainerStyle={styles.list}
-      ListHeaderComponent={
-        workoutSummary && latestWorkoutTitle ? (
-          <View style={[styles.analyticsCard, { borderColor: colorScheme === 'dark' ? '#333' : '#e5e5e5' }]}>
-            <Text style={styles.analyticsTitle}>Progress snapshot: {latestWorkoutTitle}</Text>
-            <Text style={styles.meta}>Sessions logged: {workoutSummary.sessions}</Text>
-            <Text style={styles.meta}>Average completion: {(workoutSummary.avgCompletionRate * 100).toFixed(0)}%</Text>
-            {workoutSummary.lastLoggedAt ? (
-              <Text style={styles.meta}>
-                Last session:{' '}
-                {new Date(workoutSummary.lastLoggedAt).toLocaleString(undefined, {
-                  dateStyle: 'medium',
-                  timeStyle: 'short',
-                })}
-              </Text>
-            ) : null}
-            {workoutExerciseAnalytics.map((item) => (
-              <View key={item.exerciseId} style={styles.exerciseBlock}>
-                <Text style={styles.exerciseName}>{item.name}</Text>
-                <Text style={styles.setLine}>
-                  Last weight: {item.lastWeight} lb ({item.deltaWeight >= 0 ? '+' : ''}
-                  {item.deltaWeight.toFixed(1)} vs prev)
-                </Text>
-                <Text style={styles.setLine}>
-                  PRs: {item.pr?.bestWeightKg} lb | {item.pr?.bestReps} reps | {item.pr?.bestVolume.toFixed(1)} volume
-                </Text>
-              </View>
-            ))}
-          </View>
-        ) : null
-      }
-      renderItem={({ item }) => (
-        <View style={[styles.card, { borderColor: colorScheme === 'dark' ? '#333' : '#e5e5e5' }]}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>{item.title}</Text>
-            <Pressable onPress={() => onDelete(item)} hitSlop={8}>
-              <Text style={styles.delete}>Delete</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.meta}>
-            {new Date(item.createdAt).toLocaleString(undefined, {
-              dateStyle: 'medium',
-              timeStyle: 'short',
-            })}
-          </Text>
-          <Text style={styles.meta}>
-            {item.exercises.length} exercise{item.exercises.length === 1 ? '' : 's'}
-          </Text>
-          {item.exercises.map((ex) => (
-            <View key={ex.id} style={styles.exerciseBlock}>
-              <Text style={styles.exerciseName}>{ex.name}</Text>
+    <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      {workoutSummary && latestWorkoutTitle ? (
+        <View style={[styles.analyticsCard, { borderColor: colorScheme === 'dark' ? '#333' : '#e5e5e5' }]}>
+          <Text style={styles.analyticsTitle}>Progress snapshot: {latestWorkoutTitle}</Text>
+          <Text style={styles.meta}>Sessions logged: {workoutSummary.sessions}</Text>
+          <Text style={styles.meta}>Average completion: {(workoutSummary.avgCompletionRate * 100).toFixed(0)}%</Text>
+          {workoutSummary.lastLoggedAt ? (
+            <Text style={styles.meta}>
+              Last session:{' '}
+              {new Date(workoutSummary.lastLoggedAt).toLocaleString(undefined, {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              })}
+            </Text>
+          ) : null}
+          {workoutExerciseAnalytics.map((item) => (
+            <View key={item.exerciseId} style={styles.exerciseBlock}>
+              <Text style={styles.exerciseName}>{item.name}</Text>
               <Text style={styles.setLine}>
-                Planned: {ex.sets} set{ex.sets === 1 ? '' : 's'} x {ex.reps} reps @ {ex.weightKg} lb
+                Last weight: {item.lastWeight} lb ({item.deltaWeight >= 0 ? '+' : ''}
+                {item.deltaWeight.toFixed(1)} vs prev)
               </Text>
               <Text style={styles.setLine}>
-                Actual: {ex.actualSets} set{ex.actualSets === 1 ? '' : 's'} x {ex.actualReps} reps @ {ex.actualWeightKg} lb
+                PRs: {item.pr?.bestWeightKg} lb | {item.pr?.bestReps} reps | {item.pr?.bestVolume.toFixed(1)} volume
               </Text>
             </View>
           ))}
         </View>
-      )}
-    />
+      ) : null}
+    </ScrollView>
   );
 }
 
@@ -198,15 +142,10 @@ const styles = StyleSheet.create({
     opacity: 0.75,
     lineHeight: 22,
   },
-  list: {
+  scroll: {
     padding: 16,
+    paddingBottom: 32,
     gap: 12,
-  },
-  card: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-    gap: 6,
   },
   analyticsCard: {
     borderWidth: 1,
@@ -217,21 +156,6 @@ const styles = StyleSheet.create({
   analyticsTitle: {
     fontSize: 18,
     fontWeight: '700',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    flex: 1,
-  },
-  delete: {
-    color: '#ef4444',
-    fontWeight: '600',
   },
   meta: {
     fontSize: 14,

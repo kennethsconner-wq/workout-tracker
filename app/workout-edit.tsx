@@ -1,4 +1,5 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -20,6 +21,7 @@ import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
 import { loadWorkouts, propagateExerciseDefinitionsAcrossWorkouts, updateWorkout } from '@/lib/workoutsStorage';
+import { confirmEditLinkedExercise } from '@/lib/linkedExerciseEdit';
 
 type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
 type ExerciseDraftSeed = { sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
@@ -53,8 +55,14 @@ export default function WorkoutEditScreen() {
   const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>(['Monday']);
   const [iconId, setIconId] = useState<WorkoutIconId>(DEFAULT_WORKOUT_ICON_ID);
   const [exercises, setExercises] = useState<DraftExercise[]>([]);
+  /** `clientId`s for linked exercises the user chose to edit after confirmation. */
+  const [unlockedExerciseClientIds, setUnlockedExerciseClientIds] = useState(() => new Set<string>());
 
   const inputStyle = [styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }];
+
+  useEffect(() => {
+    setUnlockedExerciseClientIds(new Set());
+  }, [id, importExercises]);
 
   /** Load workout and apply Exercise Library imports in one pass so async load cannot overwrite imported exercises. */
   useEffect(() => {
@@ -124,6 +132,11 @@ export default function WorkoutEditScreen() {
   };
 
   const removeExercise = (exerciseId: string) => {
+    setUnlockedExerciseClientIds((prev) => {
+      const next = new Set(prev);
+      next.delete(exerciseId);
+      return next;
+    });
     setExercises((prev) => prev.filter((ex) => ex.clientId !== exerciseId));
   };
 
@@ -246,22 +259,48 @@ export default function WorkoutEditScreen() {
 
         <WorkoutIconPicker value={iconId} onChange={setIconId} />
 
-        {exercises.map((exercise, exIndex) => (
+        {exercises.map((exercise, exIndex) => {
+          const fieldsLocked =
+            exercise.sourceExerciseId !== undefined && !unlockedExerciseClientIds.has(exercise.clientId);
+          const lockedFieldStyle = fieldsLocked ? { opacity: 0.62 } : null;
+          return (
           <View key={exercise.clientId} style={[styles.card, { borderColor }]}>
             <View style={styles.cardHeader}>
-              <Text style={styles.cardHeading}>Exercise {exIndex + 1}</Text>
-              {exercises.length > 1 ? (
-                <Pressable onPress={() => removeExercise(exercise.clientId)} hitSlop={6}>
-                  <Text style={styles.removeExercise}>Remove</Text>
+              <Text style={[styles.cardHeading, styles.cardHeaderTitle]} numberOfLines={1}>
+                Exercise {exIndex + 1}
+              </Text>
+              <View style={styles.cardHeaderActions}>
+                {exercise.sourceExerciseId !== undefined && fieldsLocked ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit linked exercise"
+                    onPress={() =>
+                      confirmEditLinkedExercise(() =>
+                        setUnlockedExerciseClientIds((prev) => new Set(prev).add(exercise.clientId)),
+                      )
+                    }
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.exerciseHeaderIconPressable, pressed && styles.exerciseHeaderIconPressed]}>
+                    <Ionicons name="pencil-outline" size={22} color={Colors[activeScheme].tint} />
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove exercise"
+                  onPress={() => removeExercise(exercise.clientId)}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.exerciseHeaderIconPressable, pressed && styles.exerciseHeaderIconPressed]}>
+                  <Ionicons name="close-outline" size={26} color="#ef4444" />
                 </Pressable>
-              ) : null}
+              </View>
             </View>
             <TextInput
               value={exercise.name}
               onChangeText={(value) => updateExerciseName(exercise.clientId, value)}
               placeholder="Exercise name"
               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-              style={inputStyle}
+              editable={!fieldsLocked}
+              style={[inputStyle, lockedFieldStyle]}
             />
             <View style={styles.setRow}>
               <View style={styles.unitInputWrap}>
@@ -271,7 +310,8 @@ export default function WorkoutEditScreen() {
                   placeholder="0"
                   keyboardType="number-pad"
                   placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                  style={[styles.input, styles.setInput, styles.unitInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
+                  editable={!fieldsLocked}
+                  style={[styles.input, styles.setInput, styles.unitInput, { color: textColor, borderColor, backgroundColor: inputBackground }, lockedFieldStyle]}
                 />
                 <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>sets</Text>
               </View>
@@ -282,7 +322,8 @@ export default function WorkoutEditScreen() {
                   placeholder="0"
                   keyboardType="number-pad"
                   placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                  style={[styles.input, styles.setInput, styles.unitInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
+                  editable={!fieldsLocked}
+                  style={[styles.input, styles.setInput, styles.unitInput, { color: textColor, borderColor, backgroundColor: inputBackground }, lockedFieldStyle]}
                 />
                 <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>reps</Text>
               </View>
@@ -293,13 +334,15 @@ export default function WorkoutEditScreen() {
                   placeholder="Weight"
                   keyboardType="decimal-pad"
                   placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                  style={[styles.input, styles.setInput, styles.unitInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
+                  editable={!fieldsLocked}
+                  style={[styles.input, styles.setInput, styles.unitInput, { color: textColor, borderColor, backgroundColor: inputBackground }, lockedFieldStyle]}
                 />
                 <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>lb</Text>
               </View>
             </View>
           </View>
-        ))}
+          );
+        })}
 
         <View style={styles.exerciseActionsRow}>
           <Pressable onPress={addExercise} style={styles.secondaryButton}>
@@ -326,7 +369,7 @@ export default function WorkoutEditScreen() {
               })
             }
             style={styles.secondaryButton}>
-            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add Existing Exercise</Text>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add Existing</Text>
           </Pressable>
         </View>
 
@@ -372,15 +415,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  cardHeaderTitle: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+  },
+  exerciseHeaderIconPressable: {
+    padding: 4,
+  },
+  exerciseHeaderIconPressed: {
+    opacity: 0.55,
+  },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 8,
-  },
-  removeExercise: {
-    color: '#ef4444',
-    fontWeight: '600',
   },
   setRow: {
     flexDirection: 'row',

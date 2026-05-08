@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -32,11 +33,11 @@ function toDraftExercises(workout: Workout): DraftExercise[] {
     sets: exercise.sets,
     reps: exercise.reps,
     weightKg: exercise.weightKg,
-    actualSets: exercise.sets,
-    actualReps: exercise.reps,
+    actualSets: 0,
+    actualReps: 0,
     actualWeightKg: exercise.weightKg,
-    actualSetsInput: String(exercise.sets),
-    actualRepsInput: String(exercise.reps),
+    actualSetsInput: '',
+    actualRepsInput: '',
     actualWeightKgInput: String(exercise.weightKg),
   }));
 }
@@ -76,6 +77,45 @@ export default function LogWorkoutScreen() {
       setLoading(false);
     })();
   }, [params.workoutId]);
+
+  /** Parsed actual sets for checkbox UI; empty/non-numeric → 0, capped at planned. */
+  const parsedActualSetsForCheckboxes = (raw: string, planned: number): number => {
+    const t = raw.trim();
+    if (!t) {
+      return 0;
+    }
+    const v = Number.parseInt(t, 10);
+    if (!Number.isFinite(v) || v < 0) {
+      return 0;
+    }
+    return Math.min(v, planned);
+  };
+
+  const applyActualSetsFromCheckbox = (exerciseId: string, setIndex: number, planned: number) => {
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) {
+          return ex;
+        }
+        let n = parsedActualSetsForCheckboxes(ex.actualSetsInput, planned);
+        if (setIndex < n) {
+          if (n > 0 && n <= planned) {
+            n -= 1;
+          }
+        } else if (setIndex === n && n < planned) {
+          const raw = ex.actualSetsInput.trim();
+          const parsed = raw === '' ? 0 : Number.parseInt(raw, 10);
+          const canIncrement =
+            raw === '' || !Number.isFinite(parsed) || parsed === 0 || (Number.isFinite(parsed) && parsed < planned);
+          if (canIncrement) {
+            n += 1;
+          }
+        }
+        const nextInput = n <= 0 ? '' : String(n);
+        return { ...ex, actualSetsInput: nextInput };
+      }),
+    );
+  };
 
   const updateExerciseField = (
     exerciseId: string,
@@ -161,7 +201,6 @@ export default function LogWorkoutScreen() {
       behavior={Platform.select({ ios: 'padding', android: undefined })}
       keyboardVerticalOffset={80}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={styles.label}>Workout</Text>
         <Text style={[styles.workoutTitle, { color: textColor }]}>{workout.title}</Text>
 
         {exercises.map((exercise, exIndex) => (
@@ -172,31 +211,79 @@ export default function LogWorkoutScreen() {
               Planned: {exercise.sets} set{exercise.sets === 1 ? '' : 's'} x {exercise.reps} reps @ {exercise.weightKg} lb
             </Text>
             <View style={styles.setRow}>
-              <TextInput
-                value={exercise.actualSetsInput}
-                onChangeText={(value) => updateExerciseField(exercise.id, 'actualSetsInput', value)}
-                placeholder="Actual sets"
-                keyboardType="number-pad"
-                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                style={[styles.input, styles.setInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
-              />
-              <TextInput
-                value={exercise.actualRepsInput}
-                onChangeText={(value) => updateExerciseField(exercise.id, 'actualRepsInput', value)}
-                placeholder="Actual reps"
-                keyboardType="number-pad"
-                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                style={[styles.input, styles.setInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
-              />
-              <TextInput
-                value={exercise.actualWeightKgInput}
-                onChangeText={(value) => updateExerciseField(exercise.id, 'actualWeightKgInput', value)}
-                placeholder="Actual lb"
-                keyboardType="decimal-pad"
-                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                style={[styles.input, styles.setInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
-              />
+              <View style={styles.unitInputWrap}>
+                <TextInput
+                  value={exercise.actualSetsInput}
+                  onChangeText={(value) => updateExerciseField(exercise.id, 'actualSetsInput', value)}
+                  placeholder="0"
+                  keyboardType="number-pad"
+                  placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                  style={[
+                    styles.input,
+                    styles.setInput,
+                    styles.unitInput,
+                    { color: textColor, borderColor, backgroundColor: inputBackground },
+                  ]}
+                />
+                <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>sets</Text>
+              </View>
+              <View style={styles.unitInputWrap}>
+                <TextInput
+                  value={exercise.actualRepsInput}
+                  onChangeText={(value) => updateExerciseField(exercise.id, 'actualRepsInput', value)}
+                  placeholder="0"
+                  keyboardType="number-pad"
+                  placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                  style={[
+                    styles.input,
+                    styles.setInput,
+                    styles.unitInput,
+                    { color: textColor, borderColor, backgroundColor: inputBackground },
+                  ]}
+                />
+                <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>reps</Text>
+              </View>
+              <View style={styles.unitInputWrap}>
+                <TextInput
+                  value={exercise.actualWeightKgInput}
+                  onChangeText={(value) => updateExerciseField(exercise.id, 'actualWeightKgInput', value)}
+                  placeholder="Weight"
+                  keyboardType="decimal-pad"
+                  placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                  style={[
+                    styles.input,
+                    styles.setInput,
+                    styles.unitInput,
+                    { color: textColor, borderColor, backgroundColor: inputBackground },
+                  ]}
+                />
+                <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>lb</Text>
+              </View>
             </View>
+            {exercise.sets > 0 ? (
+              <View style={styles.checkmarkRow} lightColor="transparent" darkColor="transparent">
+                {Array.from({ length: exercise.sets }, (_, setIndex) => {
+                  const n = parsedActualSetsForCheckboxes(exercise.actualSetsInput, exercise.sets);
+                  const checked = setIndex < n;
+                  return (
+                    <Pressable
+                      key={setIndex}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked }}
+                      accessibilityLabel={`Set ${setIndex + 1} of ${exercise.sets} completed`}
+                      onPress={() => applyActualSetsFromCheckbox(exercise.id, setIndex, exercise.sets)}
+                      style={({ pressed }) => [styles.checkmarkHit, pressed && styles.checkmarkHitPressed]}
+                      hitSlop={6}>
+                      <Ionicons
+                        name={checked ? 'checkbox' : 'square-outline'}
+                        size={26}
+                        color={checked ? Colors[activeScheme].tint : activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      />
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
         ))}
 
@@ -218,11 +305,6 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
     gap: 14,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    opacity: 0.8,
   },
   workoutTitle: {
     fontSize: 20,
@@ -253,7 +335,36 @@ const styles = StyleSheet.create({
   },
   setInput: {
     flexGrow: 1,
-    minWidth: 100,
+    minWidth: 80,
+  },
+  unitInputWrap: {
+    flexGrow: 1,
+    minWidth: 80,
+    position: 'relative',
+  },
+  unitInput: {
+    paddingRight: 34,
+  },
+  unitSuffix: {
+    position: 'absolute',
+    right: 12,
+    top: 10,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  checkmarkRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+    paddingTop: 4,
+  },
+  checkmarkHit: {
+    padding: 2,
+  },
+  checkmarkHitPressed: {
+    opacity: 0.65,
   },
   exerciseName: {
     fontSize: 16,

@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet } from 'react-native';
@@ -200,7 +199,7 @@ export default function ExerciseLibraryScreen() {
             contentContainerStyle={styles.list}
             ListHeaderComponent={
               <Text style={[styles.hint, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                Tap exercises to select, then add them to your workout.
+                Tap exercises to select them, then add them to your workout.
               </Text>
             }
             renderItem={({ item }) => {
@@ -219,20 +218,13 @@ export default function ExerciseLibraryScreen() {
                         : 'transparent',
                     },
                   ]}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: isSelected }}>
-                  <View style={styles.cardRow} lightColor="transparent" darkColor="transparent">
-                    <Ionicons
-                      name={isSelected ? 'checkbox' : 'square-outline'}
-                      size={22}
-                      color={isSelected ? tint : activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    />
-                    <View style={styles.cardText} lightColor="transparent" darkColor="transparent">
-                      <Text style={styles.exerciseName}>{item.name}</Text>
-                      <Text style={styles.meta}>
-                        {item.sets} set{item.sets === 1 ? '' : 's'} x {item.reps} reps @ {item.weightKg} lb
-                      </Text>
-                    </View>
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}>
+                  <View style={styles.cardText} lightColor="transparent" darkColor="transparent">
+                    <Text style={styles.exerciseName}>{item.name}</Text>
+                    <Text style={styles.meta}>
+                      {item.sets} set{item.sets === 1 ? '' : 's'} x {item.reps} reps @ {item.weightKg} lb
+                    </Text>
                   </View>
                 </Pressable>
               );
@@ -303,14 +295,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
   },
-  cardRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
   cardText: {
-    flex: 1,
-    minWidth: 0,
     gap: 4,
   },
   exerciseName: {
