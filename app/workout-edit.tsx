@@ -374,7 +374,7 @@ export default function WorkoutEditScreen() {
         </View>
 
         <Pressable onPress={onSave} style={[styles.primaryButton, { backgroundColor: Colors[activeScheme].tint }]}>
-          <Text style={styles.primaryButtonLabel}>Save changes</Text>
+          <Text style={[styles.primaryButtonLabel, { color: Colors[activeScheme].background }]}>Save</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
