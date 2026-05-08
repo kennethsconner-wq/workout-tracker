@@ -388,6 +388,7 @@ export function WorkoutsList() {
               keyboardShouldPersistTaps="handled"
               extraData={selectedId}
               onMomentumScrollEnd={onDetailMomentumEnd}
+              contentContainerStyle={styles.detailListContent}
               getItemLayout={(_, index) => ({
                 length: detailWidth,
                 offset: detailWidth * index,
@@ -396,59 +397,62 @@ export function WorkoutsList() {
               renderItem={({ item: w, index }) => {
                 const isSelected = w.id === selectedId;
                 return (
-                  <RNView
-                    style={[
-                      styles.detail,
-                      {
-                        width: detailWidth,
-                        borderColor: detailBorderColor,
-                        backgroundColor: Colors[activeScheme].background,
-                      },
-                    ]}>
-                    <View style={styles.detailActionsRow} lightColor="transparent" darkColor="transparent">
-                      <View style={styles.detailDaysRow} lightColor="transparent" darkColor="transparent">
-                        <Ionicons name="calendar-outline" size={16} color="#D40078" />
-                        <Text style={[styles.detailDaysText, styles.dropdownTextMagenta]}>{formatDays(w.daysOfWeek)}</Text>
-                      </View>
-                      <Pressable
-                        accessibilityLabel="Workout actions"
-                        onPress={() => {
-                          if (!isSelected) {
-                            setSelectedId(w.id);
-                            carouselRef.current?.scrollToOffset({
-                              offset: index * carouselWidth,
-                              animated: true,
-                            });
-                            detailRef.current?.scrollToOffset({
-                              offset: index * detailWidth,
-                              animated: true,
-                            });
-                          }
-                          openActionSheet();
-                        }}
-                        style={({ pressed }) => [styles.kebabButton, pressed && styles.kebabButtonPressed]}
-                        hitSlop={10}>
-                        <Ionicons name="ellipsis-vertical" size={22} color="#D40078" />
-                      </Pressable>
-                    </View>
-                    <View style={styles.detailExerciseList}>
-                      {w.exercises.map((ex) => (
-                        <View key={ex.id} style={styles.exerciseBlock}>
-                          <Text style={[styles.exerciseName, { color: textColor }]}>{ex.name}</Text>
-                          <Text style={[styles.setLine, { color: textColor }]}>
-                            {ex.sets} set{ex.sets === 1 ? '' : 's'} × {ex.reps} reps @ {ex.weightKg} lb
-                          </Text>
+                  <RNView style={[styles.detailPageWrap, { width: detailWidth }]}>
+                    <RNView
+                      style={[
+                        styles.detail,
+                        {
+                          borderColor: detailBorderColor,
+                          backgroundColor: Colors[activeScheme].background,
+                        },
+                      ]}>
+                      <View style={styles.detailActionsRow} lightColor="transparent" darkColor="transparent">
+                        <View style={styles.detailDaysRow} lightColor="transparent" darkColor="transparent">
+                          <Ionicons name="calendar-outline" size={16} color="#D40078" />
+                          <Text style={[styles.detailDaysText, styles.dropdownTextMagenta]}>{formatDays(w.daysOfWeek)}</Text>
                         </View>
-                      ))}
-                    </View>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Log workout"
-                      onPress={() => router.push({ pathname: '/add', params: { workoutId: w.id } })}
-                      style={({ pressed }) => [styles.logWorkoutButton, pressed && styles.logWorkoutButtonPressed]}
-                      hitSlop={8}>
-                      <Text style={styles.logWorkoutLabel}>Log Workout</Text>
-                    </Pressable>
+                        <View style={styles.detailTrailingActions} lightColor="transparent" darkColor="transparent">
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Log workout"
+                            onPress={() => router.push({ pathname: '/add', params: { workoutId: w.id } })}
+                            style={({ pressed }) => [styles.iconActionButton, pressed && styles.iconActionButtonPressed]}
+                            hitSlop={10}>
+                            <Ionicons name="journal-outline" size={22} color="#D40078" />
+                          </Pressable>
+                          <Pressable
+                            accessibilityLabel="Workout actions"
+                            onPress={() => {
+                              if (!isSelected) {
+                                setSelectedId(w.id);
+                                carouselRef.current?.scrollToOffset({
+                                  offset: index * carouselWidth,
+                                  animated: true,
+                                });
+                                detailRef.current?.scrollToOffset({
+                                  offset: index * detailWidth,
+                                  animated: true,
+                                });
+                              }
+                              openActionSheet();
+                            }}
+                            style={({ pressed }) => [styles.iconActionButton, pressed && styles.iconActionButtonPressed]}
+                            hitSlop={10}>
+                            <Ionicons name="ellipsis-vertical" size={22} color="#D40078" />
+                          </Pressable>
+                        </View>
+                      </View>
+                      <View style={styles.detailExerciseList}>
+                        {w.exercises.map((ex) => (
+                          <View key={ex.id} style={styles.exerciseBlock}>
+                            <Text style={[styles.exerciseName, { color: textColor }]}>{ex.name}</Text>
+                            <Text style={[styles.setLine, { color: textColor }]}>
+                              {ex.sets} set{ex.sets === 1 ? '' : 's'} × {ex.reps} reps @ {ex.weightKg} lb
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </RNView>
                   </RNView>
                 );
               }}
@@ -481,12 +485,12 @@ export function WorkoutsList() {
                 const w = selected;
                 closeActionSheet(() => {
                   if (w) {
-                    onCopy(w);
+                    router.push({ pathname: '/add', params: { workoutId: w.id } });
                   }
                 });
               }}>
-              <Ionicons name="copy-outline" size={22} color="#D40078" style={styles.actionSheetIcon} />
-              <Text style={[styles.actionSheetLabel, styles.copy]}>Copy</Text>
+              <Ionicons name="journal-outline" size={22} color="#D40078" style={styles.actionSheetIcon} />
+              <Text style={[styles.actionSheetLabel, styles.log]}>Log</Text>
             </Pressable>
             <Pressable
               style={({ pressed }) => [styles.actionSheetRow, pressed && styles.actionSheetRowPressed]}
@@ -500,6 +504,19 @@ export function WorkoutsList() {
               }}>
               <Ionicons name="create-outline" size={22} color="#D40078" style={styles.actionSheetIcon} />
               <Text style={[styles.actionSheetLabel, styles.edit]}>Edit</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.actionSheetRow, pressed && styles.actionSheetRowPressed]}
+              onPress={() => {
+                const w = selected;
+                closeActionSheet(() => {
+                  if (w) {
+                    onCopy(w);
+                  }
+                });
+              }}>
+              <Ionicons name="copy-outline" size={22} color="#D40078" style={styles.actionSheetIcon} />
+              <Text style={[styles.actionSheetLabel, styles.copy]}>Copy</Text>
             </Pressable>
             <Pressable
               style={({ pressed }) => [styles.actionSheetRow, pressed && styles.actionSheetRowPressed]}
@@ -585,14 +602,6 @@ const styles = StyleSheet.create({
     fontSize: DROPDOWN_TITLE_FONT_SIZE,
     lineHeight: DROPDOWN_TITLE_FONT_SIZE ? DROPDOWN_TITLE_FONT_SIZE + 2 : undefined,
   },
-  kebabButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  kebabButtonPressed: {
-    opacity: 0.55,
-  },
   dropdownTextMagenta: {
     color: '#D40078',
   },
@@ -606,10 +615,16 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     padding: 14,
     gap: 10,
+    width: '100%',
   },
   detailTrack: {
     width: '100%',
-    minHeight: 220,
+  },
+  detailListContent: {
+    alignItems: 'flex-start',
+  },
+  detailPageWrap: {
+    alignSelf: 'flex-start',
   },
   detailActionsRow: {
     flexDirection: 'row',
@@ -630,18 +645,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flexShrink: 1,
   },
-  logWorkoutButton: {
-    alignSelf: 'flex-start',
+  detailTrailingActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    flexShrink: 0,
+  },
+  iconActionButton: {
+    paddingHorizontal: 6,
     paddingVertical: 8,
-    paddingHorizontal: 4,
+    borderRadius: 10,
   },
-  logWorkoutButtonPressed: {
-    opacity: 0.65,
-  },
-  logWorkoutLabel: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#D40078',
+  iconActionButtonPressed: {
+    opacity: 0.55,
   },
   detailExerciseList: {
     gap: 10,
@@ -695,6 +711,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   copy: {
+    color: '#D40078',
+    fontWeight: '600',
+  },
+  log: {
     color: '#D40078',
     fontWeight: '600',
   },

@@ -39,8 +39,15 @@ export default function TabLayout() {
       <Tabs.Screen
         name="track"
         options={{
-          title: 'Track Workouts',
-          tabBarIcon: ({ color, size }) => <Ionicons name="list-outline" color={color} size={size} />,
+          title: 'Metrics',
+          tabBarIcon: ({ color, size }) => <Ionicons name="bar-chart-outline" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="workout-log"
+        options={{
+          title: 'Log',
+          tabBarIcon: ({ color, size }) => <Ionicons name="journal-outline" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
@@ -54,7 +61,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="workouts"
         options={{
-          title: 'Create Workout',
+          title: 'Create',
           tabBarIcon: ({ color, size }) => <Ionicons name="copy-outline" color={color} size={size} />,
         }}
       />
