@@ -194,9 +194,11 @@ export function LoggedWorkoutLogList() {
           <Text style={[styles.setLine, { color: textColor }]}>
             Planned: {ex.sets} set{ex.sets === 1 ? '' : 's'} x {ex.reps} reps @ {ex.weightKg} lb
           </Text>
-          <Text style={[styles.setLine, { color: textColor }]}>
-            Actual: {ex.actualSets} set{ex.actualSets === 1 ? '' : 's'} x {ex.actualReps} reps @ {ex.actualWeightKg} lb
-          </Text>
+          {ex.actualSets.map((actualSet, setIndex) => (
+            <Text key={`${ex.id}-actual-set-${setIndex}`} style={[styles.setLine, { color: textColor }]}>
+              Actual set {setIndex + 1}: {actualSet.actualReps} reps @ {actualSet.actualWeightKg} lb
+            </Text>
+          ))}
         </View>
       ))}
     </RNView>

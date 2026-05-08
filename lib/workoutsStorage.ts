@@ -51,12 +51,45 @@ const WORKOUTS_STORAGE_KEY = 'workout-templates@v1';
 function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown; daysOfWeek?: unknown; iconId?: unknown }): LoggedWorkout {
   const normalizedExercises = Array.isArray(raw.exercises)
     ? raw.exercises.map((exercise) => {
-        const rawSets = (exercise as unknown as { sets?: unknown }).sets;
-        const setsFromLegacy =
-          Array.isArray(rawSets) ? (rawSets as Array<{ reps?: unknown; weightKg?: unknown }>) : [];
-        const legacyActualSets = setsFromLegacy.length;
-        const legacyActualReps = legacyActualSets > 0 && typeof setsFromLegacy[0]?.reps === 'number' ? setsFromLegacy[0].reps : 0;
-        const legacyActualWeight = legacyActualSets > 0 && typeof setsFromLegacy[0]?.weightKg === 'number' ? setsFromLegacy[0].weightKg : 0;
+        const rawLegacyPlannedSets = (exercise as unknown as { sets?: unknown }).sets;
+        const plannedSetsFromLegacyArray = Array.isArray(rawLegacyPlannedSets)
+          ? (rawLegacyPlannedSets as Array<{ reps?: unknown; weightKg?: unknown }>)
+          : [];
+        const legacyPlannedSetCount = plannedSetsFromLegacyArray.length;
+        const legacyPlannedReps =
+          legacyPlannedSetCount > 0 && typeof plannedSetsFromLegacyArray[0]?.reps === 'number'
+            ? plannedSetsFromLegacyArray[0].reps
+            : 0;
+        const legacyPlannedWeight =
+          legacyPlannedSetCount > 0 && typeof plannedSetsFromLegacyArray[0]?.weightKg === 'number'
+            ? plannedSetsFromLegacyArray[0].weightKg
+            : 0;
+        const legacyActualReps =
+          typeof (exercise as unknown as { actualReps?: unknown }).actualReps === 'number'
+            ? (exercise as unknown as { actualReps: number }).actualReps
+            : legacyPlannedReps;
+        const legacyActualWeightKg =
+          typeof (exercise as unknown as { actualWeightKg?: unknown }).actualWeightKg === 'number'
+            ? (exercise as unknown as { actualWeightKg: number }).actualWeightKg
+            : legacyPlannedWeight;
+        const legacyActualSetCount =
+          typeof (exercise as unknown as { actualSets?: unknown }).actualSets === 'number'
+            ? Math.max(0, Math.floor((exercise as unknown as { actualSets: number }).actualSets))
+            : legacyPlannedSetCount;
+        const actualSetsFromNewShape = Array.isArray((exercise as { actualSets?: unknown }).actualSets)
+          ? ((exercise as { actualSets: Array<{ actualReps?: unknown; actualWeightKg?: unknown }> }).actualSets ?? [])
+              .map((actualSet) => ({
+                actualReps: typeof actualSet.actualReps === 'number' ? actualSet.actualReps : legacyActualReps,
+                actualWeightKg: typeof actualSet.actualWeightKg === 'number' ? actualSet.actualWeightKg : legacyActualWeightKg,
+              }))
+          : null;
+        const normalizedActualSets =
+          actualSetsFromNewShape ??
+          Array.from({ length: legacyActualSetCount }, () => ({
+            actualReps: legacyActualReps,
+            actualWeightKg: legacyActualWeightKg,
+          }));
+
         return {
           id: typeof exercise.id === 'string' ? exercise.id : newId(),
           workoutExerciseId:
@@ -66,24 +99,16 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
                 ? exercise.id
                 : newId(),
           name: typeof exercise.name === 'string' ? exercise.name : '',
-          sets: typeof (exercise as { sets?: unknown }).sets === 'number' ? (exercise as { sets: number }).sets : legacyActualSets,
-          reps: typeof (exercise as { reps?: unknown }).reps === 'number' ? (exercise as { reps: number }).reps : legacyActualReps,
+          sets:
+            typeof (exercise as { sets?: unknown }).sets === 'number'
+              ? (exercise as { sets: number }).sets
+              : legacyPlannedSetCount,
+          reps: typeof (exercise as { reps?: unknown }).reps === 'number' ? (exercise as { reps: number }).reps : legacyPlannedReps,
           weightKg:
             typeof (exercise as { weightKg?: unknown }).weightKg === 'number'
               ? (exercise as { weightKg: number }).weightKg
-              : legacyActualWeight,
-          actualSets:
-            typeof (exercise as { actualSets?: unknown }).actualSets === 'number'
-              ? (exercise as { actualSets: number }).actualSets
-              : legacyActualSets,
-          actualReps:
-            typeof (exercise as { actualReps?: unknown }).actualReps === 'number'
-              ? (exercise as { actualReps: number }).actualReps
-              : legacyActualReps,
-          actualWeightKg:
-            typeof (exercise as { actualWeightKg?: unknown }).actualWeightKg === 'number'
-              ? (exercise as { actualWeightKg: number }).actualWeightKg
-              : legacyActualWeight,
+              : legacyPlannedWeight,
+          actualSets: normalizedActualSets,
         };
       })
     : [];

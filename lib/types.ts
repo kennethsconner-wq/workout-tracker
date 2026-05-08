@@ -7,7 +7,10 @@ export type LoggedWorkoutExercise = {
   sets: number;
   reps: number;
   weightKg: number;
-  actualSets: number;
+  actualSets: LoggedActualSet[];
+};
+
+export type LoggedActualSet = {
   actualReps: number;
   actualWeightKg: number;
 };

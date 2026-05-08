@@ -33,7 +33,7 @@ const DROPDOWN_TITLE_FONT_SIZE = Platform.select({ ios: 17, android: 20, default
 
 const ACTION_SHEET_SLIDE = 320;
 type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
-  exercises: Array<Pick<Workout['exercises'][number], 'name' | 'sets' | 'reps' | 'weightKg'>>;
+  exercises: Array<Pick<Workout['exercises'][number], 'id' | 'name' | 'sets' | 'reps' | 'weightKg'>>;
 };
 
 export function WorkoutsList() {
@@ -256,6 +256,7 @@ export function WorkoutsList() {
       daysOfWeek: workout.daysOfWeek,
       iconId: workout.iconId,
       exercises: workout.exercises.map((ex) => ({
+        id: ex.id,
         name: ex.name,
         sets: ex.sets,
         reps: ex.reps,

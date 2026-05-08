@@ -31,7 +31,10 @@ export type WorkoutSummary = {
 
 function toPoint(log: LoggedWorkout, exercise: LoggedWorkout['exercises'][number]): LoggedExercisePoint {
   const plannedVolume = exercise.sets * exercise.reps * exercise.weightKg;
-  const actualVolume = exercise.actualSets * exercise.actualReps * exercise.actualWeightKg;
+  const actualSets = exercise.actualSets.length;
+  const actualReps = actualSets === 0 ? 0 : Math.max(...exercise.actualSets.map((set) => set.actualReps));
+  const actualWeightKg = actualSets === 0 ? 0 : Math.max(...exercise.actualSets.map((set) => set.actualWeightKg));
+  const actualVolume = exercise.actualSets.reduce((sum, set) => sum + set.actualReps * set.actualWeightKg, 0);
   return {
     loggedWorkoutId: log.id,
     workoutId: log.workoutId,
@@ -41,9 +44,9 @@ function toPoint(log: LoggedWorkout, exercise: LoggedWorkout['exercises'][number
     plannedSets: exercise.sets,
     plannedReps: exercise.reps,
     plannedWeightKg: exercise.weightKg,
-    actualSets: exercise.actualSets,
-    actualReps: exercise.actualReps,
-    actualWeightKg: exercise.actualWeightKg,
+    actualSets,
+    actualReps,
+    actualWeightKg,
     plannedVolume,
     actualVolume,
   };
@@ -91,7 +94,9 @@ export function getWorkoutSummary(logged: LoggedWorkout[], workoutId: string): W
       return 0;
     }
     const completed = session.exercises.filter(
-      (exercise) => exercise.actualSets > 0 && exercise.actualReps > 0 && exercise.actualWeightKg >= 0,
+      (exercise) =>
+        exercise.actualSets.length > 0 &&
+        exercise.actualSets.every((set) => set.actualReps > 0 && set.actualWeightKg >= 0),
     ).length;
     return completed / session.exercises.length;
   });

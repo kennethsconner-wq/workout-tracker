@@ -25,7 +25,7 @@ import { addWorkout, propagateExerciseDefinitionsAcrossWorkouts } from '@/lib/wo
 
 type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
 type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
-  exercises: Array<Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>>;
+  exercises: Array<Pick<WorkoutExercise, 'id' | 'name' | 'sets' | 'reps' | 'weightKg'>>;
 };
 type ExerciseDraftSeed = { sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
 type ImportExercisesPayload = {
@@ -142,7 +142,7 @@ export default function LogWorkoutScreen() {
 
       const mappedDrafts = parsed.exercises.map((ex) => ({
         clientId: newId(),
-        sourceExerciseId: undefined,
+        sourceExerciseId: ex.id,
         name: ex.name,
         sets: String(ex.sets),
         reps: String(ex.reps),
@@ -425,7 +425,7 @@ export default function LogWorkoutScreen() {
         <Pressable
           onPress={onSave}
           style={[styles.primaryButton, { backgroundColor: Colors[activeScheme].tint }]}>
-          <Text style={styles.primaryButtonLabel}>Save workout</Text>
+          <Text style={[styles.primaryButtonLabel, { color: Colors[activeScheme].background }]}>Save</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
