@@ -35,6 +35,8 @@ type LogWorkoutDraft = {
   workoutId: string;
   exercises: DraftExercise[];
   updatedAt: string;
+  /** Template exercise ids (`WorkoutExercise.id`) the user removed from this log. */
+  omittedWorkoutExerciseIds?: string[];
 };
 
 function hasActualSetValues(actualSet: DraftActualSet): boolean {
@@ -45,32 +47,41 @@ function draftStorageKey(workoutId: string): string {
   return `workout-log-draft@v1:${workoutId}`;
 }
 
-function normalizeDraftExercises(workout: Workout, savedExercises: unknown): DraftExercise[] {
+function normalizeDraftExercises(
+  workout: Workout,
+  savedExercises: unknown,
+  omittedWorkoutExerciseIds: readonly string[] = [],
+): DraftExercise[] {
+  const omit = new Set(omittedWorkoutExerciseIds);
   const savedList = Array.isArray(savedExercises) ? (savedExercises as DraftExercise[]) : [];
   const byWorkoutExerciseId = new Map(
     savedList
       .filter((exercise): exercise is DraftExercise => !!exercise && typeof exercise.workoutExerciseId === 'string')
       .map((exercise) => [exercise.workoutExerciseId, exercise]),
   );
-  return workout.exercises.map((exercise) => {
-    const saved = byWorkoutExerciseId.get(exercise.id);
-    return {
-      id: saved?.id && typeof saved.id === 'string' ? saved.id : newId(),
-      workoutExerciseId: exercise.id,
-      name: exercise.name,
-      sets: exercise.sets,
-      reps: exercise.reps,
-      weightKg: exercise.weightKg,
-      actualSets: Array.from({ length: exercise.sets }, (_, setIndex) => {
-        const savedSet = saved?.actualSets?.[setIndex];
-        return {
-          id: savedSet?.id && typeof savedSet.id === 'string' ? savedSet.id : newId(),
-          actualRepsInput: typeof savedSet?.actualRepsInput === 'string' ? savedSet.actualRepsInput : '',
-          actualWeightKgInput: typeof savedSet?.actualWeightKgInput === 'string' ? savedSet.actualWeightKgInput : '',
-        };
-      }),
-    };
-  });
+  return workout.exercises
+    .filter((exercise) => !omit.has(exercise.id))
+    .map((exercise) => {
+      const saved = byWorkoutExerciseId.get(exercise.id);
+      const savedLen = saved?.actualSets?.length ?? 0;
+      const setCount = Math.max(exercise.sets, savedLen);
+      return {
+        id: saved?.id && typeof saved.id === 'string' ? saved.id : newId(),
+        workoutExerciseId: exercise.id,
+        name: exercise.name,
+        sets: exercise.sets,
+        reps: exercise.reps,
+        weightKg: exercise.weightKg,
+        actualSets: Array.from({ length: setCount }, (_, setIndex) => {
+          const savedSet = saved?.actualSets?.[setIndex];
+          return {
+            id: savedSet?.id && typeof savedSet.id === 'string' ? savedSet.id : newId(),
+            actualRepsInput: typeof savedSet?.actualRepsInput === 'string' ? savedSet.actualRepsInput : '',
+            actualWeightKgInput: typeof savedSet?.actualWeightKgInput === 'string' ? savedSet.actualWeightKgInput : '',
+          };
+        }),
+      };
+    });
 }
 
 function toDraftExercises(workout: Workout): DraftExercise[] {
@@ -100,6 +111,7 @@ export default function LogWorkoutScreen() {
   const [loading, setLoading] = useState(true);
   const [workout, setWorkout] = useState<Workout | null>(null);
   const [exercises, setExercises] = useState<DraftExercise[]>([]);
+  const [omittedWorkoutExerciseIds, setOmittedWorkoutExerciseIds] = useState<string[]>([]);
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [loadedFromDraft, setLoadedFromDraft] = useState(false);
   const skipAutosaveRef = useRef(false);
@@ -133,22 +145,29 @@ export default function LogWorkoutScreen() {
       const storageKey = draftStorageKey(selectedWorkout.id);
       const rawDraft = await AsyncStorage.getItem(storageKey);
       let nextExercises = toDraftExercises(selectedWorkout);
+      let nextOmitted: string[] = [];
       let didLoadDraft = false;
       if (rawDraft) {
         try {
           const parsed = JSON.parse(rawDraft) as LogWorkoutDraft;
           if (parsed && parsed.workoutId === selectedWorkout.id) {
-            nextExercises = normalizeDraftExercises(selectedWorkout, parsed.exercises);
+            const omittedRaw = parsed.omittedWorkoutExerciseIds;
+            nextOmitted = Array.isArray(omittedRaw)
+              ? omittedRaw.filter((id): id is string => typeof id === 'string')
+              : [];
+            nextExercises = normalizeDraftExercises(selectedWorkout, parsed.exercises, nextOmitted);
             didLoadDraft = true;
           }
         } catch {
           nextExercises = toDraftExercises(selectedWorkout);
+          nextOmitted = [];
         }
       }
       if (cancelled) {
         return;
       }
       setWorkout(selectedWorkout);
+      setOmittedWorkoutExerciseIds(nextOmitted);
       setExercises(nextExercises);
       setLoadedFromDraft(didLoadDraft);
       setDraftHydrated(true);
@@ -170,10 +189,11 @@ export default function LogWorkoutScreen() {
       JSON.stringify({
         workoutId: workout.id,
         exercises,
+        omittedWorkoutExerciseIds,
         updatedAt: new Date().toISOString(),
       } as LogWorkoutDraft),
     );
-  }, [draftHydrated, exercises, workout]);
+  }, [draftHydrated, exercises, omittedWorkoutExerciseIds, workout]);
 
   const updateActualSetField = (
     exerciseId: string,
@@ -239,6 +259,26 @@ export default function LogWorkoutScreen() {
           ],
         };
       }),
+    );
+  };
+
+  const confirmRemoveExerciseFromLog = (exercise: DraftExercise) => {
+    Alert.alert(
+      'Remove exercise?',
+      `Remove "${exercise.name}" from this session? It will stay out of this log until you start fresh or clear the draft.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            setOmittedWorkoutExerciseIds((prev) =>
+              prev.includes(exercise.workoutExerciseId) ? prev : [...prev, exercise.workoutExerciseId],
+            );
+            setExercises((prev) => prev.filter((ex) => ex.id !== exercise.id));
+          },
+        },
+      ],
     );
   };
 
@@ -348,6 +388,7 @@ export default function LogWorkoutScreen() {
         onPress: () => {
           void (async () => {
             await AsyncStorage.removeItem(draftStorageKey(workout.id));
+            setOmittedWorkoutExerciseIds([]);
             setExercises(toDraftExercises(workout));
             setLoadedFromDraft(false);
           })();
@@ -373,18 +414,35 @@ export default function LogWorkoutScreen() {
         <View style={styles.workoutTitleRow} lightColor="transparent" darkColor="transparent">
           <View style={styles.workoutTitleTextRow} lightColor="transparent" darkColor="transparent">
             <Text style={[styles.workoutTitle, { color: textColor }]}>{workout.title}</Text>
-            {loadedFromDraft ? <Text style={styles.draftBadge}>(Draft)</Text> : null}
+            {loadedFromDraft ? (
+              <View style={styles.draftTrashRow} lightColor="transparent" darkColor="transparent">
+                <Text style={styles.draftBadge}>(Draft)</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear draft and start fresh"
+                  onPress={onStartFresh}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.draftTrashButton, pressed && styles.checkboxButtonPressed]}>
+                  <Ionicons name="trash-outline" size={22} color="#ef4444" />
+                </Pressable>
+              </View>
+            ) : null}
           </View>
-          {loadedFromDraft ? (
-            <Pressable onPress={onStartFresh} hitSlop={8} style={({ pressed }) => [pressed && styles.checkboxButtonPressed]}>
-              <Ionicons name="trash-outline" size={22} color="#ef4444" />
-            </Pressable>
-          ) : null}
         </View>
 
         {exercises.map((exercise, exIndex) => (
           <View key={exercise.id} style={[styles.card, { borderColor }]}>
-            <Text style={styles.cardHeading}>Exercise {exIndex + 1}</Text>
+            <View style={styles.cardTitleRow} lightColor="transparent" darkColor="transparent">
+              <Text style={styles.cardHeading}>Exercise {exIndex + 1}</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${exercise.name} from this log`}
+                hitSlop={10}
+                onPress={() => confirmRemoveExerciseFromLog(exercise)}
+                style={({ pressed }) => [styles.removeExerciseButton, pressed && styles.checkboxButtonPressed]}>
+                <Ionicons name="close" size={22} color="#ef4444" />
+              </Pressable>
+            </View>
             <Text style={[styles.exerciseName, { color: textColor }]}>{exercise.name}</Text>
             <Text style={styles.plannedLine}>
               Planned: {exercise.sets} set{exercise.sets === 1 ? '' : 's'} x {exercise.reps} reps @ {exercise.weightKg} lb
@@ -485,17 +543,29 @@ const styles = StyleSheet.create({
   workoutTitle: {
     fontSize: 20,
     fontWeight: '700',
+    flexShrink: 1,
+    minWidth: 0,
   },
   workoutTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: 12,
   },
   workoutTitleTextRow: {
+    flex: 1,
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    minWidth: 0,
+  },
+  draftTrashRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
+  },
+  draftTrashButton: {
+    padding: 2,
   },
   draftBadge: {
     fontSize: 14,
@@ -518,6 +588,18 @@ const styles = StyleSheet.create({
   cardHeading: {
     fontSize: 16,
     fontWeight: '700',
+    flex: 1,
+    flexShrink: 1,
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  removeExerciseButton: {
+    padding: 2,
+    flexShrink: 0,
   },
   setRow: {
     flexDirection: 'row',
