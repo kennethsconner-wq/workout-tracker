@@ -21,7 +21,7 @@ export default function TabLayout() {
           title: 'Workouts',
           tabBarIcon: ({ color, size }) => <Ionicons name="barbell-outline" color={color} size={size} />,
           headerRight: () => (
-            <Link href="/modal" asChild>
+            <Link href="/about" asChild>
               <Pressable style={{ marginRight: 15 }}>
                 {({ pressed }) => (
                   <Ionicons
