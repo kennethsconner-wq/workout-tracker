@@ -16,6 +16,7 @@ import { DraftExerciseDraggableList } from '@/components/DraftExerciseDraggableL
 import { WorkoutFormExerciseLibraryMenu } from '@/components/WorkoutFormExerciseLibraryMenu';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
+import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
 import { newId } from '@/lib/ids';
 import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
@@ -322,7 +323,7 @@ export default function WorkoutEditScreen() {
 
   return (
     <RNView style={styles.screenWrap}>
-      <Stack.Screen options={{ title: 'Edit Workout' }} />
+      <Stack.Screen options={{ title: 'Edit Workout', ...stackHeaderHideIosBackLabel }} />
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator color={Colors[activeScheme].tint} />

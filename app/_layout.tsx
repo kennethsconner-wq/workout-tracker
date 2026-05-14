@@ -3,6 +3,7 @@ import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import Colors from '@/constants/Colors';
+import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -61,9 +62,23 @@ function RootLayoutNav() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={NavigationAppTheme}>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+        <Stack
+          screenOptions={{
+            ...stackHeaderHideIosBackLabel,
+          }}>
+          <Stack.Screen
+            name="(tabs)"
+            options={{
+              headerShown: false,
+              /** Fallback title if any API still reads the route name instead of "(tabs)". */
+              title: 'Workouts',
+              ...stackHeaderHideIosBackLabel,
+            }}
+          />
+          <Stack.Screen
+            name="modal"
+            options={{ presentation: 'modal', ...stackHeaderHideIosBackLabel }}
+          />
         </Stack>
       </ThemeProvider>
     </GestureHandlerRootView>
