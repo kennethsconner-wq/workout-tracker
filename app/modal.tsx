@@ -3,11 +3,12 @@ import { Platform, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import { Text, View } from '@/components/Themed';
+import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 
 export default function AboutModal() {
   return (
     <>
-      <Stack.Screen options={{ title: 'About' }} />
+      <Stack.Screen options={{ title: 'About', ...stackHeaderHideIosBackLabel }} />
       <View style={styles.container}>
         <Text style={styles.lead}>
           Workout Tracker keeps a simple history of sessions on your phone. No account is required for this first

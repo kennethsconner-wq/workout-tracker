@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
+import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import {
@@ -334,6 +335,7 @@ export default function ExerciseLibraryScreen() {
                 <Text style={[styles.headerClearLabel, { color: tint }]}>Clear</Text>
               </Pressable>
             ) : null,
+          ...stackHeaderHideIosBackLabel,
         }}
       />
       {items.length === 0 ? (
