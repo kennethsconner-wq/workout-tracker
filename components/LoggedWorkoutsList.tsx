@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,12 +19,12 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import {
   averageExerciseExecutionScorePercent,
-  exerciseCompletionScorePercent,
   collectStoredExerciseOptions,
   countExerciseLoggedSessions,
   getExerciseLastLoggedAtIso,
   getExercisePersonalRecords,
   getLoggedExerciseExecutionSnapshots,
+  getLoggedExerciseWeightSnapshots,
   getTotalWeightMovedForExercise,
 } from '@/lib/exerciseSnapshot';
 import { loadLoggedWorkouts, loadWorkouts } from '@/lib/workoutsStorage';
@@ -66,18 +66,17 @@ function formatTotalWeightMoved(value: number): string {
   return `${num} lb`;
 }
 
-const EXERCISE_LOGGED_INFO_MESSAGE =
-  'This number counts how many workout sessions in your log include this exercise at least once.\n\n' +
-  'Each saved log (from Log Workout) counts as one session. If you did the exercise in that session, it adds 1—even if you logged multiple sets. Sessions where this exercise does not appear are not counted.';
-
-const EXERCISE_COMPLETION_SCORE_INFO_MESSAGE =
-  'We take the number of logs that include this exercise (the same count as Exercise Logged) and divide by the total number of logs for every workout that currently plans this exercise on the Create tab.\n\n' +
-  'Example: if this lift is only on “Upper Body”, the denominator is how many Upper Body sessions you have logged—whether or not that session included this lift. If two workouts plan it, we add each workout’s log counts together for the denominator.\n\n' +
-  'The result is shown as a percentage. It can exceed 100% if older logs still contain this exercise after you removed it from a template, or in similar edge cases.';
-
-const LAST_LOGGED_INFO_MESSAGE =
-  'The calendar date of the most recent workout log that includes this exercise.\n\n' +
-  'It uses the same sessions as Exercise Logged: whenever you save a log that contains this lift, that session’s date can become the new “last logged” if it is the newest.';
+/** Y-axis tick formatter for weight-by-session chart (values match log weight fields shown as lb in the UI). */
+function formatWeightTick(v: number): string {
+  if (!Number.isFinite(v)) {
+    return '';
+  }
+  const rounded = Math.round(v);
+  if (Math.abs(v - rounded) < 1e-6) {
+    return `${rounded} lb`;
+  }
+  return `${v.toFixed(1)} lb`;
+}
 
 const EXECUTION_SCORE_INFO_MESSAGE =
   'For each time this exercise appears in your log:\n\n' +
@@ -86,20 +85,11 @@ const EXECUTION_SCORE_INFO_MESSAGE =
   '• Execution for that entry = actual score ÷ planned score\n\n' +
   'The percentage shown is the average of those execution values across all logged entries. It can go above 100% if you beat the plan.';
 
-const PR_WEIGHT_INFO_MESSAGE =
-  'The heaviest weight you logged on a single set for this exercise, across every workout session.\n\n' +
-  'Only sets saved in your log count. If you logged the same exercise on different days, we take the maximum weight from any one set.';
-
-const PR_REPS_INFO_MESSAGE =
-  'The most repetitions you logged on a single set for this exercise, across every workout session.\n\n' +
-  'We look at each set’s rep count and take the highest value. It does not add reps across multiple sets in the same session.';
-
-const PR_SETS_INFO_MESSAGE =
-  'The most sets you logged in one session for this exercise.\n\n' +
-  'For each workout log that includes this exercise, we count how many sets you entered. The number shown is the largest of those counts—not the total sets ever logged across all time.';
-
 const TOTAL_WEIGHT_MOVED_INFO_MESSAGE =
   'For every logged set of this exercise, we multiply reps × weight for that set, then add those amounts together for the whole session, then add across every workout where this exercise appears.';
+
+const CHART_WEIGHT_EMPTY_MESSAGE =
+  'Log this exercise on more days to plot weight. Each point is the average weight per set in that session (actual vs planned from your log).';
 
 /** Metrics tab: exercise-specific snapshot (full history is on the Log tab). */
 export function LoggedWorkoutsList() {
@@ -115,18 +105,12 @@ export function LoggedWorkoutsList() {
   const [loading, setLoading] = useState(true);
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [visibleChartIndex, setVisibleChartIndex] = useState(0);
 
   const exerciseOptions = collectStoredExerciseOptions(workouts, logged);
   const selectedExercise = exerciseOptions.find((o) => o.id === selectedExerciseId) ?? null;
   const exerciseLoggedCount =
     selectedExerciseId !== null ? countExerciseLoggedSessions(logged, selectedExerciseId) : 0;
-  const completionScorePercent = useMemo(
-    () =>
-      selectedExerciseId !== null
-        ? exerciseCompletionScorePercent(workouts, logged, selectedExerciseId)
-        : null,
-    [logged, selectedExerciseId, workouts],
-  );
   const executionScorePercent = useMemo(
     () =>
       selectedExerciseId !== null ? averageExerciseExecutionScorePercent(logged, selectedExerciseId) : null,
@@ -154,7 +138,7 @@ export function LoggedWorkoutsList() {
     return [
       {
         id: 'actual-score',
-        label: 'LoggedExerciseActualScore',
+        label: 'Actual Score',
         color: Colors[activeScheme].tint,
         points: snaps.map((s) => ({
           score: s.actualScore,
@@ -163,7 +147,7 @@ export function LoggedWorkoutsList() {
       },
       {
         id: 'planned-score',
-        label: 'LoggedExercisePlannedScore',
+        label: 'Planned Score',
         color: plannedLineColor,
         points: snaps.map((s) => ({
           score: s.plannedScore,
@@ -172,11 +156,82 @@ export function LoggedWorkoutsList() {
       },
     ];
   }, [activeScheme, logged, selectedExerciseId]);
+  const weightDateChartLines = useMemo((): ScoreDateLineSeries[] => {
+    if (selectedExerciseId === null) {
+      return [];
+    }
+    const snaps = getLoggedExerciseWeightSnapshots(logged, selectedExerciseId);
+    const plannedLineColor = '#D40078';
+    return [
+      {
+        id: 'actual-weight',
+        label: 'Actual Weight',
+        color: Colors[activeScheme].tint,
+        points: snaps.map((s) => ({
+          score: s.avgActualWeightKg,
+          dateMs: new Date(s.createdAt).getTime(),
+        })),
+      },
+      {
+        id: 'planned-weight',
+        label: 'Planned Weight',
+        color: plannedLineColor,
+        points: snaps.map((s) => ({
+          score: s.plannedWeightKg,
+          dateMs: new Date(s.createdAt).getTime(),
+        })),
+      },
+    ];
+  }, [activeScheme, logged, selectedExerciseId]);
   const scrollInnerWidth = Math.max(0, windowWidth - 32);
-  /** Slightly narrower than the scroll area so the card isn’t flush to the right edge. */
-  const chartCardWidth = Math.max(0, scrollInnerWidth - 16);
-  /** Plot width inside the card’s horizontal padding (14 + 14). */
-  const chartPlotWidth = Math.max(160, chartCardWidth - 28);
+  const chartCarouselSlideWidth = scrollInnerWidth;
+  const chartPlotWidth = Math.max(160, chartCarouselSlideWidth - 28);
+
+  const metricCharts = useMemo(
+    () => [
+      {
+        key: 'weight' as const,
+        title: 'Weight By Session',
+        lines: weightDateChartLines,
+        yAxisLabel: 'Weight',
+        formatYTick: formatWeightTick,
+        emptyMessage: CHART_WEIGHT_EMPTY_MESSAGE,
+        chartAccessibilityLabel: 'Weight by session chart',
+      },
+      {
+        key: 'execution' as const,
+        title: 'Execution Score By Session',
+        lines: scoreDateChartLines,
+        yAxisLabel: 'Score',
+        formatYTick: undefined as ((v: number) => string) | undefined,
+        emptyMessage: undefined as string | undefined,
+        chartAccessibilityLabel: 'Execution score by session chart',
+      },
+    ],
+    [scoreDateChartLines, weightDateChartLines],
+  );
+
+  const chartCarouselScrollable = metricCharts.length > 1;
+  const chartCarouselRef = useRef<FlatList<(typeof metricCharts)[number]>>(null);
+
+  const onChartViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
+      const idx = viewableItems[0]?.index;
+      if (idx != null) {
+        setVisibleChartIndex(idx);
+      }
+    },
+    [],
+  );
+  const chartViewabilityConfig = useMemo(
+    () => ({ itemVisiblePercentThreshold: 55 }),
+    [],
+  );
+
+  useEffect(() => {
+    setVisibleChartIndex(0);
+    chartCarouselRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [selectedExerciseId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -224,19 +279,22 @@ export function LoggedWorkoutsList() {
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={styles.fieldLabel}>Exercise</Text>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled>
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel="Exercise for metrics"
           onPress={() => setPickerOpen(true)}
           style={({ pressed }) => [
             styles.dropdown,
             { borderColor, opacity: pressed ? 0.85 : 1 },
           ]}>
-          <Text style={[styles.dropdownText, { color: textColor }]} numberOfLines={1}>
+          <Text style={[styles.dropdownText, styles.dropdownTextMagenta]} numberOfLines={1}>
             {selectedExercise?.name ?? 'Select'}
           </Text>
-          <Ionicons name="chevron-down" size={20} color={textColor} />
+          <Ionicons name="chevron-down" size={20} color="#D40078" />
         </Pressable>
 
         {selectedExerciseId !== null ? (
@@ -245,52 +303,22 @@ export function LoggedWorkoutsList() {
             <View style={styles.metricRow}>
               <View style={styles.metricLabelWithInfo}>
                 <Text style={styles.metricTitleText} numberOfLines={2}>
-                  Exercise Logged
+                  Times Logged
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="How Exercise Logged is calculated"
-                  hitSlop={10}
-                  onPress={() => Alert.alert('Exercise Logged', EXERCISE_LOGGED_INFO_MESSAGE, [{ text: 'OK' }])}
-                  style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
-                  <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
-                </Pressable>
               </View>
               <Text style={styles.metricValue}>{exerciseLoggedCount}</Text>
             </View>
             <View style={[styles.metricRow, styles.metricRowDivider, { borderTopColor: borderColor }]}>
               <View style={styles.metricLabelWithInfo}>
                 <Text style={styles.metricTitleText} numberOfLines={2}>
-                  Exercise Completion Score
+                  Execution Score
                 </Text>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="How Exercise Completion Score is calculated"
+                  accessibilityLabel="How Execution Score is calculated"
                   hitSlop={10}
                   onPress={() =>
-                    Alert.alert('Exercise Completion Score', EXERCISE_COMPLETION_SCORE_INFO_MESSAGE, [
-                      { text: 'OK' },
-                    ])
-                  }
-                  style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
-                  <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
-                </Pressable>
-              </View>
-              <Text style={styles.metricValue}>
-                {completionScorePercent !== null ? `${completionScorePercent.toFixed(0)}%` : '—'}
-              </Text>
-            </View>
-            <View style={[styles.metricRow, styles.metricRowDivider, { borderTopColor: borderColor }]}>
-              <View style={styles.metricLabelWithInfo}>
-                <Text style={styles.metricTitleText} numberOfLines={2}>
-                  Exercise Execution Score
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="How Exercise Execution Score is calculated"
-                  hitSlop={10}
-                  onPress={() =>
-                    Alert.alert('Exercise Execution Score', EXECUTION_SCORE_INFO_MESSAGE, [{ text: 'OK' }])
+                    Alert.alert('Execution Score', EXECUTION_SCORE_INFO_MESSAGE, [{ text: 'OK' }])
                   }
                   style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
                   <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
@@ -305,16 +333,6 @@ export function LoggedWorkoutsList() {
                 <Text style={styles.metricTitleText} numberOfLines={2}>
                   Personal Record, Weight
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="How Personal Record Weight is calculated"
-                  hitSlop={10}
-                  onPress={() =>
-                    Alert.alert('Personal Record, Weight', PR_WEIGHT_INFO_MESSAGE, [{ text: 'OK' }])
-                  }
-                  style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
-                  <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
-                </Pressable>
               </View>
               <Text style={styles.metricValue}>{formatPrWeightLb(personalRecords?.maxWeight ?? null)}</Text>
             </View>
@@ -323,14 +341,6 @@ export function LoggedWorkoutsList() {
                 <Text style={styles.metricTitleText} numberOfLines={2}>
                   Personal Record, Reps
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="How Personal Record Reps is calculated"
-                  hitSlop={10}
-                  onPress={() => Alert.alert('Personal Record, Reps', PR_REPS_INFO_MESSAGE, [{ text: 'OK' }])}
-                  style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
-                  <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
-                </Pressable>
               </View>
               <Text style={styles.metricValue}>{formatPrInt(personalRecords?.maxReps ?? null)}</Text>
             </View>
@@ -339,14 +349,6 @@ export function LoggedWorkoutsList() {
                 <Text style={styles.metricTitleText} numberOfLines={2}>
                   Personal Record, Sets
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="How Personal Record Sets is calculated"
-                  hitSlop={10}
-                  onPress={() => Alert.alert('Personal Record, Sets', PR_SETS_INFO_MESSAGE, [{ text: 'OK' }])}
-                  style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
-                  <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
-                </Pressable>
               </View>
               <Text style={styles.metricValue}>{formatPrInt(personalRecords?.maxSets ?? null)}</Text>
             </View>
@@ -375,33 +377,86 @@ export function LoggedWorkoutsList() {
                 <Text style={styles.metricTitleText} numberOfLines={2}>
                   Last Logged
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="How Last Logged is determined"
-                  hitSlop={10}
-                  onPress={() => Alert.alert('Last Logged', LAST_LOGGED_INFO_MESSAGE, [{ text: 'OK' }])}
-                  style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
-                  <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
-                </Pressable>
               </View>
               <Text style={[styles.metricValue, styles.metricValueDate]} numberOfLines={2}>
                 {formatLastLoggedDisplay(lastLoggedIso)}
               </Text>
             </View>
           </View>
-          <View style={[styles.chartCard, { borderColor, width: chartCardWidth }]}>
-            <Text style={styles.chartCardTitle}>Execution Score By Session</Text>
-            <Text style={styles.chartCardSubtitle}>
-              {
-                'Horizontal: session date\nVertical: LoggedExerciseActualScore & LoggedExercisePlannedScore (same formulas as Exercise Execution Score)'
-              }
-            </Text>
-            <ScoreDateLineChart
-              width={chartPlotWidth}
-              lines={scoreDateChartLines}
-              axisColor={borderColor}
-              labelColor={activeScheme === 'dark' ? '#a3a3a3' : '#525252'}
+          <View style={[styles.chartCarouselOuter, { width: chartCarouselSlideWidth }]}>
+            {chartCarouselScrollable ? (
+              <View
+                style={styles.chartScrollHintRow}
+                accessible
+                accessibilityLabel="Swipe sideways to see both charts">
+                <Ionicons
+                  name="swap-horizontal"
+                  size={16}
+                  color={textColor}
+                  style={styles.chartScrollHintIcon}
+                />
+              </View>
+            ) : null}
+            <FlatList
+              ref={chartCarouselRef}
+              data={metricCharts}
+              keyExtractor={(item) => item.key}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator
+              nestedScrollEnabled
+              style={{ width: chartCarouselSlideWidth }}
+              snapToInterval={chartCarouselSlideWidth}
+              snapToAlignment="start"
+              decelerationRate="fast"
+              viewabilityConfig={chartViewabilityConfig}
+              onViewableItemsChanged={onChartViewableItemsChanged}
+              getItemLayout={(_, index) => ({
+                length: chartCarouselSlideWidth,
+                offset: chartCarouselSlideWidth * index,
+                index,
+              })}
+              renderItem={({ item }) => (
+                <View style={{ width: chartCarouselSlideWidth }}>
+                  <View style={[styles.chartCard, { borderColor, width: chartCarouselSlideWidth }]}>
+                    <Text style={styles.chartCardTitle}>{item.title}</Text>
+                    <ScoreDateLineChart
+                      width={chartPlotWidth}
+                      lines={item.lines}
+                      axisColor={borderColor}
+                      labelColor={activeScheme === 'dark' ? '#a3a3a3' : '#525252'}
+                      yAxisLabel={item.yAxisLabel}
+                      {...(item.formatYTick ? { formatYTick: item.formatYTick } : {})}
+                      {...(item.emptyMessage ? { emptyMessage: item.emptyMessage } : {})}
+                      chartAccessibilityLabel={item.chartAccessibilityLabel}
+                    />
+                  </View>
+                </View>
+              )}
             />
+            {chartCarouselScrollable ? (
+              <View
+                style={styles.chartPageDots}
+                accessibilityLabel={`Chart ${visibleChartIndex + 1} of ${metricCharts.length}`}>
+                {metricCharts.map((c, index) => (
+                  <View
+                    key={c.key}
+                    style={[
+                      styles.chartPageDot,
+                      {
+                        backgroundColor:
+                          index === visibleChartIndex
+                            ? Colors[activeScheme].tint
+                            : activeScheme === 'dark'
+                              ? 'rgba(255,255,255,0.22)'
+                              : 'rgba(0,0,0,0.18)',
+                      },
+                      index === visibleChartIndex ? styles.chartPageDotActive : null,
+                    ]}
+                  />
+                ))}
+              </View>
+            ) : null}
           </View>
           </>
         ) : null}
@@ -414,8 +469,7 @@ export function LoggedWorkoutsList() {
               styles.modalSheet,
               {
                 borderColor,
-                backgroundColor: activeScheme === 'dark' ? '#1a1a1a' : '#fff',
-                paddingBottom: 12 + insets.bottom,
+                backgroundColor: Colors[activeScheme].background,
               },
             ]}
             onPress={() => undefined}>
@@ -433,6 +487,7 @@ export function LoggedWorkoutsList() {
               data={exerciseOptions}
               keyExtractor={(item) => item.id}
               keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: Math.max(12, insets.bottom) }}
               renderItem={({ item }) => (
                 <Pressable
                   style={({ pressed }) => [
@@ -443,7 +498,7 @@ export function LoggedWorkoutsList() {
                     setSelectedExerciseId(item.id);
                     setPickerOpen(false);
                   }}>
-                  <Text style={[styles.optionText, { color: textColor }]} numberOfLines={2}>
+                  <Text style={[styles.optionText, styles.dropdownTextMagenta]} numberOfLines={2}>
                     {item.name}
                   </Text>
                   {item.id === selectedExerciseId ? (
@@ -483,11 +538,6 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     gap: 12,
   },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    opacity: 0.7,
-  },
   dropdown: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -502,6 +552,9 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
   },
+  dropdownTextMagenta: {
+    color: '#D40078',
+  },
   metricsCard: {
     borderWidth: 1,
     borderRadius: 12,
@@ -509,23 +562,47 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 4,
   },
+  chartCarouselOuter: {
+    marginTop: 4,
+  },
+  chartScrollHintRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  chartScrollHintIcon: {
+    opacity: 0.55,
+  },
+  chartPageDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 10,
+  },
+  chartPageDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  chartPageDotActive: {
+    width: 18,
+    borderRadius: 4,
+  },
   chartCard: {
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
     borderWidth: 1,
     borderRadius: 12,
     padding: 14,
     paddingBottom: 12,
     gap: 8,
-    marginTop: 4,
   },
   chartCardTitle: {
     fontSize: 17,
     fontWeight: '700',
-  },
-  chartCardSubtitle: {
-    fontSize: 13,
-    opacity: 0.72,
-    lineHeight: 18,
+    alignSelf: 'stretch',
+    textAlign: 'center',
   },
   metricRow: {
     flexDirection: 'row',

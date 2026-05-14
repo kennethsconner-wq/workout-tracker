@@ -167,9 +167,41 @@ export async function deleteLoggedWorkout(id: string): Promise<void> {
   await saveLoggedWorkouts(existing.filter((w) => w.id !== id));
 }
 
+export async function updateLoggedWorkout(
+  id: string,
+  patch: Pick<LoggedWorkout, 'title' | 'daysOfWeek' | 'iconId' | 'exercises' | 'workoutId'>,
+): Promise<LoggedWorkout | null> {
+  const existing = await loadLoggedWorkouts();
+  const prev = existing.find((w) => w.id === id);
+  if (!prev) {
+    return null;
+  }
+  const nextEntry: LoggedWorkout = {
+    ...prev,
+    workoutId: patch.workoutId,
+    title: patch.title,
+    daysOfWeek: Array.from(new Set(patch.daysOfWeek)),
+    iconId: normalizeWorkoutIconId(patch.iconId),
+    exercises: patch.exercises,
+  };
+  await saveLoggedWorkouts(existing.map((w) => (w.id === id ? nextEntry : w)));
+  return nextEntry;
+}
+
 export async function deleteLoggedWorkoutsByWorkoutId(workoutId: string): Promise<void> {
   const existing = await loadLoggedWorkouts();
   await saveLoggedWorkouts(existing.filter((w) => w.workoutId !== workoutId));
+}
+
+/** First template exercise with this id across saved workouts (ids are unique per exercise). */
+export function findTemplateExerciseById(workouts: Workout[], exerciseId: string): WorkoutExercise | undefined {
+  for (const w of workouts) {
+    const found = w.exercises.find((e) => e.id === exerciseId);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
 }
 
 export async function loadWorkouts(): Promise<Workout[]> {
@@ -261,4 +293,80 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
     }),
   }));
   await saveWorkouts(next);
+}
+
+function matchesExerciseDefinition(
+  ex: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
+  def: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
+): boolean {
+  return (
+    ex.name === def.name && ex.sets === def.sets && ex.reps === def.reps && ex.weightKg === def.weightKg
+  );
+}
+
+/**
+ * Updates every template exercise whose definition matches `oldDef` to `nextDef` (preserving each exercise `id`),
+ * then updates matching planned fields on logged exercises with the same `workoutExerciseId`.
+ */
+export async function updateExercisesMatchingSignatureAcrossWorkouts(
+  oldDef: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
+  nextDef: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
+): Promise<void> {
+  const all = await loadWorkouts();
+  const updates: Array<Pick<WorkoutExercise, 'id' | 'name' | 'sets' | 'reps' | 'weightKg'>> = [];
+  const affectedIds = new Set<string>();
+  for (const w of all) {
+    for (const ex of w.exercises) {
+      if (matchesExerciseDefinition(ex, oldDef)) {
+        updates.push({ id: ex.id, ...nextDef });
+        affectedIds.add(ex.id);
+      }
+    }
+  }
+  await propagateExerciseDefinitionsAcrossWorkouts(updates);
+  if (affectedIds.size === 0) {
+    return;
+  }
+  const logs = await loadLoggedWorkouts();
+  const nextLogs = logs.map((log) => ({
+    ...log,
+    exercises: log.exercises.map((lex) =>
+      affectedIds.has(lex.workoutExerciseId)
+        ? { ...lex, name: nextDef.name, sets: nextDef.sets, reps: nextDef.reps, weightKg: nextDef.weightKg }
+        : lex,
+    ),
+  }));
+  await saveLoggedWorkouts(nextLogs);
+}
+
+/** Removes matching exercises from all workout templates and from logged workouts; drops empty logs. */
+export async function removeExercisesMatchingSignatureFromAllWorkouts(
+  def: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
+): Promise<void> {
+  const all = await loadWorkouts();
+  const idsToRemove = new Set<string>();
+  for (const w of all) {
+    for (const ex of w.exercises) {
+      if (matchesExerciseDefinition(ex, def)) {
+        idsToRemove.add(ex.id);
+      }
+    }
+  }
+  const nextTemplates = all.map((w) => ({
+    ...w,
+    exercises: w.exercises.filter((ex) => !matchesExerciseDefinition(ex, def)),
+  }));
+  if (idsToRemove.size === 0) {
+    return;
+  }
+  await saveWorkouts(nextTemplates);
+
+  const logs = await loadLoggedWorkouts();
+  const nextLogs = logs
+    .map((log) => ({
+      ...log,
+      exercises: log.exercises.filter((lex) => !idsToRemove.has(lex.workoutExerciseId)),
+    }))
+    .filter((log) => log.exercises.length > 0);
+  await saveLoggedWorkouts(nextLogs);
 }

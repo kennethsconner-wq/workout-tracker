@@ -48,7 +48,11 @@ export function WorkoutDaysPicker({ value, onChange }: Props) {
               accessibilityRole="button"
               accessibilityState={{ selected }}
               accessibilityLabel={`${day} ${selected ? 'selected' : 'not selected'}`}>
-              <Text style={[styles.dayLabel, { color: selected ? '#fff' : textColor }]}>
+              <Text
+                style={[
+                  styles.dayLabel,
+                  { color: selected ? Colors.dark.background : textColor },
+                ]}>
                 {DAY_OF_WEEK_ABBREVIATIONS[day]}
               </Text>
             </Pressable>

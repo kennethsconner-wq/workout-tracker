@@ -1,17 +1,19 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useNavigation, useFocusEffect, type NavigationProp, type ParamListBase } from '@react-navigation/native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
+  View as RNView,
 } from 'react-native';
 
+import { DraftExerciseDraggableList } from '@/components/DraftExerciseDraggableList';
+import { WorkoutFormExerciseLibraryMenu } from '@/components/WorkoutFormExerciseLibraryMenu';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -21,7 +23,6 @@ import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
 import { loadWorkouts, propagateExerciseDefinitionsAcrossWorkouts, updateWorkout } from '@/lib/workoutsStorage';
-import { confirmEditLinkedExercise } from '@/lib/linkedExerciseEdit';
 
 type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
 type ExerciseDraftSeed = { sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
@@ -44,6 +45,7 @@ function toDraft(exercise: WorkoutExercise): DraftExercise {
 
 export default function WorkoutEditScreen() {
   const { id, importExercises } = useLocalSearchParams<{ id?: string; importExercises?: string | string[] }>();
+  const navigation = useNavigation();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
   const textColor = Colors[activeScheme].text;
@@ -57,8 +59,19 @@ export default function WorkoutEditScreen() {
   const [exercises, setExercises] = useState<DraftExercise[]>([]);
   /** `clientId`s for linked exercises the user chose to edit after confirmation. */
   const [unlockedExerciseClientIds, setUnlockedExerciseClientIds] = useState(() => new Set<string>());
+  const editScreenInitialLoadDoneRef = useRef(false);
 
   const inputStyle = [styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }];
+  const workoutNameInputStyle = [styles.input, { color: '#D40078', borderColor, backgroundColor: inputBackground }];
+  const setRowInputStyle = useMemo(
+    () => [
+      styles.input,
+      styles.setInput,
+      styles.unitInput,
+      { color: textColor, borderColor, backgroundColor: inputBackground },
+    ],
+    [textColor, borderColor, inputBackground],
+  );
 
   useEffect(() => {
     setUnlockedExerciseClientIds(new Set());
@@ -73,6 +86,8 @@ export default function WorkoutEditScreen() {
     }
 
     let cancelled = false;
+
+    editScreenInitialLoadDoneRef.current = false;
 
     void (async () => {
       const workouts = await loadWorkouts();
@@ -108,6 +123,7 @@ export default function WorkoutEditScreen() {
             );
             if (!cancelled) {
               setLoading(false);
+              editScreenInitialLoadDoneRef.current = true;
             }
             return;
           }
@@ -119,13 +135,65 @@ export default function WorkoutEditScreen() {
       setExercises(workout.exercises.map(toDraft));
       if (!cancelled) {
         setLoading(false);
+        editScreenInitialLoadDoneRef.current = true;
       }
     })();
 
     return () => {
       cancelled = true;
+      editScreenInitialLoadDoneRef.current = false;
     };
   }, [id, importExercises]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!id || !editScreenInitialLoadDoneRef.current) {
+        return undefined;
+      }
+      let cancelled = false;
+      void (async () => {
+        const workouts = await loadWorkouts();
+        if (cancelled) {
+          return;
+        }
+        const workout = workouts.find((w) => w.id === id);
+        if (!workout) {
+          return;
+        }
+        const byId = new Map(workout.exercises.map((e) => [e.id, e]));
+        setExercises((prev) => {
+          if (!prev.some((e) => e.sourceExerciseId)) {
+            return prev;
+          }
+          const next: DraftExercise[] = [];
+          for (const ex of prev) {
+            const templateId = ex.sourceExerciseId;
+            if (!templateId) {
+              next.push(ex);
+              continue;
+            }
+            const latest = byId.get(templateId);
+            if (!latest) {
+              continue;
+            }
+            next.push({
+              ...ex,
+              name: latest.name,
+              sets: String(latest.sets),
+              reps: String(latest.reps),
+              weightKg: String(latest.weightKg),
+            });
+          }
+          const allowed = new Set(next.map((e) => e.clientId));
+          setUnlockedExerciseClientIds((ids) => new Set([...ids].filter((cid) => allowed.has(cid))));
+          return next;
+        });
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [id]),
+  );
 
   const addExercise = () => {
     setExercises((prev) => [...prev, emptyExercise()]);
@@ -229,159 +297,131 @@ export default function WorkoutEditScreen() {
     })();
   };
 
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator color={Colors[activeScheme].tint} />
-      </View>
-    );
-  }
+  const openExerciseLibraryFromMenu = useCallback(() => {
+    if (!id) {
+      return;
+    }
+    router.push({
+      pathname: '/exercise-library',
+      params: {
+        libraryEntry: 'menu',
+        source: 'edit',
+        workoutId: id,
+        existingExercises: JSON.stringify(
+          exercises.map((exercise) => ({
+            sourceExerciseId: exercise.sourceExerciseId,
+            name: exercise.name,
+            sets: exercise.sets,
+            reps: exercise.reps,
+            weightKg: exercise.weightKg,
+          })),
+        ),
+      },
+    });
+  }, [id, exercises]);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.select({ ios: 'padding', android: 'height' })}
-      keyboardVerticalOffset={Platform.select({ ios: 80, android: 24 })}>
+    <RNView style={styles.screenWrap}>
       <Stack.Screen options={{ title: 'Edit Workout' }} />
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled">
-        <Text style={styles.label}>Workout name</Text>
-        <TextInput
-          value={title}
-          onChangeText={setTitle}
-          placeholder="Workout name"
-          placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-          style={inputStyle}
-        />
-
-        <WorkoutDaysPicker value={daysOfWeek} onChange={setDaysOfWeek} />
-
-        <WorkoutIconPicker value={iconId} onChange={setIconId} />
-
-        {exercises.map((exercise, exIndex) => {
-          const fieldsLocked =
-            exercise.sourceExerciseId !== undefined && !unlockedExerciseClientIds.has(exercise.clientId);
-          const lockedFieldStyle = fieldsLocked ? { opacity: 0.62 } : null;
-          return (
-          <View key={exercise.clientId} style={[styles.card, { borderColor }]}>
-            <View style={styles.cardHeader}>
-              <Text style={[styles.cardHeading, styles.cardHeaderTitle]} numberOfLines={1}>
-                Exercise {exIndex + 1}
-              </Text>
-              <View style={styles.cardHeaderActions}>
-                {exercise.sourceExerciseId !== undefined && fieldsLocked ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Edit linked exercise"
-                    onPress={() =>
-                      confirmEditLinkedExercise(() =>
-                        setUnlockedExerciseClientIds((prev) => new Set(prev).add(exercise.clientId)),
-                      )
-                    }
-                    hitSlop={8}
-                    style={({ pressed }) => [styles.exerciseHeaderIconPressable, pressed && styles.exerciseHeaderIconPressed]}>
-                    <Ionicons name="pencil-outline" size={22} color={Colors[activeScheme].tint} />
-                  </Pressable>
-                ) : null}
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove exercise"
-                  onPress={() => removeExercise(exercise.clientId)}
-                  hitSlop={8}
-                  style={({ pressed }) => [styles.exerciseHeaderIconPressable, pressed && styles.exerciseHeaderIconPressed]}>
-                  <Ionicons name="close-outline" size={26} color="#ef4444" />
-                </Pressable>
-              </View>
-            </View>
-            <TextInput
-              value={exercise.name}
-              onChangeText={(value) => updateExerciseName(exercise.clientId, value)}
-              placeholder="Exercise name"
-              placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-              editable={!fieldsLocked}
-              style={[inputStyle, lockedFieldStyle]}
-            />
-            <View style={styles.setRow}>
-              <View style={styles.unitInputWrap}>
-                <TextInput
-                  value={exercise.sets}
-                  onChangeText={(value) => updateExerciseField(exercise.clientId, 'sets', value)}
-                  placeholder="0"
-                  keyboardType="number-pad"
-                  placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                  editable={!fieldsLocked}
-                  style={[styles.input, styles.setInput, styles.unitInput, { color: textColor, borderColor, backgroundColor: inputBackground }, lockedFieldStyle]}
-                />
-                <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>sets</Text>
-              </View>
-              <View style={styles.unitInputWrap}>
-                <TextInput
-                  value={exercise.reps}
-                  onChangeText={(value) => updateExerciseField(exercise.clientId, 'reps', value)}
-                  placeholder="0"
-                  keyboardType="number-pad"
-                  placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                  editable={!fieldsLocked}
-                  style={[styles.input, styles.setInput, styles.unitInput, { color: textColor, borderColor, backgroundColor: inputBackground }, lockedFieldStyle]}
-                />
-                <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>reps</Text>
-              </View>
-              <View style={styles.unitInputWrap}>
-                <TextInput
-                  value={exercise.weightKg}
-                  onChangeText={(value) => updateExerciseField(exercise.clientId, 'weightKg', value)}
-                  placeholder="Weight"
-                  keyboardType="decimal-pad"
-                  placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                  editable={!fieldsLocked}
-                  style={[styles.input, styles.setInput, styles.unitInput, { color: textColor, borderColor, backgroundColor: inputBackground }, lockedFieldStyle]}
-                />
-                <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>lb</Text>
-              </View>
-            </View>
-          </View>
-          );
-        })}
-
-        <View style={styles.exerciseActionsRow}>
-          <Pressable onPress={addExercise} style={styles.secondaryButton}>
-            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Create Exercise</Text>
-          </Pressable>
-          <Text style={styles.orLabel}>or</Text>
-          <Pressable
-            onPress={() =>
-              router.push({
-                pathname: '/exercise-library',
-                params: {
-                  source: 'edit',
-                  workoutId: id,
-                  existingExercises: JSON.stringify(
-                    exercises.map((exercise) => ({
-                      sourceExerciseId: exercise.sourceExerciseId,
-                      name: exercise.name,
-                      sets: exercise.sets,
-                      reps: exercise.reps,
-                      weightKg: exercise.weightKg,
-                    })),
-                  ),
-                },
-              })
-            }
-            style={styles.secondaryButton}>
-            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add Existing</Text>
-          </Pressable>
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator color={Colors[activeScheme].tint} />
         </View>
+      ) : (
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.select({ ios: 'padding', android: 'height' })}
+          keyboardVerticalOffset={Platform.select({ ios: 80, android: 24 })}>
+          <DraftExerciseDraggableList
+        exercises={exercises}
+        onReorder={setExercises}
+        activeScheme={activeScheme}
+        borderColor={borderColor}
+        textColor={textColor}
+        exerciseNameInputStyle={inputStyle}
+        setRowInputStyle={setRowInputStyle}
+        unlockedExerciseClientIds={unlockedExerciseClientIds}
+        onUnlockLinked={(clientId) =>
+          setUnlockedExerciseClientIds((prev) => new Set(prev).add(clientId))
+        }
+        onUpdateExerciseName={updateExerciseName}
+        onUpdateExerciseField={updateExerciseField}
+        onRemoveExercise={removeExercise}
+        confirmBeforeRemoveExercise
+        contentContainerStyle={styles.scroll}
+        listHeader={
+          <>
+            <Text style={styles.label}>Workout name</Text>
+            <TextInput
+              value={title}
+              onChangeText={setTitle}
+              placeholder="Workout name"
+              placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+              style={workoutNameInputStyle}
+            />
 
-        <Pressable onPress={onSave} style={[styles.primaryButton, { backgroundColor: Colors[activeScheme].tint }]}>
-          <Text style={[styles.primaryButtonLabel, { color: Colors[activeScheme].background }]}>Save</Text>
-        </Pressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            <WorkoutDaysPicker value={daysOfWeek} onChange={setDaysOfWeek} />
+
+            <WorkoutIconPicker value={iconId} onChange={setIconId} />
+          </>
+        }
+        listFooter={
+          <>
+            <View style={styles.exerciseActionsRow}>
+              <Pressable onPress={addExercise} style={styles.secondaryButton}>
+                <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>
+                  Create Exercise
+                </Text>
+              </Pressable>
+              <Text style={styles.orLabel}>or</Text>
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/exercise-library',
+                    params: {
+                      source: 'edit',
+                      workoutId: id,
+                      existingExercises: JSON.stringify(
+                        exercises.map((exercise) => ({
+                          sourceExerciseId: exercise.sourceExerciseId,
+                          name: exercise.name,
+                          sets: exercise.sets,
+                          reps: exercise.reps,
+                          weightKg: exercise.weightKg,
+                        })),
+                      ),
+                    },
+                  })
+                }
+                style={styles.secondaryButton}>
+                <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>
+                  Add Existing
+                </Text>
+              </Pressable>
+            </View>
+
+            <Pressable onPress={onSave} style={[styles.primaryButton, { backgroundColor: Colors[activeScheme].tint }]}>
+              <Text style={[styles.primaryButtonLabel, { color: Colors[activeScheme].background }]}>Save</Text>
+            </Pressable>
+          </>
+        }
+      />
+        </KeyboardAvoidingView>
+      )}
+      <WorkoutFormExerciseLibraryMenu
+        navigation={navigation as NavigationProp<ParamListBase>}
+        activeScheme={activeScheme}
+        onExerciseLibrary={openExerciseLibraryFromMenu}
+      />
+    </RNView>
   );
 }
 
 const styles = StyleSheet.create({
+  screenWrap: {
+    flex: 1,
+    position: 'relative',
+  },
   flex: { flex: 1 },
   centered: {
     flex: 1,
@@ -405,62 +445,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 16,
   },
-  card: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    gap: 10,
-  },
-  cardHeading: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  cardHeaderTitle: {
-    flex: 1,
-    minWidth: 0,
-  },
-  cardHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    flexShrink: 0,
-  },
-  exerciseHeaderIconPressable: {
-    padding: 4,
-  },
-  exerciseHeaderIconPressed: {
-    opacity: 0.55,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-  },
-  setRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
   setInput: {
     flexGrow: 1,
     minWidth: 80,
   },
-  unitInputWrap: {
-    flexGrow: 1,
-    minWidth: 80,
-    position: 'relative',
-  },
   unitInput: {
     paddingRight: 34,
-  },
-  unitSuffix: {
-    position: 'absolute',
-    right: 12,
-    top: 10,
-    fontSize: 16,
-    fontWeight: '600',
   },
   secondaryButton: {
     alignItems: 'center',
