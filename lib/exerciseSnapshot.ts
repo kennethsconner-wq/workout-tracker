@@ -32,33 +32,7 @@ export function countExerciseLoggedSessions(logged: LoggedWorkout[], workoutExer
   return logged.filter((log) => log.exercises.some((ex) => ex.workoutExerciseId === workoutExerciseId)).length;
 }
 
-/**
- * Percentage: (logs that include this exercise) ÷ (sum of all logs whose `workoutId` is a saved workout that
- * currently plans this exercise). Null if the exercise is not on any template, or the denominator is 0.
- */
-export function exerciseCompletionScorePercent(
-  workouts: Workout[],
-  logged: LoggedWorkout[],
-  workoutExerciseId: string,
-): number | null {
-  const templatesWithExercise = workouts.filter((w) => w.exercises.some((ex) => ex.id === workoutExerciseId));
-  if (templatesWithExercise.length === 0) {
-    return null;
-  }
-
-  let plannedWorkoutLogCount = 0;
-  for (const w of templatesWithExercise) {
-    plannedWorkoutLogCount += logged.filter((log) => log.workoutId === w.id).length;
-  }
-  if (plannedWorkoutLogCount === 0) {
-    return null;
-  }
-
-  const exerciseLogCount = countExerciseLoggedSessions(logged, workoutExerciseId);
-  return (exerciseLogCount / plannedWorkoutLogCount) * 100;
-}
-
-/** ISO `createdAt` of the newest log that includes this exercise (same sessions as Exercise Logged). */
+/** ISO `createdAt` of the newest log that includes this exercise (same sessions as Times Logged on Metrics). */
 export function getExerciseLastLoggedAtIso(logged: LoggedWorkout[], workoutExerciseId: string): string | null {
   let bestTime = -Infinity;
   let bestIso: string | null = null;
@@ -100,9 +74,60 @@ export type LoggedExecutionSnapshot = {
   /** LoggedExerciseActualScore = avg(actualReps) × avg(actualWeightKg) × setsCompleted. */
   actualScore: number;
   plannedScore: number;
-  /** actualScore / plannedScore (same ratio used for Exercise Execution Score per session). */
+  /** actualScore / plannedScore (same ratio used for Execution Score per session on Metrics). */
   executionRatio: number;
 };
+
+export type LoggedWeightSnapshot = {
+  /** Log session timestamp (when the workout was saved). */
+  createdAt: string;
+  /** Mean `actualWeightKg` across logged sets for this exercise in this session. */
+  avgActualWeightKg: number;
+  /** Planned weight (`ex.weightKg`) for this exercise in that session. */
+  plannedWeightKg: number;
+};
+
+/**
+ * One row per logged appearance of this exercise with at least one actual set.
+ * `avgActualWeightKg` = mean weight across actual sets; `plannedWeightKg` = planned weight on the log.
+ * Sorted by `createdAt` ascending.
+ */
+export function getLoggedExerciseWeightSnapshots(
+  logged: LoggedWorkout[],
+  workoutExerciseId: string,
+): LoggedWeightSnapshot[] {
+  const out: LoggedWeightSnapshot[] = [];
+  for (const log of logged) {
+    for (const ex of log.exercises) {
+      if (ex.workoutExerciseId !== workoutExerciseId) {
+        continue;
+      }
+      const setsCompleted = ex.actualSets.length;
+      if (setsCompleted === 0) {
+        continue;
+      }
+      let sumW = 0;
+      for (const set of ex.actualSets) {
+        sumW += set.actualWeightKg;
+      }
+      const avgActual = sumW / setsCompleted;
+      if (!Number.isFinite(avgActual) || avgActual < 0) {
+        continue;
+      }
+      const planned = ex.weightKg;
+      if (!Number.isFinite(planned) || planned < 0) {
+        continue;
+      }
+      out.push({
+        createdAt: log.createdAt,
+        avgActualWeightKg: avgActual,
+        plannedWeightKg: planned,
+      });
+    }
+  }
+  out.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  return out;
+}
 
 /**
  * One row per logged appearance of this exercise with valid actual + planned scores.

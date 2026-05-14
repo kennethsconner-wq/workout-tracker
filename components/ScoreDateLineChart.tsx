@@ -21,6 +21,14 @@ type ScoreDateLineChartProps = {
   lines: ScoreDateLineSeries[];
   axisColor: string;
   labelColor: string;
+  /** Vertical axis title (default: Score). */
+  yAxisLabel?: string;
+  /** Formats min/max tick labels on the vertical axis. */
+  formatYTick?: (v: number) => string;
+  /** Copy when there are no points to draw. */
+  emptyMessage?: string;
+  /** Screen reader label for the chart. */
+  chartAccessibilityLabel?: string;
 };
 
 const DEFAULT_HEIGHT = 280;
@@ -68,6 +76,18 @@ function formatDateTick(ms: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+/** Higher value draws above when lines overlap (planned under, actual on top). */
+function lineSeriesStackZIndex(series: ScoreDateLineSeries): number {
+  const key = `${series.id} ${series.label}`.toLowerCase();
+  if (key.includes('planned')) {
+    return 1;
+  }
+  if (key.includes('actual')) {
+    return 2;
+  }
+  return 0;
+}
+
 function LineSegment({
   x1,
   y1,
@@ -106,7 +126,7 @@ function LineSegment({
 }
 
 /**
- * X axis = Date (older left, newer right), Y axis = Score (lower bottom, higher top).
+ * X axis = Date (older left, newer right), Y axis = numeric values (lower bottom, higher top).
  * Points are connected in chronological order within each series.
  */
 export function ScoreDateLineChart({
@@ -115,6 +135,10 @@ export function ScoreDateLineChart({
   lines,
   axisColor,
   labelColor,
+  yAxisLabel = 'Score',
+  formatYTick = formatScoreTick,
+  emptyMessage = 'Log this exercise on more days to plot scores. Each point uses the same actual score as Execution Score.',
+  chartAccessibilityLabel = 'Date versus score chart',
 }: ScoreDateLineChartProps) {
   const innerW = Math.max(1, width - PAD_L - PAD_R);
   const innerH = Math.max(1, height - PAD_T - PAD_B);
@@ -180,16 +204,13 @@ export function ScoreDateLineChart({
   if (!hasAnyPoint) {
     return (
       <View style={[styles.emptyChart, { width, minHeight: height * 0.35 }]}>
-        <Text style={styles.emptyChartText}>
-          Log this exercise on more days to plot scores. Each point uses the same actual score as Exercise Execution
-          Score.
-        </Text>
+        <Text style={styles.emptyChartText}>{emptyMessage}</Text>
       </View>
     );
   }
 
   return (
-    <View style={[styles.wrap, { width }]} accessibilityLabel="Date versus score chart">
+    <View style={[styles.wrap, { width }]} accessibilityLabel={chartAccessibilityLabel}>
       <View style={[styles.chartArea, { width, height }]}>
         <View style={[styles.axisH, { left: axisX0, top: axisY1, width: innerW, backgroundColor: axisColor }]} />
         <View style={[styles.axisV, { left: axisX0, top: axisY0, height: innerH, backgroundColor: axisColor }]} />
@@ -211,7 +232,13 @@ export function ScoreDateLineChart({
             });
           }
           return (
-            <View key={series.id} style={StyleSheet.absoluteFill} pointerEvents="none">
+            <View
+              key={series.id}
+              style={[
+                StyleSheet.absoluteFill,
+                { zIndex: lineSeriesStackZIndex(series) },
+              ]}
+              pointerEvents="none">
               {segs.map((s) => (
                 <LineSegment key={s.key} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} color={series.color} />
               ))}
@@ -239,7 +266,7 @@ export function ScoreDateLineChart({
             { top: scoreLabelCy - 40, left: 0, width: PAD_L - 4, height: 80 },
           ]}
           pointerEvents="none">
-          <Text style={[styles.axisTitle, { color: labelColor }]}>Score</Text>
+          <Text style={[styles.axisTitle, { color: labelColor }]}>{yAxisLabel}</Text>
         </View>
 
         <Text
@@ -258,10 +285,10 @@ export function ScoreDateLineChart({
         </Text>
 
         <Text style={[styles.tick, { color: labelColor, top: axisY1 - 16, left: axisX0 + 2 }]} pointerEvents="none">
-          {formatScoreTick(bounds.minScore)}
+          {formatYTick(bounds.minScore)}
         </Text>
         <Text style={[styles.tick, { color: labelColor, top: axisY0, left: axisX0 + 2 }]} pointerEvents="none">
-          {formatScoreTick(bounds.maxScore)}
+          {formatYTick(bounds.maxScore)}
         </Text>
       </View>
 

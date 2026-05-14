@@ -1,13 +1,29 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View as RNView,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
-import { loadWorkouts } from '@/lib/workoutsStorage';
+import {
+  loadWorkouts,
+  removeExercisesMatchingSignatureFromAllWorkouts,
+  updateExercisesMatchingSignatureAcrossWorkouts,
+} from '@/lib/workoutsStorage';
 import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types';
 
 type RouteSource = 'create' | 'edit';
@@ -19,6 +35,12 @@ type ImportExercisesPayload = {
   exercises: ExerciseDraftSeed[];
   createDraft?: CreateDraftPayload;
 };
+
+const EXERCISE_LIBRARY_EDIT_IMPACT =
+  'Editing changes this exercise everywhere it appears in your workouts. Saved logs that include it will be updated, which may change metrics.\n\nContinue?';
+
+const EXERCISE_LIBRARY_DELETE_IMPACT =
+  'Deleting removes this exercise from all workouts and from saved logs that include it. Metrics and history that reference it will change.\n\nDelete anyway?';
 
 function isDayOfWeekString(value: string): value is DayOfWeek {
   return (DAYS_OF_WEEK as readonly string[]).includes(value);
@@ -54,11 +76,12 @@ function parseExistingSeeds(serialized: string | undefined): ExerciseDraftSeed[]
 }
 
 export default function ExerciseLibraryScreen() {
-  const { source, workoutId, existingExercises, createDraft } = useLocalSearchParams<{
+  const { source, workoutId, existingExercises, createDraft, libraryEntry } = useLocalSearchParams<{
     source?: RouteSource;
     workoutId?: string | string[];
     existingExercises?: string | string[];
     createDraft?: string | string[];
+    libraryEntry?: string | string[];
   }>();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
@@ -67,35 +90,69 @@ export default function ExerciseLibraryScreen() {
   const [items, setItems] = useState<ExerciseListItem[]>([]);
   /** Selected exercise ids (`WorkoutExercise.id`) for multi-select. */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  /** Browse-only: baseline row when the edit modal is open. */
+  const [editBaseline, setEditBaseline] = useState<ExerciseListItem | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editSets, setEditSets] = useState('');
+  const [editReps, setEditReps] = useState('');
+  const [editWeight, setEditWeight] = useState('');
+  const [libraryMutationBusy, setLibraryMutationBusy] = useState(false);
 
-  useEffect(() => {
-    void (async () => {
-      const workouts = await loadWorkouts();
-      const unique = new Map<string, ExerciseListItem>();
-      for (const workout of workouts) {
-        for (const exercise of workout.exercises) {
-          const key = `${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weightKg}`;
-          if (!unique.has(key)) {
-            unique.set(key, {
-              key,
-              id: exercise.id,
-              name: exercise.name,
-              sets: exercise.sets,
-              reps: exercise.reps,
-              weightKg: exercise.weightKg,
-            });
-          }
+  const reloadLibrary = useCallback(async () => {
+    setLoading(true);
+    const workouts = await loadWorkouts();
+    const unique = new Map<string, ExerciseListItem>();
+    for (const workout of workouts) {
+      for (const exercise of workout.exercises) {
+        const key = `${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weightKg}`;
+        if (!unique.has(key)) {
+          unique.set(key, {
+            key,
+            id: exercise.id,
+            name: exercise.name,
+            sets: exercise.sets,
+            reps: exercise.reps,
+            weightKg: exercise.weightKg,
+          });
         }
       }
-      setItems([...unique.values()].sort((a, b) => a.name.localeCompare(b.name)));
-      setLoading(false);
-    })();
+    }
+    setItems([...unique.values()].sort((a, b) => a.name.localeCompare(b.name)));
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    void reloadLibrary();
+  }, [reloadLibrary]);
 
   const normalizedWorkoutId = useMemo(() => (Array.isArray(workoutId) ? workoutId[0] : workoutId), [workoutId]);
   const normalizedExistingExercises = useMemo(
     () => (Array.isArray(existingExercises) ? existingExercises[0] : existingExercises),
     [existingExercises],
+  );
+
+  const normalizedLibraryEntry = useMemo(
+    () => (Array.isArray(libraryEntry) ? libraryEntry[0] : libraryEntry),
+    [libraryEntry],
+  );
+  /** Opened from Create/Edit header ⋮ menu: read-only list, no hint/footer. */
+  const browseOnly = normalizedLibraryEntry === 'menu';
+
+  const textColor = Colors[activeScheme].text;
+  const draftBorderColor = activeScheme === 'dark' ? '#404040' : '#d4d4d4';
+  const draftInputBackground = activeScheme === 'dark' ? '#171717' : '#fafafa';
+  const exerciseNameInputStyle = useMemo(
+    () => [styles.draftExerciseInput, { color: textColor, borderColor: draftBorderColor, backgroundColor: draftInputBackground }],
+    [textColor, draftBorderColor, draftInputBackground],
+  );
+  const setRowInputStyle = useMemo(
+    () => [
+      styles.draftExerciseInput,
+      styles.draftSetInput,
+      styles.draftUnitInput,
+      { color: textColor, borderColor: draftBorderColor, backgroundColor: draftInputBackground },
+    ],
+    [textColor, draftBorderColor, draftInputBackground],
   );
 
   const existingSeeds = useMemo(
@@ -123,6 +180,99 @@ export default function ExerciseLibraryScreen() {
       return next;
     });
   }, []);
+
+  const openEditFormForItem = useCallback((item: ExerciseListItem) => {
+    setEditBaseline(item);
+    setEditName(item.name);
+    setEditSets(String(item.sets));
+    setEditReps(String(item.reps));
+    setEditWeight(String(item.weightKg));
+  }, []);
+
+  const closeEditForm = useCallback(() => {
+    setEditBaseline(null);
+  }, []);
+
+  const requestEditExercise = useCallback(
+    (item: ExerciseListItem) => {
+      Alert.alert('Edit exercise?', EXERCISE_LIBRARY_EDIT_IMPACT, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Continue', onPress: () => openEditFormForItem(item) },
+      ]);
+    },
+    [openEditFormForItem],
+  );
+
+  const requestDeleteExercise = useCallback(
+    (item: ExerciseListItem) => {
+      Alert.alert('Delete exercise?', EXERCISE_LIBRARY_DELETE_IMPACT, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                setLibraryMutationBusy(true);
+                await removeExercisesMatchingSignatureFromAllWorkouts({
+                  name: item.name,
+                  sets: item.sets,
+                  reps: item.reps,
+                  weightKg: item.weightKg,
+                });
+                await reloadLibrary();
+              } finally {
+                setLibraryMutationBusy(false);
+              }
+            })();
+          },
+        },
+      ]);
+    },
+    [reloadLibrary],
+  );
+
+  const saveEditedExercise = useCallback(async () => {
+    if (!editBaseline) {
+      return;
+    }
+    const name = editName.trim();
+    if (!name) {
+      Alert.alert('Missing name', 'Please enter an exercise name.');
+      return;
+    }
+    const sets = Number.parseInt(editSets.trim(), 10);
+    const reps = Number.parseInt(editReps.trim(), 10);
+    const weightKg = Number.parseFloat(editWeight.trim());
+    if (!Number.isFinite(sets) || sets < 1) {
+      Alert.alert('Invalid sets', 'Enter a whole number of sets (at least 1).');
+      return;
+    }
+    if (!Number.isFinite(reps) || reps < 1) {
+      Alert.alert('Invalid reps', 'Enter a whole number of reps (at least 1).');
+      return;
+    }
+    if (!Number.isFinite(weightKg) || weightKg < 0) {
+      Alert.alert('Invalid weight', 'Enter a valid weight (0 or more).');
+      return;
+    }
+    try {
+      setLibraryMutationBusy(true);
+      await updateExercisesMatchingSignatureAcrossWorkouts(
+        {
+          name: editBaseline.name,
+          sets: editBaseline.sets,
+          reps: editBaseline.reps,
+          weightKg: editBaseline.weightKg,
+        },
+        { name, sets, reps, weightKg },
+      );
+      closeEditForm();
+      await reloadLibrary();
+    } finally {
+      setLibraryMutationBusy(false);
+    }
+  }, [editBaseline, editName, editSets, editReps, editWeight, reloadLibrary, closeEditForm]);
 
   const addSelectedToWorkout = useCallback(() => {
     const byId = new Map(items.map((item) => [item.id, item]));
@@ -179,7 +329,7 @@ export default function ExerciseLibraryScreen() {
         options={{
           title: 'Exercise Library',
           headerRight: () =>
-            selectedCount > 0 ? (
+            !browseOnly && selectedCount > 0 ? (
               <Pressable onPress={() => setSelectedIds(new Set())} style={styles.headerClear} hitSlop={12}>
                 <Text style={[styles.headerClearLabel, { color: tint }]}>Clear</Text>
               </Pressable>
@@ -196,13 +346,63 @@ export default function ExerciseLibraryScreen() {
           <FlatList
             data={items}
             keyExtractor={(item) => item.key}
-            contentContainerStyle={styles.list}
+            contentContainerStyle={
+              browseOnly
+                ? [styles.list, { paddingBottom: Math.max(insets.bottom, 20) + 16 }]
+                : styles.list
+            }
             ListHeaderComponent={
-              <Text style={[styles.hint, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                Tap exercises to select them, then add them to your workout.
-              </Text>
+              browseOnly ? null : (
+                <Text style={[styles.hint, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
+                  Tap exercises to select them, then add them to your workout.
+                </Text>
+              )
             }
             renderItem={({ item }) => {
+              if (browseOnly) {
+                const borderColor = activeScheme === 'dark' ? '#333' : '#e5e5e5';
+                const disabled = libraryMutationBusy;
+                return (
+                  <RNView
+                    style={[
+                      styles.card,
+                      styles.cardRowBrowse,
+                      { borderColor, opacity: disabled ? 0.65 : 1 },
+                    ]}
+                    accessibilityRole="text"
+                    accessibilityLabel={`${item.name}, ${item.sets} set${item.sets === 1 ? '' : 's'}, ${item.reps} reps, ${item.weightKg} lb`}>
+                    <View
+                      style={[styles.cardText, styles.cardTextBrowse]}
+                      lightColor="transparent"
+                      darkColor="transparent">
+                      <Text style={styles.exerciseName}>{item.name}</Text>
+                      <Text style={styles.meta}>
+                        {item.sets} set{item.sets === 1 ? '' : 's'} x {item.reps} reps @ {item.weightKg} lb
+                      </Text>
+                    </View>
+                    <RNView style={styles.cardRowActions}>
+                      <Pressable
+                        disabled={disabled}
+                        onPress={() => requestEditExercise(item)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Edit exercise"
+                        style={({ pressed }) => [styles.cardRowIconBtn, pressed && styles.cardRowIconBtnPressed]}>
+                        <Ionicons name="pencil-outline" size={22} color={tint} />
+                      </Pressable>
+                      <Pressable
+                        disabled={disabled}
+                        onPress={() => requestDeleteExercise(item)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete exercise"
+                        style={({ pressed }) => [styles.cardRowIconBtn, pressed && styles.cardRowIconBtnPressed]}>
+                        <Ionicons name="trash-outline" size={22} color="#ef4444" />
+                      </Pressable>
+                    </RNView>
+                  </RNView>
+                );
+              }
               const isSelected = selectedIds.has(item.id);
               return (
                 <Pressable
@@ -230,34 +430,149 @@ export default function ExerciseLibraryScreen() {
               );
             }}
           />
-          <View
-            style={[
-              styles.footer,
-              {
-                borderTopColor: activeScheme === 'dark' ? '#333' : '#e5e5e5',
-                backgroundColor: activeScheme === 'dark' ? '#0a0a0a' : '#fafafa',
-                paddingBottom: Math.max(insets.bottom, 16),
-              },
-            ]}>
-            <Pressable
-              onPress={addSelectedToWorkout}
-              disabled={selectedCount === 0}
+          {!browseOnly ? (
+            <View
               style={[
-                styles.addButton,
-                selectedCount === 0 && styles.addButtonDisabled,
-                { backgroundColor: selectedCount === 0 ? (activeScheme === 'dark' ? '#333' : '#d4d4d4') : tint },
+                styles.footer,
+                {
+                  borderTopColor: activeScheme === 'dark' ? '#333' : '#e5e5e5',
+                  backgroundColor: activeScheme === 'dark' ? '#0a0a0a' : '#fafafa',
+                  paddingBottom: Math.max(insets.bottom, 16),
+                },
               ]}>
-              <Text
+              <Pressable
+                onPress={addSelectedToWorkout}
+                disabled={selectedCount === 0}
                 style={[
-                  styles.addButtonLabel,
-                  selectedCount === 0 && { color: activeScheme === 'dark' ? '#a3a3a3' : '#525252' },
+                  styles.addButton,
+                  selectedCount === 0 && styles.addButtonDisabled,
+                  { backgroundColor: selectedCount === 0 ? (activeScheme === 'dark' ? '#333' : '#d4d4d4') : tint },
                 ]}>
-                {selectedCount === 0 ? 'Select exercises to add' : `Add ${selectedCount} exercise${selectedCount === 1 ? '' : 's'}`}
-              </Text>
-            </Pressable>
-          </View>
+                <Text
+                  style={[
+                    styles.addButtonLabel,
+                    selectedCount === 0 && { color: activeScheme === 'dark' ? '#a3a3a3' : '#525252' },
+                  ]}>
+                  {selectedCount === 0 ? 'Select exercises to add' : `Add ${selectedCount} exercise${selectedCount === 1 ? '' : 's'}`}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
         </>
       )}
+      <Modal
+        visible={editBaseline !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={closeEditForm}>
+        <RNView style={styles.modalRoot}>
+          <Pressable
+            style={[StyleSheet.absoluteFillObject, styles.modalDim]}
+            onPress={closeEditForm}
+            accessibilityRole="button"
+            accessibilityLabel="Close edit form"
+          />
+          <KeyboardAvoidingView
+            behavior={Platform.select({ ios: 'padding', android: 'height' })}
+            keyboardVerticalOffset={Platform.select({ ios: 80, android: 24 })}
+            style={[StyleSheet.absoluteFillObject, styles.modalCenterWrap]}
+            pointerEvents="box-none">
+            <View style={[styles.draftExerciseCard, { borderColor: draftBorderColor }]}>
+              <RNView style={styles.draftCardHeader}>
+                <Text style={[styles.draftCardHeading, styles.draftCardHeaderTitle]} numberOfLines={1}>
+                  Exercise
+                </Text>
+                <RNView style={styles.draftCardHeaderActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Close without saving"
+                    onPress={closeEditForm}
+                    disabled={libraryMutationBusy}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.draftHeaderIconPressable,
+                      pressed && styles.cardRowIconBtnPressed,
+                    ]}>
+                    <Ionicons name="close-outline" size={26} color={textColor} />
+                  </Pressable>
+                </RNView>
+              </RNView>
+              <TextInput
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Exercise name"
+                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                editable={!libraryMutationBusy}
+                style={exerciseNameInputStyle}
+              />
+              <RNView style={styles.draftSetRow}>
+                <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                  <TextInput
+                    value={editSets}
+                    onChangeText={setEditSets}
+                    placeholder="0"
+                    keyboardType="number-pad"
+                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                    editable={!libraryMutationBusy}
+                    style={setRowInputStyle}
+                  />
+                  <Text
+                    style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                    lightColor="transparent"
+                    darkColor="transparent">
+                    sets
+                  </Text>
+                </View>
+                <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                  <TextInput
+                    value={editReps}
+                    onChangeText={setEditReps}
+                    placeholder="0"
+                    keyboardType="number-pad"
+                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                    editable={!libraryMutationBusy}
+                    style={setRowInputStyle}
+                  />
+                  <Text
+                    style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                    lightColor="transparent"
+                    darkColor="transparent">
+                    reps
+                  </Text>
+                </View>
+                <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                  <TextInput
+                    value={editWeight}
+                    onChangeText={setEditWeight}
+                    placeholder="0"
+                    keyboardType="decimal-pad"
+                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                    editable={!libraryMutationBusy}
+                    style={setRowInputStyle}
+                  />
+                  <Text
+                    style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                    lightColor="transparent"
+                    darkColor="transparent">
+                    lb
+                  </Text>
+                </View>
+              </RNView>
+              <Pressable
+                onPress={() => void saveEditedExercise()}
+                disabled={libraryMutationBusy}
+                style={[
+                  styles.draftModalPrimaryButton,
+                  { backgroundColor: libraryMutationBusy ? (activeScheme === 'dark' ? '#404040' : '#a3a3a3') : tint },
+                ]}>
+                <Text style={[styles.draftModalPrimaryButtonLabel, { color: Colors[activeScheme].background }]}>
+                  Save
+                </Text>
+              </Pressable>
+            </View>
+          </KeyboardAvoidingView>
+        </RNView>
+      </Modal>
     </View>
   );
 }
@@ -335,6 +650,113 @@ const styles = StyleSheet.create({
   },
   addButtonLabel: {
     color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  cardRowBrowse: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cardTextBrowse: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardRowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    flexShrink: 0,
+  },
+  cardRowIconBtn: {
+    padding: 6,
+  },
+  cardRowIconBtnPressed: {
+    opacity: 0.55,
+  },
+  modalRoot: {
+    flex: 1,
+  },
+  modalDim: {
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  modalCenterWrap: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  draftExerciseCard: {
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+  },
+  draftCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 40,
+  },
+  draftCardHeading: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  draftCardHeaderTitle: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: '44%',
+  },
+  draftCardHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+    zIndex: 2,
+  },
+  draftHeaderIconPressable: {
+    padding: 4,
+  },
+  draftExerciseInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+  },
+  draftSetInput: {
+    flexGrow: 1,
+    minWidth: 80,
+  },
+  draftUnitInput: {
+    paddingRight: 34,
+  },
+  draftSetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  draftUnitInputWrap: {
+    flexGrow: 1,
+    minWidth: 80,
+    position: 'relative',
+  },
+  draftUnitSuffix: {
+    position: 'absolute',
+    right: 12,
+    top: 10,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  draftModalPrimaryButton: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  draftModalPrimaryButtonLabel: {
     fontSize: 17,
     fontWeight: '700',
   },

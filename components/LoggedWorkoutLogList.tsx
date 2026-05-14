@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -175,9 +176,27 @@ export function LoggedWorkoutLogList() {
     <RNView key={item.id} style={[styles.card, { borderColor: borderMuted }]}>
       <View style={styles.cardHeader} lightColor="transparent" darkColor="transparent">
         <Text style={styles.cardTitle}>{item.title}</Text>
-        <Pressable onPress={() => onDelete(item)} hitSlop={8}>
-          <Text style={styles.delete}>Delete</Text>
-        </Pressable>
+        <RNView style={styles.cardActions}>
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/add',
+                params: { workoutId: item.workoutId, loggedWorkoutId: item.id },
+              })
+            }
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit logged workout “${item.title}”`}>
+            <Ionicons name="pencil-outline" size={22} color={tint} />
+          </Pressable>
+          <Pressable
+            onPress={() => onDelete(item)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete logged workout “${item.title}”`}>
+            <Ionicons name="trash-outline" size={22} color="#ef4444" />
+          </Pressable>
+        </RNView>
       </View>
       <Text style={styles.meta}>
         {new Date(item.createdAt).toLocaleString(undefined, {
@@ -278,11 +297,16 @@ export function LoggedWorkoutLogList() {
                       styles.dayCell,
                       styles.dayCellInner,
                       hasLogs && {
-                        borderColor: tint,
+                        borderColor: '#D40078',
                         backgroundColor: activeScheme === 'dark' ? 'rgba(35, 213, 213, 0.12)' : 'rgba(57, 170, 170, 0.12)',
                       },
-                      isSelected && { borderWidth: 2, borderColor: '#D40078' },
-                      isToday && !isSelected && styles.dayCellToday,
+                      isSelected && { borderWidth: 2, borderColor: tint },
+                      isToday &&
+                        !isSelected && {
+                          borderWidth: 1,
+                          borderColor:
+                            activeScheme === 'dark' ? 'rgba(35, 213, 213, 0.35)' : 'rgba(57, 170, 170, 0.35)',
+                        },
                       !hasLogs && styles.dayCellMuted,
                       pressed && hasLogs && styles.pressed,
                     ]}>
@@ -402,10 +426,6 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     minHeight: 44,
   },
-  dayCellToday: {
-    borderWidth: 1,
-    borderColor: 'rgba(212, 0, 120, 0.35)',
-  },
   dayCellMuted: {
     opacity: 1,
   },
@@ -455,14 +475,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
   cardTitle: {
     fontSize: 18,
     fontWeight: '700',
     flex: 1,
-  },
-  delete: {
-    color: '#ef4444',
-    fontWeight: '600',
   },
   meta: {
     fontSize: 14,

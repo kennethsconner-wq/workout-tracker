@@ -409,17 +409,19 @@ export function WorkoutsList() {
                       ]}>
                       <View style={styles.detailActionsRow} lightColor="transparent" darkColor="transparent">
                         <View style={styles.detailDaysRow} lightColor="transparent" darkColor="transparent">
-                          <Ionicons name="calendar-outline" size={16} color="#D40078" />
-                          <Text style={[styles.detailDaysText, styles.dropdownTextMagenta]}>{formatDays(w.daysOfWeek)}</Text>
+                          <Ionicons name="calendar-outline" size={16} color={Colors[activeScheme].tint} />
+                          <Text style={[styles.detailDaysText, { color: Colors[activeScheme].tint }]}>
+                            {formatDays(w.daysOfWeek)}
+                          </Text>
                         </View>
                         <View style={styles.detailTrailingActions} lightColor="transparent" darkColor="transparent">
                           <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel="Log workout"
+                            accessibilityLabel="Start workout"
                             onPress={() => router.push({ pathname: '/add', params: { workoutId: w.id } })}
                             style={({ pressed }) => [styles.iconActionButton, pressed && styles.iconActionButtonPressed]}
                             hitSlop={10}>
-                            <Ionicons name="journal-outline" size={22} color="#D40078" />
+                            <Text style={[styles.detailStartButtonLabel, styles.dropdownTextMagenta]}>Start</Text>
                           </Pressable>
                           <Pressable
                             accessibilityLabel="Workout actions"
@@ -439,7 +441,7 @@ export function WorkoutsList() {
                             }}
                             style={({ pressed }) => [styles.iconActionButton, pressed && styles.iconActionButtonPressed]}
                             hitSlop={10}>
-                            <Ionicons name="ellipsis-vertical" size={22} color="#D40078" />
+                            <Ionicons name="ellipsis-vertical" size={22} color={Colors[activeScheme].tint} />
                           </Pressable>
                         </View>
                       </View>
@@ -482,6 +484,8 @@ export function WorkoutsList() {
             <View style={[styles.actionSheetHandle, { backgroundColor: activeScheme === 'dark' ? '#5b5378' : '#d4d4d4' }]} />
             <Pressable
               style={({ pressed }) => [styles.actionSheetRow, pressed && styles.actionSheetRowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Log workout"
               onPress={() => {
                 const w = selected;
                 closeActionSheet(() => {
@@ -660,6 +664,10 @@ const styles = StyleSheet.create({
   iconActionButtonPressed: {
     opacity: 0.55,
   },
+  detailStartButtonLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
   detailExerciseList: {
     gap: 10,
   },
@@ -707,15 +715,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'left',
   },
+  log: {
+    color: '#D40078',
+    fontWeight: '600',
+  },
   edit: {
     color: '#D40078',
     fontWeight: '600',
   },
   copy: {
-    color: '#D40078',
-    fontWeight: '600',
-  },
-  log: {
     color: '#D40078',
     fontWeight: '600',
   },
