@@ -1,0 +1,30 @@
+Workout Tracker — Privacy Policy
+Last updated: May 13, 2026
+
+This policy describes how Workout Tracker (“the app”) handles information on your device. By using the app, you agree to this policy.
+
+1. Who we are
+Workout Tracker is a mobile application you install on your own device. This version is designed to work without creating an account with us.
+
+2. Information the app stores
+The app stores workout-related information you enter or generate locally on your device, such as workout templates, exercise details, logged sessions, and similar data used to show your history and metrics. That data stays on the device unless you choose to export or share it outside the app using features your device provides (for example, screenshots or system share sheets), which are outside our control.
+
+3. Accounts
+This version of the app does not require you to sign in. We do not operate a user account system for this app as described here.
+
+4. Network and third parties
+The app may use standard device networking for routine technical purposes (for example, software updates, crash diagnostics, or analytics) depending on your platform, build configuration, and how you distribute the app. If you use Expo or similar tooling during development, additional services may apply only in those environments.
+
+We do not sell your personal information.
+
+5. Children’s privacy
+The app is not directed to children under 13 (or the minimum age required in your region). If you are a parent or guardian and believe your child has provided personal information through the app, contact us using the information in your App Store listing or support channel.
+
+6. Security
+We rely on your device’s operating system protections for data stored locally. No method of storage or transmission is completely secure.
+
+7. Changes
+We may update this policy from time to time. The “Last updated” date at the top will change when we do. Continued use of the app after changes means you accept the updated policy.
+
+8. Contact
+For privacy questions, use the contact option provided on your app store listing or in-app support, if available.
