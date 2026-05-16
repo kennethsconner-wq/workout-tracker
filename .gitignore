@@ -39,3 +39,5 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+axiosworkouttracker-4db7071e20a4.json

@@ -9,10 +9,10 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.example.workouttracker"
+      "bundleIdentifier": "com.kconsoft.axiosworkouttracker"
     },
     "android": {
-      "package": "com.example.workouttracker",
+      "package": "com.kconsoft.workouttracker",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -39,6 +39,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0d970299-d43d-4c13-9872-65c76a31a07f"
+      }
     }
   }
 }
