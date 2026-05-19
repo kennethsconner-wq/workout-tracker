@@ -1,9 +1,7 @@
 #!/bin/sh
 
-echo "CI POST CLONE IS RUNNING"
+set -e
 
-cd ios || exit 1
+echo "Installing CocoaPods dependencies..."
 
-pod install --repo-update || exit 1
-
-ls "Pods/Target Support Files/Pods-WorkoutTracker"
+pod install --repo-update
