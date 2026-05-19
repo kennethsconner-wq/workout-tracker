@@ -2,18 +2,9 @@
 
 set -e
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export HOMEBREW_NO_INSTALL_CLEANUP=TRUE
 
-if [ -f ~/.zprofile ]; then
-  source ~/.zprofile
-fi
-
-if [ -f ~/.zshrc ]; then
-  source ~/.zshrc
-fi
-
-echo "Node location:"
-which node
+brew install node
 
 echo "Node version:"
 node --version
