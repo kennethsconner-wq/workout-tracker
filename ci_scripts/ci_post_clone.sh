@@ -1,22 +1,9 @@
 #!/bin/sh
-set -e
-set -x
 
-echo "=== CI POST CLONE START ==="
+echo "CI POST CLONE IS RUNNING"
 
-pwd
-ls
-ls ios
+cd ios || exit 1
 
-echo "=== Installing Node dependencies ==="
-npm install
+pod install --repo-update || exit 1
 
-echo "=== Installing CocoaPods ==="
-cd ios
-
-pod install --repo-update
-
-echo "=== Listing generated xcconfig ==="
 ls "Pods/Target Support Files/Pods-WorkoutTracker"
-
-echo "=== CI POST CLONE COMPLETE ==="
