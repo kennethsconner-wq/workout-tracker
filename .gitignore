@@ -27,8 +27,10 @@ yarn-debug.*
 yarn-error.*
 
 # macOS
-.DS_Store
+ios/.DS_Store
 *.pem
+ios/xcuserdata/
+*.xcuserstate
 
 # local env files
 .env*.local
