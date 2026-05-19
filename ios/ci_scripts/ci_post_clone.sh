@@ -1,16 +1,19 @@
-#!/bin/sh
+#!/bin/zsh
 
 set -e
 
-export HOMEBREW_NO_INSTALL_CLEANUP=TRUE
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-if [[ -d "$HOME/.nvm" ]]; then
-  export NVM_DIR="$HOME/.nvm"
-  . "$NVM_DIR/nvm.sh"
+if [ -f ~/.zprofile ]; then
+  source ~/.zprofile
 fi
 
-export PATH="/opt/homebrew/bin:$PATH"
-export PATH="/usr/local/bin:$PATH"
+if [ -f ~/.zshrc ]; then
+  source ~/.zshrc
+fi
+
+echo "Node location:"
+which node
 
 echo "Node version:"
 node --version
