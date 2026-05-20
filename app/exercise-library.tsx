@@ -3,7 +3,6 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -25,6 +24,7 @@ import {
   removeExercisesMatchingSignatureFromAllWorkouts,
   updateExercisesMatchingSignatureAcrossWorkouts,
 } from '@/lib/workoutsStorage';
+import { themedAlert } from '@/lib/themedAlert';
 import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types';
 
 type RouteSource = 'create' | 'edit';
@@ -196,7 +196,7 @@ export default function ExerciseLibraryScreen() {
 
   const requestEditExercise = useCallback(
     (item: ExerciseListItem) => {
-      Alert.alert('Edit exercise?', EXERCISE_LIBRARY_EDIT_IMPACT, [
+      themedAlert('Edit exercise?', EXERCISE_LIBRARY_EDIT_IMPACT, [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Continue', onPress: () => openEditFormForItem(item) },
       ]);
@@ -206,7 +206,7 @@ export default function ExerciseLibraryScreen() {
 
   const requestDeleteExercise = useCallback(
     (item: ExerciseListItem) => {
-      Alert.alert('Delete exercise?', EXERCISE_LIBRARY_DELETE_IMPACT, [
+      themedAlert('Delete exercise?', EXERCISE_LIBRARY_DELETE_IMPACT, [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
@@ -239,22 +239,22 @@ export default function ExerciseLibraryScreen() {
     }
     const name = editName.trim();
     if (!name) {
-      Alert.alert('Missing name', 'Please enter an exercise name.');
+      themedAlert('Missing name', 'Please enter an exercise name.');
       return;
     }
     const sets = Number.parseInt(editSets.trim(), 10);
     const reps = Number.parseInt(editReps.trim(), 10);
     const weightKg = Number.parseFloat(editWeight.trim());
     if (!Number.isFinite(sets) || sets < 1) {
-      Alert.alert('Invalid sets', 'Enter a whole number of sets (at least 1).');
+      themedAlert('Invalid sets', 'Enter a whole number of sets (at least 1).');
       return;
     }
     if (!Number.isFinite(reps) || reps < 1) {
-      Alert.alert('Invalid reps', 'Enter a whole number of reps (at least 1).');
+      themedAlert('Invalid reps', 'Enter a whole number of reps (at least 1).');
       return;
     }
     if (!Number.isFinite(weightKg) || weightKg < 0) {
-      Alert.alert('Invalid weight', 'Enter a valid weight (0 or more).');
+      themedAlert('Invalid weight', 'Enter a valid weight (0 or more).');
       return;
     }
     try {

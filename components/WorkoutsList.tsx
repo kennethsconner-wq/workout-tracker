@@ -4,7 +4,6 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   BackHandler,
   Easing,
@@ -25,6 +24,13 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
 import { pickWorkoutIdForDeviceCalendarDay, sortWorkoutsForDropdown } from '@/lib/deviceDayOfWeek';
+import { getWorkoutIdsWithNewLogDrafts } from '@/lib/logWorkoutDraft';
+import {
+  navigateToNewLogWorkout,
+  navigateToNewLogWorkoutFresh,
+  navigateToResumeLogWorkout,
+} from '@/lib/logWorkoutNavigation';
+import { themedAlert } from '@/lib/themedAlert';
 import { deleteLoggedWorkoutsByWorkoutId, deleteWorkout, loadWorkouts } from '@/lib/workoutsStorage';
 import { DAYS_OF_WEEK, DAY_OF_WEEK_ABBREVIATIONS, type Workout } from '@/lib/types';
 
@@ -47,6 +53,7 @@ export function WorkoutsList() {
   const [carouselWidth, setCarouselWidth] = useState(0);
   const [detailWidth, setDetailWidth] = useState(0);
   const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
+  const [draftWorkoutIds, setDraftWorkoutIds] = useState<Set<string>>(() => new Set());
   const sheetTranslateY = useRef(new Animated.Value(ACTION_SHEET_SLIDE)).current;
   const carouselRef = useRef<FlatList<Workout>>(null);
   const detailRef = useRef<FlatList<Workout>>(null);
@@ -75,9 +82,10 @@ export function WorkoutsList() {
     useCallback(() => {
       let cancelled = false;
       void (async () => {
-        const next = await loadWorkouts();
+        const [next, draftIds] = await Promise.all([loadWorkouts(), getWorkoutIdsWithNewLogDrafts()]);
         if (!cancelled) {
           setWorkouts(next);
+          setDraftWorkoutIds(draftIds);
           setSelectedId((prev) => pickWorkoutIdForDeviceCalendarDay(next, prev));
           setLoading(false);
         }
@@ -226,8 +234,29 @@ export function WorkoutsList() {
     return () => sub.remove();
   }, [isActionSheetOpen, closeActionSheet]);
 
+  const onStartWorkout = useCallback((workoutId: string) => {
+    if (draftWorkoutIds.has(workoutId)) {
+      themedAlert(
+        'Start fresh?',
+        'Starting a new workout will clear your saved draft for this workout.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Start fresh',
+            style: 'destructive',
+            onPress: () => {
+              void navigateToNewLogWorkoutFresh(workoutId);
+            },
+          },
+        ],
+      );
+      return;
+    }
+    navigateToNewLogWorkout(workoutId);
+  }, [draftWorkoutIds]);
+
   const onDelete = (workout: Workout) => {
-    Alert.alert(
+    themedAlert(
       'Delete workout?',
       `Remove “${workout.title}”? This cannot be undone.\n\nAll logged workouts linked to this workout will also be deleted.`,
       [
@@ -415,13 +444,35 @@ export function WorkoutsList() {
                           </Text>
                         </View>
                         <View style={styles.detailTrailingActions} lightColor="transparent" darkColor="transparent">
+                          {draftWorkoutIds.has(w.id) ? (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel="Resume draft workout log"
+                              onPress={() => navigateToResumeLogWorkout(w.id)}
+                              style={({ pressed }) => [
+                                styles.detailPrimaryButton,
+                                { backgroundColor: Colors[activeScheme].tint, opacity: pressed ? 0.85 : 1 },
+                              ]}
+                              hitSlop={6}>
+                              <Text
+                                style={[styles.detailPrimaryButtonLabel, { color: Colors[activeScheme].background }]}>
+                                Resume
+                              </Text>
+                            </Pressable>
+                          ) : null}
                           <Pressable
                             accessibilityRole="button"
                             accessibilityLabel="Start workout"
-                            onPress={() => router.push({ pathname: '/add', params: { workoutId: w.id } })}
-                            style={({ pressed }) => [styles.iconActionButton, pressed && styles.iconActionButtonPressed]}
-                            hitSlop={10}>
-                            <Text style={[styles.detailStartButtonLabel, styles.dropdownTextMagenta]}>Start</Text>
+                            onPress={() => onStartWorkout(w.id)}
+                            style={({ pressed }) => [
+                              styles.detailPrimaryButton,
+                              { backgroundColor: Colors[activeScheme].tint, opacity: pressed ? 0.85 : 1 },
+                            ]}
+                            hitSlop={6}>
+                            <Text
+                              style={[styles.detailPrimaryButtonLabel, { color: Colors[activeScheme].background }]}>
+                              Start
+                            </Text>
                           </Pressable>
                           <Pressable
                             accessibilityLabel="Workout actions"
@@ -485,18 +536,35 @@ export function WorkoutsList() {
             <Pressable
               style={({ pressed }) => [styles.actionSheetRow, pressed && styles.actionSheetRowPressed]}
               accessibilityRole="button"
-              accessibilityLabel="Log workout"
+              accessibilityLabel="Start workout"
               onPress={() => {
                 const w = selected;
                 closeActionSheet(() => {
                   if (w) {
-                    router.push({ pathname: '/add', params: { workoutId: w.id } });
+                    onStartWorkout(w.id);
                   }
                 });
               }}>
               <Ionicons name="journal-outline" size={22} color="#D40078" style={styles.actionSheetIcon} />
-              <Text style={[styles.actionSheetLabel, styles.log]}>Log</Text>
+              <Text style={[styles.actionSheetLabel, styles.log]}>Start</Text>
             </Pressable>
+            {selected && draftWorkoutIds.has(selected.id) ? (
+              <Pressable
+                style={({ pressed }) => [styles.actionSheetRow, pressed && styles.actionSheetRowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Resume draft workout log"
+                onPress={() => {
+                  const w = selected;
+                  closeActionSheet(() => {
+                    if (w) {
+                      navigateToResumeLogWorkout(w.id);
+                    }
+                  });
+                }}>
+                <Ionicons name="play-outline" size={22} color="#D40078" style={styles.actionSheetIcon} />
+                <Text style={[styles.actionSheetLabel, styles.log]}>Resume</Text>
+              </Pressable>
+            ) : null}
             <Pressable
               style={({ pressed }) => [styles.actionSheetRow, pressed && styles.actionSheetRowPressed]}
               onPress={() => {
@@ -653,8 +721,21 @@ const styles = StyleSheet.create({
   detailTrailingActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: 8,
     flexShrink: 0,
+  },
+  /** Compact variant of {@link StickySaveFooter} primary button. */
+  detailPrimaryButton: {
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 36,
+  },
+  detailPrimaryButtonLabel: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   iconActionButton: {
     paddingHorizontal: 6,
@@ -663,10 +744,6 @@ const styles = StyleSheet.create({
   },
   iconActionButtonPressed: {
     opacity: 0.55,
-  },
-  detailStartButtonLabel: {
-    fontSize: 16,
-    fontWeight: '600',
   },
   detailExerciseList: {
     gap: 10,

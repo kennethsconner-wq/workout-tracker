@@ -2,7 +2,6 @@ import { useNavigation, useFocusEffect, type NavigationProp, type ParamListBase 
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,6 +11,7 @@ import {
 } from 'react-native';
 
 import { DraftExerciseDraggableList } from '@/components/DraftExerciseDraggableList';
+import { StickySaveFooter } from '@/components/StickySaveFooter';
 import { WorkoutFormExerciseLibraryMenu } from '@/components/WorkoutFormExerciseLibraryMenu';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
@@ -21,6 +21,7 @@ import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
 import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { DAYS_OF_WEEK, type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
+import { themedAlert } from '@/lib/themedAlert';
 import { addWorkout, findTemplateExerciseById, loadWorkouts, propagateExerciseDefinitionsAcrossWorkouts } from '@/lib/workoutsStorage';
 
 type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
@@ -247,11 +248,11 @@ export default function LogWorkoutScreen() {
   const parseWorkout = (): Omit<Workout, 'id' | 'createdAt'> | null => {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
-      Alert.alert('Missing title', 'Give this session a short name (for example, “Upper body”).');
+      themedAlert('Missing title', 'Give this session a short name (for example, “Upper body”).');
       return null;
     }
     if (daysOfWeek.length === 0) {
-      Alert.alert('Choose at least one day', 'Select one or more days of the week for this workout.');
+      themedAlert('Choose at least one day', 'Select one or more days of the week for this workout.');
       return null;
     }
 
@@ -268,7 +269,7 @@ export default function LogWorkoutScreen() {
       }
 
       if (!name) {
-        Alert.alert('Name your exercise', 'One of your sets is missing an exercise name.');
+        themedAlert('Name your exercise', 'One of your sets is missing an exercise name.');
         return null;
       }
 
@@ -283,7 +284,7 @@ export default function LogWorkoutScreen() {
         !Number.isFinite(weightKg) ||
         weightKg < 0
       ) {
-        Alert.alert('Check your numbers', 'Each exercise needs a positive set count, positive rep count, and a weight (use 0 for bodyweight).');
+        themedAlert('Check your numbers', 'Each exercise needs a positive set count, positive rep count, and a weight (use 0 for bodyweight).');
         return null;
       }
 
@@ -297,7 +298,7 @@ export default function LogWorkoutScreen() {
     }
 
     if (parsedExercises.length === 0) {
-      Alert.alert('Add an exercise', 'Enter at least one exercise name and one complete set.');
+      themedAlert('Add an exercise', 'Enter at least one exercise name and one complete set.');
       return null;
     }
 
@@ -413,15 +414,10 @@ export default function LogWorkoutScreen() {
                 </Text>
               </Pressable>
             </View>
-
-            <Pressable
-              onPress={onSave}
-              style={[styles.primaryButton, { backgroundColor: Colors[activeScheme].tint }]}>
-              <Text style={[styles.primaryButtonLabel, { color: Colors[activeScheme].background }]}>Save</Text>
-            </Pressable>
           </>
         }
       />
+        <StickySaveFooter onPress={onSave} activeScheme={activeScheme} insetBottom={false} />
       </KeyboardAvoidingView>
       <WorkoutFormExerciseLibraryMenu
         navigation={navigation as NavigationProp<ParamListBase>}
@@ -442,7 +438,7 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 16,
     gap: 14,
   },
   label: {
@@ -483,15 +479,5 @@ const styles = StyleSheet.create({
   secondaryButtonLabel: {
     fontSize: 16,
     fontWeight: '600',
-  },
-  primaryButton: {
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  primaryButtonLabel: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
   },
 });

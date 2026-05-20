@@ -1,10 +1,15 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
+import { themedAlert } from '@/lib/themedAlert';
 import { WORKOUT_ICON_OPTIONS, type WorkoutIconId } from '@/lib/workoutIcons';
+
+const WORKOUT_ICON_INFO_MESSAGE =
+  'Icon selection is purely aesthetic. It only helps you tell this workout apart from your other workouts.';
 
 type Props = {
   value: WorkoutIconId;
@@ -20,7 +25,17 @@ export function WorkoutIconPicker({ value, onChange }: Props) {
 
   return (
     <View style={styles.wrap}>
-      <Text style={[styles.label, { color: textColor }]}>Icon</Text>
+      <View style={styles.labelRow} lightColor="transparent" darkColor="transparent">
+        <Text style={[styles.label, { color: textColor }]}>Icon</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="About workout icons"
+          hitSlop={10}
+          onPress={() => themedAlert('Workout icon', WORKOUT_ICON_INFO_MESSAGE, [{ text: 'OK' }])}
+          style={({ pressed }) => [styles.infoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
+          <Ionicons name="information-circle-outline" size={18} color={Colors[activeScheme].tint} />
+        </Pressable>
+      </View>
       <ScrollView
         horizontal
         nestedScrollEnabled
@@ -53,12 +68,21 @@ export function WorkoutIconPicker({ value, onChange }: Props) {
 
 const styles = StyleSheet.create({
   wrap: {
+    marginTop: 10,
     gap: 10,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
     opacity: 0.8,
+  },
+  infoIconPressable: {
+    padding: 2,
   },
   iconScroll: {
     width: '100%',

@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import type { ReactElement } from 'react';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import {
-  Alert,
   Keyboard,
   Pressable,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { confirmEditLinkedExercise } from '@/lib/linkedExerciseEdit';
+import { themedAlert } from '@/lib/themedAlert';
 
 export type DraftExerciseRow = {
   clientId: string;
@@ -114,7 +114,7 @@ export function DraftExerciseDraggableList({
                     onPress={() => {
                       if (confirmBeforeRemoveExercise) {
                         const label = exercise.name.trim() || 'this exercise';
-                        Alert.alert(
+                        themedAlert(
                           'Remove exercise?',
                           `Remove "${label}" from this workout?`,
                           [
