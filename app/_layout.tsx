@@ -1,7 +1,9 @@
 import 'react-native-gesture-handler';
 import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { ThemedAlertProvider } from '@/components/ThemedAlertProvider';
 import Colors from '@/constants/Colors';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useFonts } from 'expo-font';
@@ -60,7 +62,9 @@ export default function RootLayout() {
 function RootLayoutNav() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider value={NavigationAppTheme}>
+      <SafeAreaProvider>
+        <ThemedAlertProvider>
+        <ThemeProvider value={NavigationAppTheme}>
         <Stack
           screenOptions={{
             ...stackHeaderHideIosBackLabel,
@@ -74,8 +78,18 @@ function RootLayoutNav() {
               ...stackHeaderHideIosBackLabel,
             }}
           />
+          <Stack.Screen
+            name="log-workout"
+            options={{
+              title: 'Log workout',
+              presentation: 'card',
+              ...stackHeaderHideIosBackLabel,
+            }}
+          />
         </Stack>
-      </ThemeProvider>
+        </ThemeProvider>
+        </ThemedAlertProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

@@ -1,10 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,8 +10,11 @@ import {
 } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { navigateToEditLoggedWorkout } from '@/lib/logWorkoutNavigation';
+import { themedAlert } from '@/lib/themedAlert';
 import { deleteLoggedWorkout, loadLoggedWorkouts } from '@/lib/workoutsStorage';
 import type { LoggedWorkout } from '@/lib/types';
 
@@ -116,7 +117,7 @@ export function LoggedWorkoutLogList() {
   }, [calendarYear, calendarMonth]);
 
   const onDelete = (workout: LoggedWorkout) => {
-    Alert.alert('Delete workout?', `Remove “${workout.title}”? This cannot be undone.`, [
+    themedAlert('Delete workout?', `Remove “${workout.title}”? This cannot be undone.`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -175,15 +176,17 @@ export function LoggedWorkoutLogList() {
   const renderWorkoutCard = (item: LoggedWorkout) => (
     <RNView key={item.id} style={[styles.card, { borderColor: borderMuted }]}>
       <View style={styles.cardHeader} lightColor="transparent" darkColor="transparent">
-        <Text style={styles.cardTitle}>{item.title}</Text>
+        <View style={styles.cardTitleBlock} lightColor="transparent" darkColor="transparent">
+          <View style={styles.cardTitleWithIcon} lightColor="transparent" darkColor="transparent">
+            <WorkoutIconGlyph iconId={item.iconId} size={22} color="#D40078" />
+            <Text style={[styles.cardTitle, styles.cardTitleMagenta]} numberOfLines={2}>
+              {item.title}
+            </Text>
+          </View>
+        </View>
         <RNView style={styles.cardActions}>
           <Pressable
-            onPress={() =>
-              router.push({
-                pathname: '/add',
-                params: { workoutId: item.workoutId, loggedWorkoutId: item.id },
-              })
-            }
+            onPress={() => navigateToEditLoggedWorkout(item.workoutId, item.id)}
             hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel={`Edit logged workout “${item.title}”`}>
@@ -480,10 +483,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
   },
+  cardTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardTitleWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   cardTitle: {
     fontSize: 18,
     fontWeight: '700',
-    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  cardTitleMagenta: {
+    color: '#D40078',
   },
   meta: {
     fontSize: 14,

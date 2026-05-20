@@ -65,6 +65,7 @@ export function WorkoutDaysPicker({ value, onChange }: Props) {
 
 const styles = StyleSheet.create({
   wrap: {
+    marginTop: 10,
     gap: 10,
   },
   label: {

@@ -3,7 +3,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -27,6 +26,7 @@ import {
   getLoggedExerciseWeightSnapshots,
   getTotalWeightMovedForExercise,
 } from '@/lib/exerciseSnapshot';
+import { themedAlert } from '@/lib/themedAlert';
 import { loadLoggedWorkouts, loadWorkouts } from '@/lib/workoutsStorage';
 import type { LoggedWorkout, Workout } from '@/lib/types';
 
@@ -318,7 +318,7 @@ export function LoggedWorkoutsList() {
                   accessibilityLabel="How Execution Score is calculated"
                   hitSlop={10}
                   onPress={() =>
-                    Alert.alert('Execution Score', EXECUTION_SCORE_INFO_MESSAGE, [{ text: 'OK' }])
+                    themedAlert('Execution Score', EXECUTION_SCORE_INFO_MESSAGE, [{ text: 'OK' }])
                   }
                   style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
                   <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
@@ -362,7 +362,7 @@ export function LoggedWorkoutsList() {
                   accessibilityLabel="How Total Weight Moved is calculated"
                   hitSlop={10}
                   onPress={() =>
-                    Alert.alert('Total Weight Moved', TOTAL_WEIGHT_MOVED_INFO_MESSAGE, [{ text: 'OK' }])
+                    themedAlert('Total Weight Moved', TOTAL_WEIGHT_MOVED_INFO_MESSAGE, [{ text: 'OK' }])
                   }
                   style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
                   <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
