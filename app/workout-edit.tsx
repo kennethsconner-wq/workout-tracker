@@ -3,7 +3,6 @@ import { useNavigation, useFocusEffect, type NavigationProp, type ParamListBase 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +12,7 @@ import {
 } from 'react-native';
 
 import { DraftExerciseDraggableList } from '@/components/DraftExerciseDraggableList';
+import { StickySaveFooter } from '@/components/StickySaveFooter';
 import { WorkoutFormExerciseLibraryMenu } from '@/components/WorkoutFormExerciseLibraryMenu';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
@@ -23,6 +23,7 @@ import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
 import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
+import { themedAlert } from '@/lib/themedAlert';
 import { loadWorkouts, propagateExerciseDefinitionsAcrossWorkouts, updateWorkout } from '@/lib/workoutsStorage';
 
 type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
@@ -81,7 +82,7 @@ export default function WorkoutEditScreen() {
   /** Load workout and apply Exercise Library imports in one pass so async load cannot overwrite imported exercises. */
   useEffect(() => {
     if (!id) {
-      Alert.alert('Workout not found', 'Missing workout id.');
+      themedAlert('Workout not found', 'Missing workout id.');
       router.back();
       return;
     }
@@ -97,7 +98,7 @@ export default function WorkoutEditScreen() {
       }
       const workout = workouts.find((w) => w.id === id);
       if (!workout) {
-        Alert.alert('Workout not found', 'Could not find this workout.');
+        themedAlert('Workout not found', 'Could not find this workout.');
         router.back();
         return;
       }
@@ -220,11 +221,11 @@ export default function WorkoutEditScreen() {
   const parseWorkout = (): Omit<Workout, 'id' | 'createdAt'> | null => {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
-      Alert.alert('Missing title', 'Give this workout a title.');
+      themedAlert('Missing title', 'Give this workout a title.');
       return null;
     }
     if (daysOfWeek.length === 0) {
-      Alert.alert('Choose at least one day', 'Select one or more days of the week for this workout.');
+      themedAlert('Choose at least one day', 'Select one or more days of the week for this workout.');
       return null;
     }
 
@@ -240,7 +241,7 @@ export default function WorkoutEditScreen() {
       }
 
       if (!name) {
-        Alert.alert('Name your exercise', 'One entry is missing an exercise name.');
+        themedAlert('Name your exercise', 'One entry is missing an exercise name.');
         return null;
       }
 
@@ -255,7 +256,7 @@ export default function WorkoutEditScreen() {
         !Number.isFinite(weightKg) ||
         weightKg < 0
       ) {
-        Alert.alert('Check your numbers', 'Each exercise needs a positive set count, positive rep count, and a weight.');
+        themedAlert('Check your numbers', 'Each exercise needs a positive set count, positive rep count, and a weight.');
         return null;
       }
 
@@ -269,7 +270,7 @@ export default function WorkoutEditScreen() {
     }
 
     if (parsedExercises.length === 0) {
-      Alert.alert('Add an exercise', 'Enter at least one complete exercise.');
+      themedAlert('Add an exercise', 'Enter at least one complete exercise.');
       return null;
     }
 
@@ -288,7 +289,7 @@ export default function WorkoutEditScreen() {
     void (async () => {
       const updated = await updateWorkout(id, parsed);
       if (!updated) {
-        Alert.alert('Workout not found', 'Could not update this workout.');
+        themedAlert('Workout not found', 'Could not update this workout.');
         return;
       }
       await propagateExerciseDefinitionsAcrossWorkouts(parsed.exercises);
@@ -400,13 +401,10 @@ export default function WorkoutEditScreen() {
                 </Text>
               </Pressable>
             </View>
-
-            <Pressable onPress={onSave} style={[styles.primaryButton, { backgroundColor: Colors[activeScheme].tint }]}>
-              <Text style={[styles.primaryButtonLabel, { color: Colors[activeScheme].background }]}>Save</Text>
-            </Pressable>
           </>
         }
       />
+          <StickySaveFooter onPress={onSave} activeScheme={activeScheme} />
         </KeyboardAvoidingView>
       )}
       <WorkoutFormExerciseLibraryMenu
@@ -431,7 +429,7 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 16,
     gap: 14,
   },
   label: {
@@ -472,15 +470,5 @@ const styles = StyleSheet.create({
   secondaryButtonLabel: {
     fontSize: 16,
     fontWeight: '600',
-  },
-  primaryButton: {
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  primaryButtonLabel: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
   },
 });
