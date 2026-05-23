@@ -13,6 +13,7 @@ import {
   View as RNView,
 } from 'react-native';
 
+import { SessionDateTimeField } from '@/components/SessionDateTimeField';
 import { StickySaveFooter } from '@/components/StickySaveFooter';
 import { Text, View } from '@/components/Themed';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
@@ -47,9 +48,19 @@ type LogWorkoutDraft = {
   loggedWorkoutId?: string;
   exercises: DraftExercise[];
   updatedAt: string;
+  /** ISO timestamp for when the workout was performed. */
+  sessionDate?: string;
   /** Template exercise ids (`WorkoutExercise.id`) the user removed from this log. */
   omittedWorkoutExerciseIds?: string[];
 };
+
+function parseSessionDateFromIso(iso: string | undefined, fallback: Date): Date {
+  if (!iso) {
+    return fallback;
+  }
+  const parsed = new Date(iso);
+  return Number.isFinite(parsed.getTime()) ? parsed : fallback;
+}
 
 function hasActualSetValues(actualSet: DraftActualSet): boolean {
   return actualSet.actualRepsInput.trim().length > 0 && actualSet.actualWeightKgInput.trim().length > 0;
@@ -256,12 +267,15 @@ export default function LogWorkoutScreen() {
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [loadedFromDraft, setLoadedFromDraft] = useState(false);
   const [displayIconId, setDisplayIconId] = useState<WorkoutIconId>(DEFAULT_WORKOUT_ICON_ID);
+  const [sessionDate, setSessionDate] = useState(() => new Date());
   const skipAutosaveRef = useRef(false);
   const loadGenerationRef = useRef(0);
+  const initialSessionDateRef = useRef<Date>(new Date());
   const draftSnapshotRef = useRef({
     workout: null as Workout | null,
     exercises: [] as DraftExercise[],
     omittedWorkoutExerciseIds: [] as string[],
+    sessionDate: new Date(),
     session: null as LogWorkoutSession | null,
   });
 
@@ -309,6 +323,7 @@ export default function LogWorkoutScreen() {
       let nextOmitted: string[] = [];
       let didLoadDraft = false;
       let iconIdForHeader = selectedWorkout.iconId;
+      let nextSessionDate = new Date();
 
       if (intent === 'edit' && loggedWorkoutId) {
         const allLogged = await loadLoggedWorkouts();
@@ -330,6 +345,7 @@ export default function LogWorkoutScreen() {
 
         await AsyncStorage.removeItem(legacyEditDraftStorageKey(loggedWorkoutId));
         iconIdForHeader = logged.iconId;
+        nextSessionDate = parseSessionDateFromIso(logged.createdAt, new Date());
         nextExercises = buildDraftExercisesFromLogged(logged, selectedWorkout);
         nextOmitted = [];
       } else {
@@ -346,6 +362,7 @@ export default function LogWorkoutScreen() {
                 ? omittedRaw.filter((id): id is string => typeof id === 'string')
                 : [];
               nextExercises = normalizeDraftExercises(selectedWorkout, parsed.exercises, nextOmitted);
+              nextSessionDate = parseSessionDateFromIso(parsed.sessionDate, new Date());
               didLoadDraft = true;
             }
           } catch {
@@ -363,6 +380,8 @@ export default function LogWorkoutScreen() {
       setDisplayIconId(iconIdForHeader);
       setOmittedWorkoutExerciseIds(nextOmitted);
       setExercises(nextExercises);
+      setSessionDate(nextSessionDate);
+      initialSessionDateRef.current = nextSessionDate;
       setLoadedFromDraft(didLoadDraft);
       setDraftHydrated(true);
       setLoading(false);
@@ -382,7 +401,8 @@ export default function LogWorkoutScreen() {
       return;
     }
 
-    if (isNewLogFormPristine(workout, exercises, omittedWorkoutExerciseIds)) {
+    const sessionDateChanged = sessionDate.getTime() !== initialSessionDateRef.current.getTime();
+    if (isNewLogFormPristine(workout, exercises, omittedWorkoutExerciseIds) && !sessionDateChanged) {
       void clearNewLogDraft(workout.id);
       return;
     }
@@ -393,12 +413,13 @@ export default function LogWorkoutScreen() {
         workoutId: workout.id,
         exercises,
         omittedWorkoutExerciseIds,
+        sessionDate: sessionDate.toISOString(),
         updatedAt: new Date().toISOString(),
       } as LogWorkoutDraft),
     );
-  }, [draftHydrated, exercises, loading, omittedWorkoutExerciseIds, session, workout]);
+  }, [draftHydrated, exercises, loading, omittedWorkoutExerciseIds, session, sessionDate, workout]);
 
-  draftSnapshotRef.current = { workout, exercises, omittedWorkoutExerciseIds, session };
+  draftSnapshotRef.current = { workout, exercises, omittedWorkoutExerciseIds, sessionDate, session };
 
   useEffect(() => {
     return () => {
@@ -409,7 +430,8 @@ export default function LogWorkoutScreen() {
       if (!snap.workout || !snap.session || snap.session.intent !== 'new') {
         return;
       }
-      if (isNewLogFormPristine(snap.workout, snap.exercises, snap.omittedWorkoutExerciseIds)) {
+      const sessionDateChanged = snap.sessionDate.getTime() !== initialSessionDateRef.current.getTime();
+      if (isNewLogFormPristine(snap.workout, snap.exercises, snap.omittedWorkoutExerciseIds) && !sessionDateChanged) {
         void clearNewLogDraft(snap.workout.id);
       }
     };
@@ -572,6 +594,11 @@ export default function LogWorkoutScreen() {
   };
 
   const onSave = () => {
+    if (sessionDate.getTime() > Date.now()) {
+      themedAlert('Invalid date', 'Workout date and time cannot be in the future.');
+      return;
+    }
+
     const parsed = parseWorkout();
     if (!parsed) {
       return;
@@ -584,6 +611,7 @@ export default function LogWorkoutScreen() {
           return;
         }
         const { loggedWorkoutId, intent } = session;
+        const createdAt = sessionDate.toISOString();
         if (intent === 'edit' && loggedWorkoutId) {
           const updated = await updateLoggedWorkout(loggedWorkoutId, {
             workoutId: parsed.workout.id,
@@ -591,6 +619,7 @@ export default function LogWorkoutScreen() {
             daysOfWeek: parsed.workout.daysOfWeek,
             iconId: parsed.workout.iconId,
             exercises: parsed.exercises,
+            createdAt,
           });
           if (!updated) {
             skipAutosaveRef.current = false;
@@ -604,6 +633,7 @@ export default function LogWorkoutScreen() {
             daysOfWeek: parsed.workout.daysOfWeek,
             iconId: parsed.workout.iconId,
             exercises: parsed.exercises,
+            createdAt,
           });
           await AsyncStorage.removeItem(newLogDraftStorageKey(parsed.workout.id));
         }
@@ -634,8 +664,11 @@ export default function LogWorkoutScreen() {
         onPress: () => {
           void (async () => {
             await AsyncStorage.removeItem(newLogDraftStorageKey(workout.id));
+            const freshDate = new Date();
             setOmittedWorkoutExerciseIds([]);
             setExercises(toDraftExercises(workout));
+            setSessionDate(freshDate);
+            initialSessionDateRef.current = freshDate;
             setLoadedFromDraft(false);
           })();
         },
@@ -687,6 +720,15 @@ export default function LogWorkoutScreen() {
             ) : null}
           </View>
         </View>
+
+        <SessionDateTimeField
+          value={sessionDate}
+          onChange={setSessionDate}
+          activeScheme={activeScheme}
+          borderColor={borderColor}
+          inputBackground={inputBackground}
+          textColor={textColor}
+        />
 
         {exercises.map((exercise, exIndex) => (
           <View key={exercise.id} style={[styles.card, { borderColor }]}>

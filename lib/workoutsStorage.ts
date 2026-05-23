@@ -169,7 +169,8 @@ export async function deleteLoggedWorkout(id: string): Promise<void> {
 
 export async function updateLoggedWorkout(
   id: string,
-  patch: Pick<LoggedWorkout, 'title' | 'daysOfWeek' | 'iconId' | 'exercises' | 'workoutId'>,
+  patch: Pick<LoggedWorkout, 'title' | 'daysOfWeek' | 'iconId' | 'exercises' | 'workoutId'> &
+    Partial<Pick<LoggedWorkout, 'createdAt'>>,
 ): Promise<LoggedWorkout | null> {
   const existing = await loadLoggedWorkouts();
   const prev = existing.find((w) => w.id === id);
@@ -183,6 +184,7 @@ export async function updateLoggedWorkout(
     daysOfWeek: Array.from(new Set(patch.daysOfWeek)),
     iconId: normalizeWorkoutIconId(patch.iconId),
     exercises: patch.exercises,
+    ...(patch.createdAt !== undefined ? { createdAt: patch.createdAt } : {}),
   };
   await saveLoggedWorkouts(existing.map((w) => (w.id === id ? nextEntry : w)));
   return nextEntry;
