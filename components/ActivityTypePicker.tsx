@@ -19,7 +19,6 @@ export function ActivityTypePicker({ value, onChange, disabled = false }: Props)
 
   return (
     <View style={styles.wrap} lightColor="transparent" darkColor="transparent">
-      <Text style={[styles.label, { color: textColor }]}>Activity type</Text>
       <ScrollView
         horizontal
         nestedScrollEnabled
@@ -56,12 +55,7 @@ export function ActivityTypePicker({ value, onChange, disabled = false }: Props)
 
 const styles = StyleSheet.create({
   wrap: {
-    gap: 8,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    opacity: 0.8,
+    gap: 0,
   },
   scroll: {
     flexGrow: 0,

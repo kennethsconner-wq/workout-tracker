@@ -19,6 +19,8 @@ import Colors from '@/constants/Colors';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
 import type { ActivityType } from '@/lib/activityTypes';
+import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
+import type { DurationUnit } from '@/lib/durationUnits';
 import {
   emptyExerciseDraftRow,
   exerciseDraftRowFromSeed,
@@ -203,10 +205,18 @@ export default function WorkoutEditScreen() {
 
   const updateExerciseField = (
     exerciseId: string,
-    field: 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score',
+    field: 'sets' | 'reps' | 'weightKg' | 'duration' | 'distance' | 'score',
     value: string,
   ) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, [field]: value } : ex)));
+  };
+
+  const updateExerciseDistanceUnit = (exerciseId: string, unit: CardioDistanceUnit) => {
+    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, distanceUnit: unit } : ex)));
+  };
+
+  const updateExerciseDurationUnit = (exerciseId: string, unit: DurationUnit) => {
+    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, durationUnit: unit } : ex)));
   };
 
   const parseWorkout = (): Omit<Workout, 'id' | 'createdAt'> | null => {
@@ -307,6 +317,8 @@ export default function WorkoutEditScreen() {
         onUpdateExerciseName={updateExerciseName}
         onUpdateExerciseActivityType={updateExerciseActivityType}
         onUpdateExerciseField={updateExerciseField}
+        onUpdateExerciseDistanceUnit={updateExerciseDistanceUnit}
+        onUpdateExerciseDurationUnit={updateExerciseDurationUnit}
         onRemoveExercise={removeExercise}
         confirmBeforeRemoveExercise
         contentContainerStyle={styles.scroll}

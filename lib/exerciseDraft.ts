@@ -1,4 +1,18 @@
 import { DEFAULT_ACTIVITY_TYPE, normalizeActivityType, type ActivityType } from '@/lib/activityTypes';
+import {
+  DEFAULT_CARDIO_DISTANCE_UNIT,
+  formatCardioDistanceValue,
+  normalizeCardioDistanceUnit,
+  parseCardioDistanceInput,
+  type CardioDistanceUnit,
+} from '@/lib/cardioDistanceUnits';
+import {
+  DEFAULT_DURATION_UNIT,
+  formatDurationValue,
+  normalizeDurationUnit,
+  parseDurationInput,
+  type DurationUnit,
+} from '@/lib/durationUnits';
 import { newId } from '@/lib/ids';
 import type { WorkoutExercise } from '@/lib/types';
 
@@ -10,8 +24,10 @@ export type ExerciseDraftRow = {
   sets: string;
   reps: string;
   weightKg: string;
-  durationMinutes: string;
-  distanceMiles: string;
+  duration: string;
+  durationUnit: DurationUnit;
+  distance: string;
+  distanceUnit: CardioDistanceUnit;
   score: string;
 };
 
@@ -27,13 +43,17 @@ export function emptyExerciseDraftRow(): ExerciseDraftRow {
     sets: '',
     reps: '',
     weightKg: '',
-    durationMinutes: '',
-    distanceMiles: '',
+    duration: '',
+    durationUnit: DEFAULT_DURATION_UNIT,
+    distance: '',
+    distanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
     score: '',
   };
 }
 
 export function workoutExerciseToDraftRow(exercise: WorkoutExercise, options?: { clientId?: string; sourceExerciseId?: string }): ExerciseDraftRow {
+  const distanceUnit = normalizeCardioDistanceUnit(exercise.distanceUnit);
+  const durationUnit = normalizeDurationUnit(exercise.durationUnit);
   return {
     clientId: options?.clientId ?? newId(),
     sourceExerciseId: options?.sourceExerciseId ?? exercise.id,
@@ -42,8 +62,10 @@ export function workoutExerciseToDraftRow(exercise: WorkoutExercise, options?: {
     sets: String(exercise.sets),
     reps: String(exercise.reps),
     weightKg: String(exercise.weightKg),
-    durationMinutes: exercise.durationMinutes > 0 ? String(exercise.durationMinutes) : '',
-    distanceMiles: exercise.distanceMiles > 0 ? String(exercise.distanceMiles) : '',
+    duration: exercise.duration > 0 ? formatDurationValue(exercise.duration, durationUnit) : '',
+    durationUnit,
+    distance: exercise.distance > 0 ? formatCardioDistanceValue(exercise.distance, distanceUnit) : '',
+    distanceUnit,
     score: exercise.score,
   };
 }
@@ -57,9 +79,9 @@ export function isExerciseDraftRowEmpty(ex: ExerciseDraftRow): boolean {
     case 'strength':
       return !ex.sets.trim() && !ex.reps.trim() && !ex.weightKg.trim();
     case 'cardio':
-      return !ex.durationMinutes.trim() && !ex.distanceMiles.trim();
+      return !ex.duration.trim() && !ex.distance.trim();
     case 'sport':
-      return !ex.durationMinutes.trim() && !ex.score.trim();
+      return !ex.duration.trim() && !ex.score.trim();
     default:
       return true;
   }
@@ -104,29 +126,43 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
         sets: setsCount,
         reps,
         weightKg,
-        durationMinutes: 0,
-        distanceMiles: 0,
+        duration: 0,
+        durationUnit: DEFAULT_DURATION_UNIT,
+        distance: 0,
+        distanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
         score: '',
       },
     };
   }
 
   if (activityType === 'cardio') {
-    const durationMinutes = Number.parseInt(ex.durationMinutes.trim(), 10);
-    const distanceRaw = ex.distanceMiles.trim().replace(',', '.');
-    const distanceMiles = distanceRaw.length > 0 ? Number.parseFloat(distanceRaw) : 0;
-    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+    const durationRaw = ex.duration.trim();
+    const hasDurationInput = durationRaw.length > 0;
+    const hasDistanceInput = ex.distance.trim().length > 0;
+    const durationUnit = normalizeDurationUnit(ex.durationUnit);
+    const distanceUnit = normalizeCardioDistanceUnit(ex.distanceUnit);
+    const duration = parseDurationInput(ex.duration, durationUnit);
+    const distance = parseCardioDistanceInput(ex.distance, distanceUnit);
+
+    if (!hasDurationInput && !hasDistanceInput) {
       return {
         ok: false,
         title: 'Check your numbers',
-        message: 'Cardio exercises need a positive duration in minutes.',
+        message: 'Cardio exercises need a duration, a distance, or both.',
       };
     }
-    if (!Number.isFinite(distanceMiles) || distanceMiles < 0) {
+    if (hasDurationInput && (!Number.isFinite(duration) || duration <= 0)) {
       return {
         ok: false,
         title: 'Check your numbers',
-        message: 'Enter a valid distance in miles, or leave it blank.',
+        message: 'Enter a positive duration.',
+      };
+    }
+    if (hasDistanceInput && (!Number.isFinite(distance) || distance < 0)) {
+      return {
+        ok: false,
+        title: 'Check your numbers',
+        message: 'Enter a valid distance.',
       };
     }
     return {
@@ -138,20 +174,23 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
         sets: 0,
         reps: 0,
         weightKg: 0,
-        durationMinutes,
-        distanceMiles,
+        duration,
+        durationUnit,
+        distance,
+        distanceUnit,
         score: '',
       },
     };
   }
 
-  const durationMinutes = Number.parseInt(ex.durationMinutes.trim(), 10);
+  const durationUnit = normalizeDurationUnit(ex.durationUnit);
+  const duration = parseDurationInput(ex.duration, durationUnit);
   const score = ex.score.trim();
-  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+  if (!Number.isFinite(duration) || duration <= 0) {
     return {
       ok: false,
       title: 'Check your numbers',
-      message: 'Sport activities need a positive duration in minutes.',
+      message: 'Sport activities need a positive duration.',
     };
   }
   return {
@@ -163,8 +202,10 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
       sets: 0,
       reps: 0,
       weightKg: 0,
-      durationMinutes,
-      distanceMiles: 0,
+      duration,
+      durationUnit,
+      distance: 0,
+      distanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
       score,
     },
   };
@@ -172,8 +213,13 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
 
 export type ExerciseDraftSeed = Pick<
   ExerciseDraftRow,
-  'sourceExerciseId' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
->;
+  'sourceExerciseId' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+> & {
+  /** @deprecated Legacy import payloads used distanceMiles. */
+  distanceMiles?: string;
+  /** @deprecated Legacy import payloads used durationMinutes. */
+  durationMinutes?: string;
+};
 
 export function exerciseDraftSeedFromRow(ex: ExerciseDraftRow): ExerciseDraftSeed {
   return {
@@ -183,8 +229,10 @@ export function exerciseDraftSeedFromRow(ex: ExerciseDraftRow): ExerciseDraftSee
     sets: ex.sets,
     reps: ex.reps,
     weightKg: ex.weightKg,
-    durationMinutes: ex.durationMinutes,
-    distanceMiles: ex.distanceMiles,
+    duration: ex.duration,
+    durationUnit: ex.durationUnit,
+    distance: ex.distance,
+    distanceUnit: ex.distanceUnit,
     score: ex.score,
   };
 }
@@ -198,8 +246,10 @@ export function exerciseDraftRowFromSeed(seed: ExerciseDraftSeed): ExerciseDraft
     sets: seed.sets,
     reps: seed.reps,
     weightKg: seed.weightKg,
-    durationMinutes: seed.durationMinutes ?? '',
-    distanceMiles: seed.distanceMiles ?? '',
+    duration: seed.duration ?? seed.durationMinutes ?? '',
+    durationUnit: normalizeDurationUnit(seed.durationUnit),
+    distance: seed.distance ?? seed.distanceMiles ?? '',
+    distanceUnit: normalizeCardioDistanceUnit(seed.distanceUnit),
     score: seed.score ?? '',
   };
 }

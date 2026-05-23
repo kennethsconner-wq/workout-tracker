@@ -15,10 +15,24 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text, View } from '@/components/Themed';
+import { CardioDistanceUnitPicker } from '@/components/CardioDistanceUnitPicker';
+import { DurationUnitPicker } from '@/components/DurationUnitPicker';
 import Colors from '@/constants/Colors';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
 import { activityTypeLabel, formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
+import {
+  DEFAULT_CARDIO_DISTANCE_UNIT,
+  formatCardioDistanceValue,
+  usesIntegerDistanceInput,
+  type CardioDistanceUnit,
+} from '@/lib/cardioDistanceUnits';
+import {
+  DEFAULT_DURATION_UNIT,
+  formatDurationValue,
+  usesIntegerDurationInput,
+  type DurationUnit,
+} from '@/lib/durationUnits';
 import {
   parseWorkoutExerciseFromDraft,
   type ExerciseDraftSeed,
@@ -35,7 +49,7 @@ import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types'
 type RouteSource = 'create' | 'edit';
 type ExerciseListItem = Pick<
   WorkoutExercise,
-  'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+  'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
 > & { key: string };
 type CreateDraftPayload = { title: string; daysOfWeek: DayOfWeek[]; iconId: WorkoutIconId };
 type ImportExercisesPayload = {
@@ -105,7 +119,9 @@ export default function ExerciseLibraryScreen() {
   const [editReps, setEditReps] = useState('');
   const [editWeight, setEditWeight] = useState('');
   const [editDuration, setEditDuration] = useState('');
+  const [editDurationUnit, setEditDurationUnit] = useState<DurationUnit>(DEFAULT_DURATION_UNIT);
   const [editDistance, setEditDistance] = useState('');
+  const [editDistanceUnit, setEditDistanceUnit] = useState<CardioDistanceUnit>(DEFAULT_CARDIO_DISTANCE_UNIT);
   const [editScore, setEditScore] = useState('');
   const [libraryMutationBusy, setLibraryMutationBusy] = useState(false);
 
@@ -115,7 +131,7 @@ export default function ExerciseLibraryScreen() {
     const unique = new Map<string, ExerciseListItem>();
     for (const workout of workouts) {
       for (const exercise of workout.exercises) {
-        const key = `${exercise.activityType}|${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weightKg}|${exercise.durationMinutes}|${exercise.distanceMiles}|${exercise.score}`;
+        const key = `${exercise.activityType}|${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weightKg}|${exercise.duration}|${exercise.durationUnit}|${exercise.distance}|${exercise.distanceUnit}|${exercise.score}`;
         if (!unique.has(key)) {
           unique.set(key, {
             key,
@@ -125,8 +141,10 @@ export default function ExerciseLibraryScreen() {
             sets: exercise.sets,
             reps: exercise.reps,
             weightKg: exercise.weightKg,
-            durationMinutes: exercise.durationMinutes,
-            distanceMiles: exercise.distanceMiles,
+            duration: exercise.duration,
+            durationUnit: exercise.durationUnit,
+            distance: exercise.distance,
+            distanceUnit: exercise.distanceUnit,
             score: exercise.score,
           });
         }
@@ -202,8 +220,10 @@ export default function ExerciseLibraryScreen() {
     setEditSets(String(item.sets));
     setEditReps(String(item.reps));
     setEditWeight(String(item.weightKg));
-    setEditDuration(item.durationMinutes > 0 ? String(item.durationMinutes) : '');
-    setEditDistance(item.distanceMiles > 0 ? String(item.distanceMiles) : '');
+    setEditDuration(item.duration > 0 ? formatDurationValue(item.duration, item.durationUnit) : '');
+    setEditDurationUnit(item.durationUnit);
+    setEditDistance(item.distance > 0 ? formatCardioDistanceValue(item.distance, item.distanceUnit) : '');
+    setEditDistanceUnit(item.distanceUnit);
     setEditScore(item.score);
   }, []);
 
@@ -238,8 +258,10 @@ export default function ExerciseLibraryScreen() {
                   sets: item.sets,
                   reps: item.reps,
                   weightKg: item.weightKg,
-                  durationMinutes: item.durationMinutes,
-                  distanceMiles: item.distanceMiles,
+                  duration: item.duration,
+                  durationUnit: item.durationUnit,
+                  distance: item.distance,
+                  distanceUnit: item.distanceUnit,
                   score: item.score,
                 });
                 await reloadLibrary();
@@ -266,8 +288,10 @@ export default function ExerciseLibraryScreen() {
         sets: editSets,
         reps: editReps,
         weightKg: editWeight,
-        durationMinutes: editDuration,
-        distanceMiles: editDistance,
+        duration: editDuration,
+        durationUnit: editDurationUnit,
+        distance: editDistance,
+        distanceUnit: editDistanceUnit,
         score: editScore,
       },
       editBaseline.id,
@@ -285,8 +309,10 @@ export default function ExerciseLibraryScreen() {
           sets: editBaseline.sets,
           reps: editBaseline.reps,
           weightKg: editBaseline.weightKg,
-          durationMinutes: editBaseline.durationMinutes,
-          distanceMiles: editBaseline.distanceMiles,
+          duration: editBaseline.duration,
+          durationUnit: editBaseline.durationUnit,
+          distance: editBaseline.distance,
+          distanceUnit: editBaseline.distanceUnit,
           score: editBaseline.score,
         },
         parsed.exercise,
@@ -303,7 +329,9 @@ export default function ExerciseLibraryScreen() {
     editReps,
     editWeight,
     editDuration,
+    editDurationUnit,
     editDistance,
+    editDistanceUnit,
     editScore,
     reloadLibrary,
     closeEditForm,
@@ -329,8 +357,10 @@ export default function ExerciseLibraryScreen() {
       sets: String(exercise.sets),
       reps: String(exercise.reps),
       weightKg: String(exercise.weightKg),
-      durationMinutes: exercise.durationMinutes > 0 ? String(exercise.durationMinutes) : '',
-      distanceMiles: exercise.distanceMiles > 0 ? String(exercise.distanceMiles) : '',
+      duration: exercise.duration > 0 ? formatDurationValue(exercise.duration, exercise.durationUnit) : '',
+      durationUnit: exercise.durationUnit,
+      distance: exercise.distance > 0 ? formatCardioDistanceValue(exercise.distance, exercise.distanceUnit) : '',
+      distanceUnit: exercise.distanceUnit,
       score: exercise.score,
     }));
     const importPayload: ImportExercisesPayload = {
@@ -597,73 +627,76 @@ export default function ExerciseLibraryScreen() {
                 </RNView>
               ) : null}
               {editBaseline?.activityType === 'cardio' ? (
-                <RNView style={styles.draftSetRow}>
-                  <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                <RNView style={styles.draftCardioFieldsColumn}>
+                  <View style={styles.draftCardioDurationWrap} lightColor="transparent" darkColor="transparent">
                     <TextInput
                       value={editDuration}
                       onChangeText={setEditDuration}
-                      placeholder="0"
-                      keyboardType="number-pad"
+                      placeholder="Time"
+                      keyboardType={usesIntegerDurationInput(editDurationUnit) ? 'number-pad' : 'decimal-pad'}
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       editable={!libraryMutationBusy}
-                      style={setRowInputStyle}
+                      style={[setRowInputStyle, styles.draftCardioDurationInput]}
                     />
-                    <Text
-                      style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
-                      lightColor="transparent"
-                      darkColor="transparent">
-                      min
-                    </Text>
+                    <DurationUnitPicker
+                      value={editDurationUnit}
+                      onChange={setEditDurationUnit}
+                      disabled={libraryMutationBusy}
+                      borderColor={draftBorderColor}
+                      textColor={textColor}
+                    />
                   </View>
-                  <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                  <View style={styles.draftCardioDistanceWrap} lightColor="transparent" darkColor="transparent">
                     <TextInput
                       value={editDistance}
                       onChangeText={setEditDistance}
-                      placeholder="Optional"
-                      keyboardType="decimal-pad"
+                      placeholder="Distance"
+                      keyboardType={usesIntegerDistanceInput(editDistanceUnit) ? 'number-pad' : 'decimal-pad'}
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       editable={!libraryMutationBusy}
-                      style={setRowInputStyle}
+                      style={[setRowInputStyle, styles.draftCardioDistanceInput]}
                     />
-                    <Text
-                      style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
-                      lightColor="transparent"
-                      darkColor="transparent">
-                      mi
-                    </Text>
+                    <CardioDistanceUnitPicker
+                      value={editDistanceUnit}
+                      onChange={setEditDistanceUnit}
+                      disabled={libraryMutationBusy}
+                      borderColor={draftBorderColor}
+                      textColor={textColor}
+                    />
                   </View>
                 </RNView>
               ) : null}
               {editBaseline?.activityType === 'sport' ? (
-                <>
-                  <RNView style={styles.draftSetRow}>
-                    <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
-                      <TextInput
-                        value={editDuration}
-                        onChangeText={setEditDuration}
-                        placeholder="0"
-                        keyboardType="number-pad"
-                        placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                        editable={!libraryMutationBusy}
-                        style={setRowInputStyle}
-                      />
-                      <Text
-                        style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
-                        lightColor="transparent"
-                        darkColor="transparent">
-                        min
-                      </Text>
-                    </View>
-                  </RNView>
-                  <TextInput
-                    value={editScore}
-                    onChangeText={setEditScore}
-                    placeholder="Score (optional)"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    editable={!libraryMutationBusy}
-                    style={exerciseNameInputStyle}
-                  />
-                </>
+                <RNView style={styles.draftSetRow}>
+                  <View style={styles.draftCardioDurationWrap} lightColor="transparent" darkColor="transparent">
+                    <TextInput
+                      value={editDuration}
+                      onChangeText={setEditDuration}
+                      placeholder="Time"
+                      keyboardType={usesIntegerDurationInput(editDurationUnit) ? 'number-pad' : 'decimal-pad'}
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      editable={!libraryMutationBusy}
+                      style={[setRowInputStyle, styles.draftCardioDurationInput]}
+                    />
+                    <DurationUnitPicker
+                      value={editDurationUnit}
+                      onChange={setEditDurationUnit}
+                      disabled={libraryMutationBusy}
+                      borderColor={draftBorderColor}
+                      textColor={textColor}
+                    />
+                  </View>
+                  <View style={[styles.draftUnitInputWrap, styles.draftScoreInputWrap]} lightColor="transparent" darkColor="transparent">
+                    <TextInput
+                      value={editScore}
+                      onChangeText={setEditScore}
+                      placeholder="Score (optional)"
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      editable={!libraryMutationBusy}
+                      style={setRowInputStyle}
+                    />
+                  </View>
+                </RNView>
               ) : null}
               <Pressable
                 onPress={() => void saveEditedExercise()}
@@ -850,6 +883,41 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     minWidth: 80,
     position: 'relative',
+  },
+  draftDurationInputWrap: {
+    flexGrow: 0,
+    flexShrink: 0,
+    width: 108,
+    minWidth: 108,
+    maxWidth: 108,
+  },
+  draftCardioFieldsColumn: {
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  draftCardioDurationWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  draftCardioDurationInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  draftCardioDistanceWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  draftCardioDistanceInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  draftScoreInputWrap: {
+    flex: 1,
+    minWidth: 0,
   },
   draftUnitSuffix: {
     position: 'absolute',

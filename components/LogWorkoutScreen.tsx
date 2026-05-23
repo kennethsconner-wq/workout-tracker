@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 
 import { SessionDateTimeField } from '@/components/SessionDateTimeField';
+import { CardioDistanceUnitPicker } from '@/components/CardioDistanceUnitPicker';
+import { DurationUnitPicker } from '@/components/DurationUnitPicker';
 import { StickySaveFooter } from '@/components/StickySaveFooter';
 import { Text, View } from '@/components/Themed';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
@@ -29,6 +31,18 @@ import { newId } from '@/lib/ids';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import type { LoggedWorkout, LoggedWorkoutExercise, Workout } from '@/lib/types';
 import { normalizeActivityType } from '@/lib/activityTypes';
+import {
+  formatCardioDistanceValue,
+  normalizeCardioDistanceUnit,
+  usesIntegerDistanceInput,
+  type CardioDistanceUnit,
+} from '@/lib/cardioDistanceUnits';
+import {
+  formatDurationValue,
+  normalizeDurationUnit,
+  usesIntegerDurationInput,
+  type DurationUnit,
+} from '@/lib/durationUnits';
 import { formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
 import { hasLoggedExerciseInput, parseLoggedExerciseFromDraft } from '@/lib/logExerciseDraft';
 import { clearNewLogDraft, isNewLogFormPristine, newLogDraftStorageKey } from '@/lib/logWorkoutDraft';
@@ -43,11 +57,13 @@ type DraftActualSet = {
 
 type DraftExercise = Omit<
   LoggedWorkoutExercise,
-  'actualSets' | 'actualDurationMinutes' | 'actualDistanceMiles' | 'actualScore'
+  'actualSets' | 'actualDuration' | 'actualDistance' | 'actualScore'
 > & {
   actualSets: DraftActualSet[];
-  actualDurationMinutesInput: string;
-  actualDistanceMilesInput: string;
+  actualDurationInput: string;
+  actualDurationUnit: DurationUnit;
+  actualDistanceInput: string;
+  actualDistanceUnit: CardioDistanceUnit;
   actualScoreInput: string;
 };
 
@@ -93,11 +109,11 @@ function loggedActualToDraftSet(as: LoggedWorkoutExercise['actualSets'][number])
 }
 
 function hasCardioActualValues(exercise: DraftExercise): boolean {
-  return exercise.actualDurationMinutesInput.trim().length > 0 || exercise.actualDistanceMilesInput.trim().length > 0;
+  return exercise.actualDurationInput.trim().length > 0 || exercise.actualDistanceInput.trim().length > 0;
 }
 
 function hasSportActualValues(exercise: DraftExercise): boolean {
-  return exercise.actualDurationMinutesInput.trim().length > 0 || exercise.actualScoreInput.trim().length > 0;
+  return exercise.actualDurationInput.trim().length > 0 || exercise.actualScoreInput.trim().length > 0;
 }
 
 function loggedExerciseToDraftExercise(loggedExercise: LoggedWorkoutExercise): DraftExercise {
@@ -109,17 +125,25 @@ function loggedExerciseToDraftExercise(loggedExercise: LoggedWorkoutExercise): D
     sets: loggedExercise.sets,
     reps: loggedExercise.reps,
     weightKg: loggedExercise.weightKg,
-    durationMinutes: loggedExercise.durationMinutes,
-    distanceMiles: loggedExercise.distanceMiles,
+    duration: loggedExercise.duration,
+    durationUnit: loggedExercise.durationUnit,
+    distance: loggedExercise.distance,
+    distanceUnit: loggedExercise.distanceUnit,
     score: loggedExercise.score,
     actualSets:
       loggedExercise.activityType === 'strength'
         ? loggedExercise.actualSets.map((actualSet) => loggedActualToDraftSet(actualSet))
         : [],
-    actualDurationMinutesInput:
-      loggedExercise.actualDurationMinutes > 0 ? String(loggedExercise.actualDurationMinutes) : '',
-    actualDistanceMilesInput:
-      loggedExercise.actualDistanceMiles > 0 ? String(loggedExercise.actualDistanceMiles) : '',
+    actualDurationInput:
+      loggedExercise.actualDuration > 0
+        ? formatDurationValue(loggedExercise.actualDuration, loggedExercise.actualDurationUnit)
+        : '',
+    actualDurationUnit: loggedExercise.actualDurationUnit,
+    actualDistanceInput:
+      loggedExercise.actualDistance > 0
+        ? formatCardioDistanceValue(loggedExercise.actualDistance, loggedExercise.actualDistanceUnit)
+        : '',
+    actualDistanceUnit: loggedExercise.actualDistanceUnit,
     actualScoreInput: loggedExercise.actualScore,
   };
 }
@@ -133,12 +157,16 @@ function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): 
     sets: exercise.sets,
     reps: exercise.reps,
     weightKg: exercise.weightKg,
-    durationMinutes: exercise.durationMinutes,
-    distanceMiles: exercise.distanceMiles,
+    duration: exercise.duration,
+    durationUnit: exercise.durationUnit,
+    distance: exercise.distance,
+    distanceUnit: exercise.distanceUnit,
     score: exercise.score,
     actualSets: [],
-    actualDurationMinutesInput: '',
-    actualDistanceMilesInput: '',
+    actualDurationInput: '',
+    actualDurationUnit: exercise.durationUnit,
+    actualDistanceInput: '',
+    actualDistanceUnit: exercise.distanceUnit,
     actualScoreInput: '',
   };
 
@@ -227,12 +255,52 @@ function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
       sets: o.sets,
       reps: o.reps,
       weightKg: o.weightKg,
-      durationMinutes: typeof o.durationMinutes === 'number' ? o.durationMinutes : 0,
-      distanceMiles: typeof o.distanceMiles === 'number' ? o.distanceMiles : 0,
+      duration:
+        typeof o.duration === 'number'
+          ? o.duration
+          : typeof o.durationMinutes === 'number'
+            ? o.durationMinutes
+            : 0,
+      durationUnit:
+        typeof o.durationUnit === 'string'
+          ? normalizeDurationUnit(o.durationUnit)
+          : normalizeDurationUnit(undefined),
+      distance:
+        typeof o.distance === 'number'
+          ? o.distance
+          : typeof o.distanceMiles === 'number'
+            ? o.distanceMiles
+            : 0,
+      distanceUnit:
+        typeof o.distanceUnit === 'string'
+          ? normalizeCardioDistanceUnit(o.distanceUnit)
+          : normalizeCardioDistanceUnit(undefined),
       score: typeof o.score === 'string' ? o.score : '',
       actualSets,
-      actualDurationMinutesInput: typeof o.actualDurationMinutesInput === 'string' ? o.actualDurationMinutesInput : '',
-      actualDistanceMilesInput: typeof o.actualDistanceMilesInput === 'string' ? o.actualDistanceMilesInput : '',
+      actualDurationInput:
+        typeof o.actualDurationInput === 'string'
+          ? o.actualDurationInput
+          : typeof o.actualDurationMinutesInput === 'string'
+            ? o.actualDurationMinutesInput
+            : '',
+      actualDurationUnit:
+        typeof o.actualDurationUnit === 'string'
+          ? normalizeDurationUnit(o.actualDurationUnit)
+          : typeof o.durationUnit === 'string'
+            ? normalizeDurationUnit(o.durationUnit)
+            : normalizeDurationUnit(undefined),
+      actualDistanceInput:
+        typeof o.actualDistanceInput === 'string'
+          ? o.actualDistanceInput
+          : typeof o.actualDistanceMilesInput === 'string'
+            ? o.actualDistanceMilesInput
+            : '',
+      actualDistanceUnit:
+        typeof o.actualDistanceUnit === 'string'
+          ? normalizeCardioDistanceUnit(o.actualDistanceUnit)
+          : typeof o.distanceUnit === 'string'
+            ? normalizeCardioDistanceUnit(o.distanceUnit)
+            : normalizeCardioDistanceUnit(undefined),
       actualScoreInput: typeof o.actualScoreInput === 'string' ? o.actualScoreInput : '',
     });
   }
@@ -265,8 +333,10 @@ function normalizeDraftExercises(
         sets: exercise.sets,
         reps: exercise.reps,
         weightKg: exercise.weightKg,
-        durationMinutes: exercise.durationMinutes,
-        distanceMiles: exercise.distanceMiles,
+        duration: exercise.duration,
+        durationUnit: exercise.durationUnit,
+        distance: exercise.distance,
+        distanceUnit: exercise.distanceUnit,
         score: exercise.score,
         actualSets:
           exercise.activityType === 'strength'
@@ -280,10 +350,26 @@ function normalizeDraftExercises(
                 };
               })
             : [],
-        actualDurationMinutesInput:
-          typeof saved?.actualDurationMinutesInput === 'string' ? saved.actualDurationMinutesInput : '',
-        actualDistanceMilesInput:
-          typeof saved?.actualDistanceMilesInput === 'string' ? saved.actualDistanceMilesInput : '',
+        actualDurationInput:
+          typeof saved?.actualDurationInput === 'string'
+            ? saved.actualDurationInput
+            : typeof (saved as unknown as { actualDurationMinutesInput?: string } | undefined)?.actualDurationMinutesInput === 'string'
+              ? (saved as unknown as { actualDurationMinutesInput: string }).actualDurationMinutesInput
+              : '',
+        actualDurationUnit:
+          typeof saved?.actualDurationUnit === 'string'
+            ? normalizeDurationUnit(saved.actualDurationUnit)
+            : exercise.durationUnit,
+        actualDistanceInput:
+          typeof saved?.actualDistanceInput === 'string'
+            ? saved.actualDistanceInput
+            : typeof (saved as unknown as { actualDistanceMilesInput?: string } | undefined)?.actualDistanceMilesInput === 'string'
+              ? (saved as unknown as { actualDistanceMilesInput: string }).actualDistanceMilesInput
+              : '',
+        actualDistanceUnit:
+          typeof saved?.actualDistanceUnit === 'string'
+            ? normalizeCardioDistanceUnit(saved.actualDistanceUnit)
+            : exercise.distanceUnit,
         actualScoreInput: typeof saved?.actualScoreInput === 'string' ? saved.actualScoreInput : '',
       };
     });
@@ -594,11 +680,23 @@ export default function LogWorkoutScreen() {
 
   const updateExerciseActualField = (
     exerciseId: string,
-    field: 'actualDurationMinutesInput' | 'actualDistanceMilesInput' | 'actualScoreInput',
+    field: 'actualDurationInput' | 'actualDistanceInput' | 'actualScoreInput',
     value: string,
   ) => {
     setExercises((prev) =>
       prev.map((ex) => (ex.id === exerciseId ? { ...ex, [field]: value } : ex)),
+    );
+  };
+
+  const updateExerciseActualDurationUnit = (exerciseId: string, unit: DurationUnit) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.id === exerciseId ? { ...ex, actualDurationUnit: unit } : ex)),
+    );
+  };
+
+  const updateExerciseActualDistanceUnit = (exerciseId: string, unit: CardioDistanceUnit) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.id === exerciseId ? { ...ex, actualDistanceUnit: unit } : ex)),
     );
   };
 
@@ -609,12 +707,16 @@ export default function LogWorkoutScreen() {
           return ex;
         }
         if (hasCardioActualValues(ex)) {
-          return { ...ex, actualDurationMinutesInput: '', actualDistanceMilesInput: '' };
+          return { ...ex, actualDurationInput: '', actualDistanceInput: '' };
         }
         return {
           ...ex,
-          actualDurationMinutesInput: ex.durationMinutes > 0 ? String(ex.durationMinutes) : '',
-          actualDistanceMilesInput: ex.distanceMiles > 0 ? String(ex.distanceMiles) : '',
+          actualDurationInput:
+            ex.duration > 0 ? formatDurationValue(ex.duration, ex.durationUnit) : '',
+          actualDurationUnit: ex.durationUnit,
+          actualDistanceInput:
+            ex.distance > 0 ? formatCardioDistanceValue(ex.distance, ex.distanceUnit) : '',
+          actualDistanceUnit: ex.distanceUnit,
         };
       }),
     );
@@ -627,11 +729,13 @@ export default function LogWorkoutScreen() {
           return ex;
         }
         if (hasSportActualValues(ex)) {
-          return { ...ex, actualDurationMinutesInput: '', actualScoreInput: '' };
+          return { ...ex, actualDurationInput: '', actualScoreInput: '' };
         }
         return {
           ...ex,
-          actualDurationMinutesInput: ex.durationMinutes > 0 ? String(ex.durationMinutes) : '',
+          actualDurationInput:
+            ex.duration > 0 ? formatDurationValue(ex.duration, ex.durationUnit) : '',
+          actualDurationUnit: ex.durationUnit,
           actualScoreInput: ex.score,
         };
       }),
@@ -650,8 +754,10 @@ export default function LogWorkoutScreen() {
         {
           activityType: ex.activityType,
           actualSets: ex.actualSets,
-          actualDurationMinutesInput: ex.actualDurationMinutesInput,
-          actualDistanceMilesInput: ex.actualDistanceMilesInput,
+          actualDurationInput: ex.actualDurationInput,
+          actualDurationUnit: ex.actualDurationUnit,
+          actualDistanceInput: ex.actualDistanceInput,
+          actualDistanceUnit: ex.actualDistanceUnit,
           actualScoreInput: ex.actualScoreInput,
         },
         ex.name,
@@ -669,8 +775,10 @@ export default function LogWorkoutScreen() {
         sets: ex.sets,
         reps: ex.reps,
         weightKg: ex.weightKg,
-        durationMinutes: ex.durationMinutes,
-        distanceMiles: ex.distanceMiles,
+        duration: ex.duration,
+        durationUnit: ex.durationUnit,
+        distance: ex.distance,
+        distanceUnit: ex.distanceUnit,
         score: ex.score,
         ...parsedActual.exercise,
       });
@@ -929,38 +1037,48 @@ export default function LogWorkoutScreen() {
                       color={Colors[activeScheme].tint}
                     />
                   </Pressable>
-                  <View style={styles.setRow}>
-                    <View style={styles.unitInputWrap}>
+                  <View style={[styles.cardioFieldsColumn, styles.flexField]}>
+                    <View style={styles.cardioDurationRow}>
                       <TextInput
-                        value={exercise.actualDurationMinutesInput}
-                        onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationMinutesInput', value)}
-                        placeholder="0"
-                        keyboardType="number-pad"
+                        value={exercise.actualDurationInput}
+                        onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
+                        placeholder="Time"
+                        keyboardType={usesIntegerDurationInput(exercise.actualDurationUnit) ? 'number-pad' : 'decimal-pad'}
                         placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                         style={[
                           styles.input,
                           styles.setInput,
-                          styles.unitInput,
+                          styles.cardioDurationInput,
                           { color: textColor, borderColor, backgroundColor: inputBackground },
                         ]}
                       />
-                      <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>min</Text>
+                      <DurationUnitPicker
+                        value={exercise.actualDurationUnit}
+                        onChange={(unit) => updateExerciseActualDurationUnit(exercise.id, unit)}
+                        borderColor={borderColor}
+                        textColor={textColor}
+                      />
                     </View>
-                    <View style={styles.unitInputWrap}>
+                    <View style={styles.cardioDistanceRow}>
                       <TextInput
-                        value={exercise.actualDistanceMilesInput}
-                        onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDistanceMilesInput', value)}
-                        placeholder="Optional"
-                        keyboardType="decimal-pad"
+                        value={exercise.actualDistanceInput}
+                        onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDistanceInput', value)}
+                        placeholder="Distance"
+                        keyboardType={usesIntegerDistanceInput(exercise.actualDistanceUnit) ? 'number-pad' : 'decimal-pad'}
                         placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                         style={[
                           styles.input,
                           styles.setInput,
-                          styles.unitInput,
+                          styles.cardioDistanceInput,
                           { color: textColor, borderColor, backgroundColor: inputBackground },
                         ]}
                       />
-                      <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>mi</Text>
+                      <CardioDistanceUnitPicker
+                        value={exercise.actualDistanceUnit}
+                        onChange={(unit) => updateExerciseActualDistanceUnit(exercise.id, unit)}
+                        borderColor={borderColor}
+                        textColor={textColor}
+                      />
                     </View>
                   </View>
                 </View>
@@ -968,44 +1086,56 @@ export default function LogWorkoutScreen() {
             ) : null}
 
             {exercise.activityType === 'sport' ? (
-              <View style={styles.fieldColumn}>
-                <View style={styles.setRowWithCheckbox}>
-                  <Pressable
-                    accessibilityRole="checkbox"
-                    accessibilityLabel="Use planned duration and score"
-                    accessibilityState={{ checked: hasSportActualValues(exercise) }}
-                    onPress={() => toggleSportPlannedValues(exercise.id)}
-                    style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
-                    hitSlop={8}>
-                    <Ionicons
-                      name={hasSportActualValues(exercise) ? 'checkbox' : 'square-outline'}
-                      size={22}
-                      color={Colors[activeScheme].tint}
-                    />
-                  </Pressable>
-                  <View style={[styles.unitInputWrap, styles.flexField]}>
+              <View style={styles.setRowWithCheckbox}>
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityLabel="Use planned duration and score"
+                  accessibilityState={{ checked: hasSportActualValues(exercise) }}
+                  onPress={() => toggleSportPlannedValues(exercise.id)}
+                  style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                  hitSlop={8}>
+                  <Ionicons
+                    name={hasSportActualValues(exercise) ? 'checkbox' : 'square-outline'}
+                    size={22}
+                    color={Colors[activeScheme].tint}
+                  />
+                </Pressable>
+                <View style={styles.setRow}>
+                  <View style={[styles.cardioDurationRow, styles.durationInputWrap]}>
                     <TextInput
-                      value={exercise.actualDurationMinutesInput}
-                      onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationMinutesInput', value)}
-                      placeholder="0"
-                      keyboardType="number-pad"
+                      value={exercise.actualDurationInput}
+                      onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
+                      placeholder="Time"
+                      keyboardType={usesIntegerDurationInput(exercise.actualDurationUnit) ? 'number-pad' : 'decimal-pad'}
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       style={[
                         styles.input,
-                        styles.unitInput,
+                        styles.setInput,
+                        styles.cardioDurationInput,
                         { color: textColor, borderColor, backgroundColor: inputBackground },
                       ]}
                     />
-                    <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>min</Text>
+                    <DurationUnitPicker
+                      value={exercise.actualDurationUnit}
+                      onChange={(unit) => updateExerciseActualDurationUnit(exercise.id, unit)}
+                      borderColor={borderColor}
+                      textColor={textColor}
+                    />
+                  </View>
+                  <View style={[styles.unitInputWrap, styles.scoreInputWrap]}>
+                    <TextInput
+                      value={exercise.actualScoreInput}
+                      onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualScoreInput', value)}
+                      placeholder="Score (optional)"
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      style={[
+                        styles.input,
+                        styles.setInput,
+                        { color: textColor, borderColor, backgroundColor: inputBackground },
+                      ]}
+                    />
                   </View>
                 </View>
-                <TextInput
-                  value={exercise.actualScoreInput}
-                  onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualScoreInput', value)}
-                  placeholder="Score (optional)"
-                  placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                  style={[styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }]}
-                />
               </View>
             ) : null}
           </View>
@@ -1029,7 +1159,41 @@ const styles = StyleSheet.create({
   fieldColumn: {
     gap: 10,
   },
+  scoreInputWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  durationInputWrap: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  cardioFieldsColumn: {
+    flex: 1,
+    minWidth: 0,
+    gap: 8,
+  },
+  cardioDurationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  cardioDurationInput: {
+    flex: 1,
+    minWidth: 0,
+  },
   flexField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardioDistanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  cardioDistanceInput: {
     flex: 1,
     minWidth: 0,
   },

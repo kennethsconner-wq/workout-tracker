@@ -1,16 +1,36 @@
 import type { ActivityType } from '@/lib/activityTypes';
+import {
+  DEFAULT_CARDIO_DISTANCE_UNIT,
+  normalizeCardioDistanceUnit,
+  parseCardioDistanceInput,
+  type CardioDistanceUnit,
+} from '@/lib/cardioDistanceUnits';
+import {
+  DEFAULT_DURATION_UNIT,
+  normalizeDurationUnit,
+  parseDurationInput,
+  type DurationUnit,
+} from '@/lib/durationUnits';
 import type { LoggedWorkoutExercise } from '@/lib/types';
 
 export type LogExerciseDraftFields = {
   activityType: ActivityType;
   actualSets: Array<{ actualRepsInput: string; actualWeightKgInput: string }>;
-  actualDurationMinutesInput: string;
-  actualDistanceMilesInput: string;
+  actualDurationInput: string;
+  actualDurationUnit: DurationUnit;
+  actualDistanceInput: string;
+  actualDistanceUnit: CardioDistanceUnit;
   actualScoreInput: string;
 };
 
 export type ParseLoggedExerciseResult =
-  | { ok: true; exercise: Pick<LoggedWorkoutExercise, 'actualSets' | 'actualDurationMinutes' | 'actualDistanceMiles' | 'actualScore'> }
+  | {
+      ok: true;
+      exercise: Pick<
+        LoggedWorkoutExercise,
+        'actualSets' | 'actualDuration' | 'actualDurationUnit' | 'actualDistance' | 'actualDistanceUnit' | 'actualScore'
+      >;
+    }
   | { ok: false; title: string; message: string };
 
 export function hasLoggedExerciseInput(exercise: LogExerciseDraftFields): boolean {
@@ -20,9 +40,9 @@ export function hasLoggedExerciseInput(exercise: LogExerciseDraftFields): boolea
         (set) => set.actualRepsInput.trim().length > 0 || set.actualWeightKgInput.trim().length > 0,
       );
     case 'cardio':
-      return exercise.actualDurationMinutesInput.trim().length > 0 || exercise.actualDistanceMilesInput.trim().length > 0;
+      return exercise.actualDurationInput.trim().length > 0 || exercise.actualDistanceInput.trim().length > 0;
     case 'sport':
-      return exercise.actualDurationMinutesInput.trim().length > 0 || exercise.actualScoreInput.trim().length > 0;
+      return exercise.actualDurationInput.trim().length > 0 || exercise.actualScoreInput.trim().length > 0;
     default:
       return false;
   }
@@ -61,30 +81,43 @@ export function parseLoggedExerciseFromDraft(
       ok: true,
       exercise: {
         actualSets: parsedActualSets,
-        actualDurationMinutes: 0,
-        actualDistanceMiles: 0,
+        actualDuration: 0,
+        actualDurationUnit: DEFAULT_DURATION_UNIT,
+        actualDistance: 0,
+        actualDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
         actualScore: '',
       },
     };
   }
 
   if (exercise.activityType === 'cardio') {
-    const actualDurationMinutes = Number.parseInt(exercise.actualDurationMinutesInput.trim(), 10);
-    const distanceRaw = exercise.actualDistanceMilesInput.trim().replace(',', '.');
-    const actualDistanceMiles = distanceRaw.length > 0 ? Number.parseFloat(distanceRaw) : 0;
+    const durationRaw = exercise.actualDurationInput.trim();
+    const hasDurationInput = durationRaw.length > 0;
+    const hasDistanceInput = exercise.actualDistanceInput.trim().length > 0;
+    const actualDurationUnit = normalizeDurationUnit(exercise.actualDurationUnit);
+    const actualDistanceUnit = normalizeCardioDistanceUnit(exercise.actualDistanceUnit);
+    const actualDuration = parseDurationInput(exercise.actualDurationInput, actualDurationUnit);
+    const actualDistance = parseCardioDistanceInput(exercise.actualDistanceInput, actualDistanceUnit);
 
-    if (!Number.isFinite(actualDurationMinutes) || actualDurationMinutes <= 0) {
+    if (!hasDurationInput && !hasDistanceInput) {
       return {
         ok: false,
         title: 'Check your numbers',
-        message: `Enter a positive duration in minutes for "${exerciseName}".`,
+        message: `"${exerciseName}" needs a duration, a distance, or both.`,
       };
     }
-    if (!Number.isFinite(actualDistanceMiles) || actualDistanceMiles < 0) {
+    if (hasDurationInput && (!Number.isFinite(actualDuration) || actualDuration <= 0)) {
       return {
         ok: false,
         title: 'Check your numbers',
-        message: `Enter a valid distance in miles for "${exerciseName}", or leave it blank.`,
+        message: `Enter a positive duration for "${exerciseName}".`,
+      };
+    }
+    if (hasDistanceInput && (!Number.isFinite(actualDistance) || actualDistance < 0)) {
+      return {
+        ok: false,
+        title: 'Check your numbers',
+        message: `Enter a valid distance for "${exerciseName}".`,
       };
     }
 
@@ -92,20 +125,23 @@ export function parseLoggedExerciseFromDraft(
       ok: true,
       exercise: {
         actualSets: [],
-        actualDurationMinutes,
-        actualDistanceMiles,
+        actualDuration,
+        actualDurationUnit,
+        actualDistance,
+        actualDistanceUnit,
         actualScore: '',
       },
     };
   }
 
-  const actualDurationMinutes = Number.parseInt(exercise.actualDurationMinutesInput.trim(), 10);
+  const actualDurationUnit = normalizeDurationUnit(exercise.actualDurationUnit);
+  const actualDuration = parseDurationInput(exercise.actualDurationInput, actualDurationUnit);
   const actualScore = exercise.actualScoreInput.trim();
-  if (!Number.isFinite(actualDurationMinutes) || actualDurationMinutes <= 0) {
+  if (!Number.isFinite(actualDuration) || actualDuration <= 0) {
     return {
       ok: false,
       title: 'Check your numbers',
-      message: `Enter a positive duration in minutes for "${exerciseName}".`,
+      message: `Enter a positive duration for "${exerciseName}".`,
     };
   }
 
@@ -113,8 +149,10 @@ export function parseLoggedExerciseFromDraft(
     ok: true,
     exercise: {
       actualSets: [],
-      actualDurationMinutes,
-      actualDistanceMiles: 0,
+      actualDuration,
+      actualDurationUnit,
+      actualDistance: 0,
+      actualDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
       actualScore,
     },
   };

@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { normalizeActivityType } from '@/lib/activityTypes';
+import { DEFAULT_CARDIO_DISTANCE_UNIT, normalizeCardioDistanceUnit } from '@/lib/cardioDistanceUnits';
+import { DEFAULT_DURATION_UNIT, normalizeDurationUnit } from '@/lib/durationUnits';
 import { newId } from '@/lib/ids';
 import { normalizeWorkoutIconId } from '@/lib/workoutIcons';
 import {
@@ -17,6 +19,40 @@ function isDayOfWeek(value: string): value is DayOfWeek {
 
 const LEGACY_TITLE_DAY_RE = new RegExp(`^(.+?)\\s+\\((${DAYS_OF_WEEK.join('|')})\\)$`);
 
+function readExerciseDistance(exercise: Record<string, unknown>): number {
+  if (typeof exercise.distance === 'number') {
+    return exercise.distance;
+  }
+  if (typeof exercise.distanceMiles === 'number') {
+    return exercise.distanceMiles;
+  }
+  return 0;
+}
+
+function readExerciseDistanceUnit(exercise: Record<string, unknown>): ReturnType<typeof normalizeCardioDistanceUnit> {
+  if (typeof exercise.distanceUnit === 'string') {
+    return normalizeCardioDistanceUnit(exercise.distanceUnit);
+  }
+  return DEFAULT_CARDIO_DISTANCE_UNIT;
+}
+
+function readExerciseDuration(exercise: Record<string, unknown>): number {
+  if (typeof exercise.duration === 'number') {
+    return exercise.duration;
+  }
+  if (typeof exercise.durationMinutes === 'number') {
+    return exercise.durationMinutes;
+  }
+  return 0;
+}
+
+function readExerciseDurationUnit(exercise: Record<string, unknown>): ReturnType<typeof normalizeDurationUnit> {
+  if (typeof exercise.durationUnit === 'string') {
+    return normalizeDurationUnit(exercise.durationUnit);
+  }
+  return DEFAULT_DURATION_UNIT;
+}
+
 function normalizeWorkoutExercise(raw: unknown): WorkoutExercise {
   const exercise = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   return {
@@ -26,8 +62,10 @@ function normalizeWorkoutExercise(raw: unknown): WorkoutExercise {
     sets: typeof exercise.sets === 'number' ? exercise.sets : 0,
     reps: typeof exercise.reps === 'number' ? exercise.reps : 0,
     weightKg: typeof exercise.weightKg === 'number' ? exercise.weightKg : 0,
-    durationMinutes: typeof exercise.durationMinutes === 'number' ? exercise.durationMinutes : 0,
-    distanceMiles: typeof exercise.distanceMiles === 'number' ? exercise.distanceMiles : 0,
+    duration: readExerciseDuration(exercise),
+    durationUnit: readExerciseDurationUnit(exercise),
+    distance: readExerciseDistance(exercise),
+    distanceUnit: readExerciseDistanceUnit(exercise),
     score: typeof exercise.score === 'string' ? exercise.score : '',
   };
 }
@@ -130,24 +168,32 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
             typeof (exercise as { weightKg?: unknown }).weightKg === 'number'
               ? (exercise as { weightKg: number }).weightKg
               : legacyPlannedWeight,
-          durationMinutes:
-            typeof (exercise as { durationMinutes?: unknown }).durationMinutes === 'number'
-              ? (exercise as { durationMinutes: number }).durationMinutes
-              : 0,
-          distanceMiles:
-            typeof (exercise as { distanceMiles?: unknown }).distanceMiles === 'number'
-              ? (exercise as { distanceMiles: number }).distanceMiles
-              : 0,
+          duration: readExerciseDuration(exercise as Record<string, unknown>),
+          durationUnit: readExerciseDurationUnit(exercise as Record<string, unknown>),
+          distance: readExerciseDistance(exercise as Record<string, unknown>),
+          distanceUnit: readExerciseDistanceUnit(exercise as Record<string, unknown>),
           score: typeof (exercise as { score?: unknown }).score === 'string' ? (exercise as { score: string }).score : '',
           actualSets: normalizedActualSets,
-          actualDurationMinutes:
-            typeof (exercise as { actualDurationMinutes?: unknown }).actualDurationMinutes === 'number'
-              ? (exercise as { actualDurationMinutes: number }).actualDurationMinutes
-              : 0,
-          actualDistanceMiles:
-            typeof (exercise as { actualDistanceMiles?: unknown }).actualDistanceMiles === 'number'
-              ? (exercise as { actualDistanceMiles: number }).actualDistanceMiles
-              : 0,
+          actualDuration:
+            typeof (exercise as { actualDuration?: unknown }).actualDuration === 'number'
+              ? (exercise as { actualDuration: number }).actualDuration
+              : typeof (exercise as unknown as { actualDurationMinutes?: unknown }).actualDurationMinutes === 'number'
+                ? (exercise as unknown as { actualDurationMinutes: number }).actualDurationMinutes
+                : 0,
+          actualDurationUnit:
+            typeof (exercise as { actualDurationUnit?: unknown }).actualDurationUnit === 'string'
+              ? normalizeDurationUnit((exercise as { actualDurationUnit: string }).actualDurationUnit)
+              : readExerciseDurationUnit(exercise as Record<string, unknown>),
+          actualDistance:
+            typeof (exercise as { actualDistance?: unknown }).actualDistance === 'number'
+              ? (exercise as { actualDistance: number }).actualDistance
+              : typeof (exercise as unknown as { actualDistanceMiles?: unknown }).actualDistanceMiles === 'number'
+                ? (exercise as unknown as { actualDistanceMiles: number }).actualDistanceMiles
+                : 0,
+          actualDistanceUnit:
+            typeof (exercise as { actualDistanceUnit?: unknown }).actualDistanceUnit === 'string'
+              ? normalizeCardioDistanceUnit((exercise as { actualDistanceUnit: string }).actualDistanceUnit)
+              : readExerciseDistanceUnit(exercise as Record<string, unknown>),
           actualScore:
             typeof (exercise as { actualScore?: unknown }).actualScore === 'string'
               ? (exercise as { actualScore: string }).actualScore
@@ -317,7 +363,7 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
   exercises: Array<
     Pick<
       WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
     >
   >,
 ): Promise<void> {
@@ -340,8 +386,10 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
         sets: definition.sets,
         reps: definition.reps,
         weightKg: definition.weightKg,
-        durationMinutes: definition.durationMinutes,
-        distanceMiles: definition.distanceMiles,
+        duration: definition.duration,
+        durationUnit: definition.durationUnit,
+        distance: definition.distance,
+        distanceUnit: definition.distanceUnit,
         score: definition.score,
       };
     }),
@@ -352,11 +400,11 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
 function matchesExerciseDefinition(
   ex: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
   >,
   def: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
   >,
 ): boolean {
   return (
@@ -365,8 +413,10 @@ function matchesExerciseDefinition(
     ex.sets === def.sets &&
     ex.reps === def.reps &&
     ex.weightKg === def.weightKg &&
-    ex.durationMinutes === def.durationMinutes &&
-    ex.distanceMiles === def.distanceMiles &&
+    ex.duration === def.duration &&
+    ex.durationUnit === def.durationUnit &&
+    ex.distance === def.distance &&
+    ex.distanceUnit === def.distanceUnit &&
     ex.score === def.score
   );
 }
@@ -378,18 +428,18 @@ function matchesExerciseDefinition(
 export async function updateExercisesMatchingSignatureAcrossWorkouts(
   oldDef: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
   >,
   nextDef: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
   >,
 ): Promise<void> {
   const all = await loadWorkouts();
   const updates: Array<
     Pick<
       WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
     >
   > = [];
   const affectedIds = new Set<string>();
@@ -417,8 +467,10 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
             sets: nextDef.sets,
             reps: nextDef.reps,
             weightKg: nextDef.weightKg,
-            durationMinutes: nextDef.durationMinutes,
-            distanceMiles: nextDef.distanceMiles,
+            duration: nextDef.duration,
+            durationUnit: nextDef.durationUnit,
+            distance: nextDef.distance,
+            distanceUnit: nextDef.distanceUnit,
             score: nextDef.score,
           }
         : lex,
@@ -431,7 +483,7 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
 export async function removeExercisesMatchingSignatureFromAllWorkouts(
   def: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
   >,
 ): Promise<void> {
   const all = await loadWorkouts();

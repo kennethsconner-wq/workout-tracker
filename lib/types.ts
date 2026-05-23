@@ -1,5 +1,7 @@
 import type { WorkoutIconId } from '@/lib/workoutIcons';
 import type { ActivityType } from '@/lib/activityTypes';
+import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
+import type { DurationUnit } from '@/lib/durationUnits';
 
 export type LoggedWorkoutExercise = {
   id: string;
@@ -9,12 +11,16 @@ export type LoggedWorkoutExercise = {
   sets: number;
   reps: number;
   weightKg: number;
-  durationMinutes: number;
-  distanceMiles: number;
+  duration: number;
+  durationUnit: DurationUnit;
+  distance: number;
+  distanceUnit: CardioDistanceUnit;
   score: string;
   actualSets: LoggedActualSet[];
-  actualDurationMinutes: number;
-  actualDistanceMiles: number;
+  actualDuration: number;
+  actualDurationUnit: DurationUnit;
+  actualDistance: number;
+  actualDistanceUnit: CardioDistanceUnit;
   actualScore: string;
 };
 
@@ -40,8 +46,10 @@ export type WorkoutExercise = {
   sets: number;
   reps: number;
   weightKg: number;
-  durationMinutes: number;
-  distanceMiles: number;
+  duration: number;
+  durationUnit: DurationUnit;
+  distance: number;
+  distanceUnit: CardioDistanceUnit;
   score: string;
 };
 

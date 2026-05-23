@@ -1,6 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { ActivityType } from '@/lib/activityTypes';
+import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
+import { DEFAULT_CARDIO_DISTANCE_UNIT } from '@/lib/cardioDistanceUnits';
+import type { DurationUnit } from '@/lib/durationUnits';
+import { DEFAULT_DURATION_UNIT } from '@/lib/durationUnits';
 import { hasLoggedExerciseInput, type LogExerciseDraftFields } from '@/lib/logExerciseDraft';
 import type { Workout } from '@/lib/types';
 
@@ -12,8 +16,10 @@ type DraftExerciseFields = {
   workoutExerciseId: string;
   activityType: ActivityType;
   actualSets: DraftSetFields[];
-  actualDurationMinutesInput?: string;
-  actualDistanceMilesInput?: string;
+  actualDurationInput?: string;
+  actualDurationUnit?: DurationUnit;
+  actualDistanceInput?: string;
+  actualDistanceUnit?: CardioDistanceUnit;
   actualScoreInput?: string;
 };
 
@@ -94,8 +100,10 @@ export function isNewLogFormPristine(
     const draftFields: LogExerciseDraftFields = {
       activityType: exercise.activityType,
       actualSets: exercise.actualSets,
-      actualDurationMinutesInput: exercise.actualDurationMinutesInput ?? '',
-      actualDistanceMilesInput: exercise.actualDistanceMilesInput ?? '',
+      actualDurationInput: exercise.actualDurationInput ?? '',
+      actualDurationUnit: exercise.actualDurationUnit ?? DEFAULT_DURATION_UNIT,
+      actualDistanceInput: exercise.actualDistanceInput ?? '',
+      actualDistanceUnit: exercise.actualDistanceUnit ?? DEFAULT_CARDIO_DISTANCE_UNIT,
       actualScoreInput: exercise.actualScoreInput ?? '',
     };
 
