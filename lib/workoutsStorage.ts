@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { normalizeActivityType } from '@/lib/activityTypes';
 import { newId } from '@/lib/ids';
 import { normalizeWorkoutIconId } from '@/lib/workoutIcons';
 import {
@@ -16,8 +17,28 @@ function isDayOfWeek(value: string): value is DayOfWeek {
 
 const LEGACY_TITLE_DAY_RE = new RegExp(`^(.+?)\\s+\\((${DAYS_OF_WEEK.join('|')})\\)$`);
 
+function normalizeWorkoutExercise(raw: unknown): WorkoutExercise {
+  const exercise = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  return {
+    id: typeof exercise.id === 'string' ? exercise.id : newId(),
+    activityType: normalizeActivityType(exercise.activityType),
+    name: typeof exercise.name === 'string' ? exercise.name : '',
+    sets: typeof exercise.sets === 'number' ? exercise.sets : 0,
+    reps: typeof exercise.reps === 'number' ? exercise.reps : 0,
+    weightKg: typeof exercise.weightKg === 'number' ? exercise.weightKg : 0,
+    durationMinutes: typeof exercise.durationMinutes === 'number' ? exercise.durationMinutes : 0,
+    distanceMiles: typeof exercise.distanceMiles === 'number' ? exercise.distanceMiles : 0,
+    score: typeof exercise.score === 'string' ? exercise.score : '',
+  };
+}
+
+function normalizeWorkoutExercises(raw: unknown): WorkoutExercise[] {
+  return Array.isArray(raw) ? raw.map((exercise) => normalizeWorkoutExercise(exercise)) : [];
+}
+
 function normalizeStoredWorkout(raw: Workout & { dayOfWeek?: string; iconId?: unknown; daysOfWeek?: unknown }): Workout {
-  const { id, createdAt, exercises } = raw;
+  const { id, createdAt, exercises: rawExercises } = raw;
+  const exercises = normalizeWorkoutExercises(rawExercises);
   let title = raw.title;
   const daysFromArray = Array.isArray(raw.daysOfWeek)
     ? raw.daysOfWeek.filter((day): day is DayOfWeek => typeof day === 'string' && isDayOfWeek(day))
@@ -98,6 +119,7 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
               : typeof exercise.id === 'string'
                 ? exercise.id
                 : newId(),
+          activityType: normalizeActivityType((exercise as { activityType?: unknown }).activityType),
           name: typeof exercise.name === 'string' ? exercise.name : '',
           sets:
             typeof (exercise as { sets?: unknown }).sets === 'number'
@@ -108,7 +130,28 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
             typeof (exercise as { weightKg?: unknown }).weightKg === 'number'
               ? (exercise as { weightKg: number }).weightKg
               : legacyPlannedWeight,
+          durationMinutes:
+            typeof (exercise as { durationMinutes?: unknown }).durationMinutes === 'number'
+              ? (exercise as { durationMinutes: number }).durationMinutes
+              : 0,
+          distanceMiles:
+            typeof (exercise as { distanceMiles?: unknown }).distanceMiles === 'number'
+              ? (exercise as { distanceMiles: number }).distanceMiles
+              : 0,
+          score: typeof (exercise as { score?: unknown }).score === 'string' ? (exercise as { score: string }).score : '',
           actualSets: normalizedActualSets,
+          actualDurationMinutes:
+            typeof (exercise as { actualDurationMinutes?: unknown }).actualDurationMinutes === 'number'
+              ? (exercise as { actualDurationMinutes: number }).actualDurationMinutes
+              : 0,
+          actualDistanceMiles:
+            typeof (exercise as { actualDistanceMiles?: unknown }).actualDistanceMiles === 'number'
+              ? (exercise as { actualDistanceMiles: number }).actualDistanceMiles
+              : 0,
+          actualScore:
+            typeof (exercise as { actualScore?: unknown }).actualScore === 'string'
+              ? (exercise as { actualScore: string }).actualScore
+              : '',
         };
       })
     : [];
@@ -269,9 +312,14 @@ export async function updateWorkout(
   return nextWorkout;
 }
 
-/** For each exercise id, apply name/sets/reps/weight to every workout that contains that exercise id (linked / library exercises). */
+/** For each exercise id, apply name/activityType/sets/reps/weight/duration/distance/score to every workout that contains that exercise id (linked / library exercises). */
 export async function propagateExerciseDefinitionsAcrossWorkouts(
-  exercises: Array<Pick<WorkoutExercise, 'id' | 'name' | 'sets' | 'reps' | 'weightKg'>>,
+  exercises: Array<
+    Pick<
+      WorkoutExercise,
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+    >
+  >,
 ): Promise<void> {
   if (exercises.length === 0) {
     return;
@@ -287,10 +335,14 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
       }
       return {
         ...exercise,
+        activityType: definition.activityType,
         name: definition.name,
         sets: definition.sets,
         reps: definition.reps,
         weightKg: definition.weightKg,
+        durationMinutes: definition.durationMinutes,
+        distanceMiles: definition.distanceMiles,
+        score: definition.score,
       };
     }),
   }));
@@ -298,11 +350,24 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
 }
 
 function matchesExerciseDefinition(
-  ex: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
-  def: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
+  ex: Pick<
+    WorkoutExercise,
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+  >,
+  def: Pick<
+    WorkoutExercise,
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+  >,
 ): boolean {
   return (
-    ex.name === def.name && ex.sets === def.sets && ex.reps === def.reps && ex.weightKg === def.weightKg
+    ex.activityType === def.activityType &&
+    ex.name === def.name &&
+    ex.sets === def.sets &&
+    ex.reps === def.reps &&
+    ex.weightKg === def.weightKg &&
+    ex.durationMinutes === def.durationMinutes &&
+    ex.distanceMiles === def.distanceMiles &&
+    ex.score === def.score
   );
 }
 
@@ -311,11 +376,22 @@ function matchesExerciseDefinition(
  * then updates matching planned fields on logged exercises with the same `workoutExerciseId`.
  */
 export async function updateExercisesMatchingSignatureAcrossWorkouts(
-  oldDef: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
-  nextDef: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
+  oldDef: Pick<
+    WorkoutExercise,
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+  >,
+  nextDef: Pick<
+    WorkoutExercise,
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+  >,
 ): Promise<void> {
   const all = await loadWorkouts();
-  const updates: Array<Pick<WorkoutExercise, 'id' | 'name' | 'sets' | 'reps' | 'weightKg'>> = [];
+  const updates: Array<
+    Pick<
+      WorkoutExercise,
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+    >
+  > = [];
   const affectedIds = new Set<string>();
   for (const w of all) {
     for (const ex of w.exercises) {
@@ -334,7 +410,17 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
     ...log,
     exercises: log.exercises.map((lex) =>
       affectedIds.has(lex.workoutExerciseId)
-        ? { ...lex, name: nextDef.name, sets: nextDef.sets, reps: nextDef.reps, weightKg: nextDef.weightKg }
+        ? {
+            ...lex,
+            activityType: nextDef.activityType,
+            name: nextDef.name,
+            sets: nextDef.sets,
+            reps: nextDef.reps,
+            weightKg: nextDef.weightKg,
+            durationMinutes: nextDef.durationMinutes,
+            distanceMiles: nextDef.distanceMiles,
+            score: nextDef.score,
+          }
         : lex,
     ),
   }));
@@ -343,7 +429,10 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
 
 /** Removes matching exercises from all workout templates and from logged workouts; drops empty logs. */
 export async function removeExercisesMatchingSignatureFromAllWorkouts(
-  def: Pick<WorkoutExercise, 'name' | 'sets' | 'reps' | 'weightKg'>,
+  def: Pick<
+    WorkoutExercise,
+    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+  >,
 ): Promise<void> {
   const all = await loadWorkouts();
   const idsToRemove = new Set<string>();

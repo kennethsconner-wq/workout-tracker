@@ -11,23 +11,23 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { ActivityTypePicker } from '@/components/ActivityTypePicker';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
+import type { ActivityType } from '@/lib/activityTypes';
+import type { ExerciseDraftRow } from '@/lib/exerciseDraft';
 import { confirmEditLinkedExercise } from '@/lib/linkedExerciseEdit';
 import { themedAlert } from '@/lib/themedAlert';
 
-export type DraftExerciseRow = {
-  clientId: string;
-  sourceExerciseId?: string;
-  name: string;
-  sets: string;
-  reps: string;
-  weightKg: string;
-};
+export type { ExerciseDraftRow } from '@/lib/exerciseDraft';
+
+type NumericDraftField = 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles';
+type TextDraftField = 'score';
+type DraftField = NumericDraftField | TextDraftField;
 
 type Props = {
-  exercises: DraftExerciseRow[];
-  onReorder: (next: DraftExerciseRow[]) => void;
+  exercises: ExerciseDraftRow[];
+  onReorder: (next: ExerciseDraftRow[]) => void;
   listHeader: ReactElement;
   listFooter: ReactElement;
   contentContainerStyle: StyleProp<ViewStyle>;
@@ -39,11 +39,47 @@ type Props = {
   unlockedExerciseClientIds: Set<string>;
   onUnlockLinked: (clientId: string) => void;
   onUpdateExerciseName: (clientId: string, name: string) => void;
-  onUpdateExerciseField: (clientId: string, field: 'sets' | 'reps' | 'weightKg', value: string) => void;
+  onUpdateExerciseActivityType: (clientId: string, activityType: ActivityType) => void;
+  onUpdateExerciseField: (clientId: string, field: DraftField, value: string) => void;
   onRemoveExercise: (clientId: string) => void;
   /** When true (e.g. Edit Workout), show a confirmation before removing an exercise. */
   confirmBeforeRemoveExercise?: boolean;
 };
+
+function UnitField({
+  value,
+  onChangeText,
+  placeholder,
+  suffix,
+  keyboardType,
+  editable,
+  setRowInputStyle,
+  suffixColor,
+}: {
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  suffix: string;
+  keyboardType: 'number-pad' | 'decimal-pad' | 'default';
+  editable: boolean;
+  setRowInputStyle: StyleProp<TextStyle>;
+  suffixColor: string;
+}) {
+  return (
+    <View style={styles.unitInputWrap}>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        keyboardType={keyboardType}
+        placeholderTextColor="#a3a3a3"
+        editable={editable}
+        style={[setRowInputStyle, !editable && styles.lockedField]}
+      />
+      <Text style={[styles.unitSuffix, { color: suffixColor }]}>{suffix}</Text>
+    </View>
+  );
+}
 
 export function DraftExerciseDraggableList({
   exercises,
@@ -59,10 +95,13 @@ export function DraftExerciseDraggableList({
   unlockedExerciseClientIds,
   onUnlockLinked,
   onUpdateExerciseName,
+  onUpdateExerciseActivityType,
   onUpdateExerciseField,
   onRemoveExercise,
   confirmBeforeRemoveExercise = false,
 }: Props) {
+  const suffixColor = activeScheme === 'dark' ? '#a3a3a3' : '#737373';
+
   return (
     <DraggableFlatList
       containerStyle={{ flex: 1 }}
@@ -82,7 +121,8 @@ export function DraftExerciseDraggableList({
         const exIndex = getIndex() ?? 0;
         const fieldsLocked =
           exercise.sourceExerciseId !== undefined && !unlockedExerciseClientIds.has(exercise.clientId);
-        const lockedFieldStyle = fieldsLocked ? { opacity: 0.62 } : null;
+        const lockedFieldStyle = fieldsLocked ? styles.lockedField : null;
+
         return (
           <ScaleDecorator>
             <View style={[styles.card, { borderColor, opacity: isActive ? 0.95 : 1 }]}>
@@ -158,6 +198,13 @@ export function DraftExerciseDraggableList({
                   </Pressable>
                 </View>
               </View>
+
+              <ActivityTypePicker
+                value={exercise.activityType}
+                onChange={(activityType) => onUpdateExerciseActivityType(exercise.clientId, activityType)}
+                disabled={fieldsLocked}
+              />
+
               <TextInput
                 value={exercise.name}
                 onChangeText={(value) => onUpdateExerciseName(exercise.clientId, value)}
@@ -166,50 +213,89 @@ export function DraftExerciseDraggableList({
                 editable={!fieldsLocked}
                 style={[exerciseNameInputStyle, lockedFieldStyle]}
               />
-              <View style={styles.setRow}>
-                <View style={styles.unitInputWrap}>
-                  <TextInput
+
+              {exercise.activityType === 'strength' ? (
+                <View style={styles.setRow}>
+                  <UnitField
                     value={exercise.sets}
                     onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'sets', value)}
                     placeholder="0"
+                    suffix="sets"
                     keyboardType="number-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                     editable={!fieldsLocked}
-                    style={[setRowInputStyle, lockedFieldStyle]}
+                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
+                    suffixColor={suffixColor}
                   />
-                  <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                    sets
-                  </Text>
-                </View>
-                <View style={styles.unitInputWrap}>
-                  <TextInput
+                  <UnitField
                     value={exercise.reps}
                     onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'reps', value)}
                     placeholder="0"
+                    suffix="reps"
                     keyboardType="number-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                     editable={!fieldsLocked}
-                    style={[setRowInputStyle, lockedFieldStyle]}
+                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
+                    suffixColor={suffixColor}
                   />
-                  <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                    reps
-                  </Text>
-                </View>
-                <View style={styles.unitInputWrap}>
-                  <TextInput
+                  <UnitField
                     value={exercise.weightKg}
                     onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'weightKg', value)}
                     placeholder="Weight"
+                    suffix="lb"
                     keyboardType="decimal-pad"
+                    editable={!fieldsLocked}
+                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
+                    suffixColor={suffixColor}
+                  />
+                </View>
+              ) : null}
+
+              {exercise.activityType === 'cardio' ? (
+                <View style={styles.setRow}>
+                  <UnitField
+                    value={exercise.durationMinutes}
+                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'durationMinutes', value)}
+                    placeholder="0"
+                    suffix="min"
+                    keyboardType="number-pad"
+                    editable={!fieldsLocked}
+                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
+                    suffixColor={suffixColor}
+                  />
+                  <UnitField
+                    value={exercise.distanceMiles}
+                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'distanceMiles', value)}
+                    placeholder="Optional"
+                    suffix="mi"
+                    keyboardType="decimal-pad"
+                    editable={!fieldsLocked}
+                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
+                    suffixColor={suffixColor}
+                  />
+                </View>
+              ) : null}
+
+              {exercise.activityType === 'sport' ? (
+                <View style={styles.fieldColumn}>
+                  <UnitField
+                    value={exercise.durationMinutes}
+                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'durationMinutes', value)}
+                    placeholder="0"
+                    suffix="min"
+                    keyboardType="number-pad"
+                    editable={!fieldsLocked}
+                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
+                    suffixColor={suffixColor}
+                  />
+                  <TextInput
+                    value={exercise.score}
+                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'score', value)}
+                    placeholder="Score (optional)"
                     placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                     editable={!fieldsLocked}
-                    style={[setRowInputStyle, lockedFieldStyle]}
+                    style={[exerciseNameInputStyle, lockedFieldStyle]}
                   />
-                  <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                    lb
-                  </Text>
                 </View>
-              </View>
+              ) : null}
             </View>
           </ScaleDecorator>
         );
@@ -275,6 +361,9 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: 'wrap',
   },
+  fieldColumn: {
+    gap: 10,
+  },
   unitInputWrap: {
     flexGrow: 1,
     minWidth: 80,
@@ -286,5 +375,8 @@ const styles = StyleSheet.create({
     top: 10,
     fontSize: 16,
     fontWeight: '600',
+  },
+  lockedField: {
+    opacity: 0.62,
   },
 });

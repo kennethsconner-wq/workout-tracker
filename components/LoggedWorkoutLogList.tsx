@@ -13,6 +13,7 @@ import { Text, View } from '@/components/Themed';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { formatLoggedExerciseSummary, formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
 import { navigateToEditLoggedWorkout } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
 import { deleteLoggedWorkout, loadLoggedWorkouts } from '@/lib/workoutsStorage';
@@ -214,13 +215,19 @@ export function LoggedWorkoutLogList() {
         <View key={ex.id} style={styles.exerciseBlock}>
           <Text style={[styles.exerciseName, { color: textColor }]}>{ex.name}</Text>
           <Text style={[styles.setLine, { color: textColor }]}>
-            Planned: {ex.sets} set{ex.sets === 1 ? '' : 's'} x {ex.reps} reps @ {ex.weightKg} lb
+            Planned: {formatPlannedExerciseSummary(ex)}
           </Text>
-          {ex.actualSets.map((actualSet, setIndex) => (
-            <Text key={`${ex.id}-actual-set-${setIndex}`} style={[styles.setLine, { color: textColor }]}>
-              Actual set {setIndex + 1}: {actualSet.actualReps} reps @ {actualSet.actualWeightKg} lb
-            </Text>
-          ))}
+          {ex.activityType === 'strength'
+            ? ex.actualSets.map((actualSet, setIndex) => (
+                <Text key={`${ex.id}-actual-set-${setIndex}`} style={[styles.setLine, { color: textColor }]}>
+                  Actual set {setIndex + 1}: {actualSet.actualReps} reps @ {actualSet.actualWeightKg} lb
+                </Text>
+              ))
+            : (
+                <Text style={[styles.setLine, { color: textColor }]}>
+                  Actual: {formatLoggedExerciseSummary(ex)}
+                </Text>
+              )}
         </View>
       ))}
     </RNView>

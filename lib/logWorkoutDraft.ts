@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { ActivityType } from '@/lib/activityTypes';
+import { hasLoggedExerciseInput, type LogExerciseDraftFields } from '@/lib/logExerciseDraft';
 import type { Workout } from '@/lib/types';
 
 export const NEW_LOG_DRAFT_KEY_PREFIX = 'workout-log-draft@v1:';
@@ -8,7 +10,11 @@ type DraftSetFields = { actualRepsInput: string; actualWeightKgInput: string };
 
 type DraftExerciseFields = {
   workoutExerciseId: string;
+  activityType: ActivityType;
   actualSets: DraftSetFields[];
+  actualDurationMinutesInput?: string;
+  actualDistanceMilesInput?: string;
+  actualScoreInput?: string;
 };
 
 export function newLogDraftStorageKey(workoutId: string): string {
@@ -84,13 +90,21 @@ export function isNewLogFormPristine(
     if (!template) {
       return false;
     }
-    if (exercise.actualSets.length !== template.sets) {
+
+    const draftFields: LogExerciseDraftFields = {
+      activityType: exercise.activityType,
+      actualSets: exercise.actualSets,
+      actualDurationMinutesInput: exercise.actualDurationMinutesInput ?? '',
+      actualDistanceMilesInput: exercise.actualDistanceMilesInput ?? '',
+      actualScoreInput: exercise.actualScoreInput ?? '',
+    };
+
+    if (hasLoggedExerciseInput(draftFields)) {
       return false;
     }
-    for (const set of exercise.actualSets) {
-      if (set.actualRepsInput.trim().length > 0 || set.actualWeightKgInput.trim().length > 0) {
-        return false;
-      }
+
+    if (template.activityType === 'strength' && exercise.actualSets.length !== template.sets) {
+      return false;
     }
   }
 

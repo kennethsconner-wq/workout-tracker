@@ -23,6 +23,7 @@ import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
+import { formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
 import { pickWorkoutIdForDeviceCalendarDay, sortWorkoutsForDropdown } from '@/lib/deviceDayOfWeek';
 import { getWorkoutIdsWithNewLogDrafts } from '@/lib/logWorkoutDraft';
 import {
@@ -39,7 +40,12 @@ const DROPDOWN_TITLE_FONT_SIZE = Platform.select({ ios: 17, android: 20, default
 
 const ACTION_SHEET_SLIDE = 320;
 type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
-  exercises: Array<Pick<Workout['exercises'][number], 'id' | 'name' | 'sets' | 'reps' | 'weightKg'>>;
+  exercises: Array<
+    Pick<
+      Workout['exercises'][number],
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+    >
+  >;
 };
 
 export function WorkoutsList() {
@@ -286,10 +292,14 @@ export function WorkoutsList() {
       iconId: workout.iconId,
       exercises: workout.exercises.map((ex) => ({
         id: ex.id,
+        activityType: ex.activityType,
         name: ex.name,
         sets: ex.sets,
         reps: ex.reps,
         weightKg: ex.weightKg,
+        durationMinutes: ex.durationMinutes,
+        distanceMiles: ex.distanceMiles,
+        score: ex.score,
       })),
     };
 
@@ -436,14 +446,8 @@ export function WorkoutsList() {
                           backgroundColor: Colors[activeScheme].background,
                         },
                       ]}>
-                      <View style={styles.detailActionsRow} lightColor="transparent" darkColor="transparent">
-                        <View style={styles.detailDaysRow} lightColor="transparent" darkColor="transparent">
-                          <Ionicons name="calendar-outline" size={16} color={Colors[activeScheme].tint} />
-                          <Text style={[styles.detailDaysText, { color: Colors[activeScheme].tint }]}>
-                            {formatDays(w.daysOfWeek)}
-                          </Text>
-                        </View>
-                        <View style={styles.detailTrailingActions} lightColor="transparent" darkColor="transparent">
+                      <View style={styles.detailButtonsRow} lightColor="transparent" darkColor="transparent">
+                        <View style={styles.detailLeadingActions} lightColor="transparent" darkColor="transparent">
                           {draftWorkoutIds.has(w.id) ? (
                             <Pressable
                               accessibilityRole="button"
@@ -474,34 +478,40 @@ export function WorkoutsList() {
                               Start
                             </Text>
                           </Pressable>
-                          <Pressable
-                            accessibilityLabel="Workout actions"
-                            onPress={() => {
-                              if (!isSelected) {
-                                setSelectedId(w.id);
-                                carouselRef.current?.scrollToOffset({
-                                  offset: index * carouselWidth,
-                                  animated: true,
-                                });
-                                detailRef.current?.scrollToOffset({
-                                  offset: index * detailWidth,
-                                  animated: true,
-                                });
-                              }
-                              openActionSheet();
-                            }}
-                            style={({ pressed }) => [styles.iconActionButton, pressed && styles.iconActionButtonPressed]}
-                            hitSlop={10}>
-                            <Ionicons name="ellipsis-vertical" size={22} color={Colors[activeScheme].tint} />
-                          </Pressable>
                         </View>
+                        <Pressable
+                          accessibilityLabel="Workout actions"
+                          onPress={() => {
+                            if (!isSelected) {
+                              setSelectedId(w.id);
+                              carouselRef.current?.scrollToOffset({
+                                offset: index * carouselWidth,
+                                animated: true,
+                              });
+                              detailRef.current?.scrollToOffset({
+                                offset: index * detailWidth,
+                                animated: true,
+                              });
+                            }
+                            openActionSheet();
+                          }}
+                          style={({ pressed }) => [styles.iconActionButton, pressed && styles.iconActionButtonPressed]}
+                          hitSlop={10}>
+                          <Ionicons name="ellipsis-vertical" size={22} color={Colors[activeScheme].tint} />
+                        </Pressable>
+                      </View>
+                      <View style={styles.detailDaysRow} lightColor="transparent" darkColor="transparent">
+                        <Ionicons name="calendar-outline" size={16} color={Colors[activeScheme].tint} />
+                        <Text style={[styles.detailDaysText, { color: Colors[activeScheme].tint }]}>
+                          {formatDays(w.daysOfWeek)}
+                        </Text>
                       </View>
                       <View style={styles.detailExerciseList}>
                         {w.exercises.map((ex) => (
                           <View key={ex.id} style={styles.exerciseBlock}>
                             <Text style={[styles.exerciseName, { color: textColor }]}>{ex.name}</Text>
                             <Text style={[styles.setLine, { color: textColor }]}>
-                              {ex.sets} set{ex.sets === 1 ? '' : 's'} × {ex.reps} reps @ {ex.weightKg} lb
+                              {formatPlannedExerciseSummary(ex)}
                             </Text>
                           </View>
                         ))}
@@ -699,30 +709,30 @@ const styles = StyleSheet.create({
   detailPageWrap: {
     alignSelf: 'flex-start',
   },
-  detailActionsRow: {
+  detailButtonsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
-    marginBottom: 2,
+  },
+  detailLeadingActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
   },
   detailDaysRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    minWidth: 0,
-    flex: 1,
+    width: '100%',
   },
   detailDaysText: {
     fontSize: 16,
     fontWeight: '600',
     flexShrink: 1,
-  },
-  detailTrailingActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexShrink: 0,
   },
   /** Compact variant of {@link StickySaveFooter} primary button. */
   detailPrimaryButton: {
@@ -732,10 +742,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 36,
+    width: 96,
   },
   detailPrimaryButtonLabel: {
     fontSize: 14,
     fontWeight: '700',
+    textAlign: 'center',
   },
   iconActionButton: {
     paddingHorizontal: 6,

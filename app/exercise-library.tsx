@@ -18,6 +18,11 @@ import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
+import { activityTypeLabel, formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
+import {
+  parseWorkoutExerciseFromDraft,
+  type ExerciseDraftSeed,
+} from '@/lib/exerciseDraft';
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import {
   loadWorkouts,
@@ -28,8 +33,10 @@ import { themedAlert } from '@/lib/themedAlert';
 import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types';
 
 type RouteSource = 'create' | 'edit';
-type ExerciseListItem = Pick<WorkoutExercise, 'id' | 'name' | 'sets' | 'reps' | 'weightKg'> & { key: string };
-type ExerciseDraftSeed = { sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
+type ExerciseListItem = Pick<
+  WorkoutExercise,
+  'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'durationMinutes' | 'distanceMiles' | 'score'
+> & { key: string };
 type CreateDraftPayload = { title: string; daysOfWeek: DayOfWeek[]; iconId: WorkoutIconId };
 type ImportExercisesPayload = {
   nonce: string;
@@ -97,6 +104,9 @@ export default function ExerciseLibraryScreen() {
   const [editSets, setEditSets] = useState('');
   const [editReps, setEditReps] = useState('');
   const [editWeight, setEditWeight] = useState('');
+  const [editDuration, setEditDuration] = useState('');
+  const [editDistance, setEditDistance] = useState('');
+  const [editScore, setEditScore] = useState('');
   const [libraryMutationBusy, setLibraryMutationBusy] = useState(false);
 
   const reloadLibrary = useCallback(async () => {
@@ -105,15 +115,19 @@ export default function ExerciseLibraryScreen() {
     const unique = new Map<string, ExerciseListItem>();
     for (const workout of workouts) {
       for (const exercise of workout.exercises) {
-        const key = `${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weightKg}`;
+        const key = `${exercise.activityType}|${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weightKg}|${exercise.durationMinutes}|${exercise.distanceMiles}|${exercise.score}`;
         if (!unique.has(key)) {
           unique.set(key, {
             key,
             id: exercise.id,
+            activityType: exercise.activityType,
             name: exercise.name,
             sets: exercise.sets,
             reps: exercise.reps,
             weightKg: exercise.weightKg,
+            durationMinutes: exercise.durationMinutes,
+            distanceMiles: exercise.distanceMiles,
+            score: exercise.score,
           });
         }
       }
@@ -188,6 +202,9 @@ export default function ExerciseLibraryScreen() {
     setEditSets(String(item.sets));
     setEditReps(String(item.reps));
     setEditWeight(String(item.weightKg));
+    setEditDuration(item.durationMinutes > 0 ? String(item.durationMinutes) : '');
+    setEditDistance(item.distanceMiles > 0 ? String(item.distanceMiles) : '');
+    setEditScore(item.score);
   }, []);
 
   const closeEditForm = useCallback(() => {
@@ -216,10 +233,14 @@ export default function ExerciseLibraryScreen() {
               try {
                 setLibraryMutationBusy(true);
                 await removeExercisesMatchingSignatureFromAllWorkouts({
+                  activityType: item.activityType,
                   name: item.name,
                   sets: item.sets,
                   reps: item.reps,
                   weightKg: item.weightKg,
+                  durationMinutes: item.durationMinutes,
+                  distanceMiles: item.distanceMiles,
+                  score: item.score,
                 });
                 await reloadLibrary();
               } finally {
@@ -237,43 +258,56 @@ export default function ExerciseLibraryScreen() {
     if (!editBaseline) {
       return;
     }
-    const name = editName.trim();
-    if (!name) {
-      themedAlert('Missing name', 'Please enter an exercise name.');
-      return;
-    }
-    const sets = Number.parseInt(editSets.trim(), 10);
-    const reps = Number.parseInt(editReps.trim(), 10);
-    const weightKg = Number.parseFloat(editWeight.trim());
-    if (!Number.isFinite(sets) || sets < 1) {
-      themedAlert('Invalid sets', 'Enter a whole number of sets (at least 1).');
-      return;
-    }
-    if (!Number.isFinite(reps) || reps < 1) {
-      themedAlert('Invalid reps', 'Enter a whole number of reps (at least 1).');
-      return;
-    }
-    if (!Number.isFinite(weightKg) || weightKg < 0) {
-      themedAlert('Invalid weight', 'Enter a valid weight (0 or more).');
+    const parsed = parseWorkoutExerciseFromDraft(
+      {
+        clientId: editBaseline.id,
+        activityType: editBaseline.activityType,
+        name: editName,
+        sets: editSets,
+        reps: editReps,
+        weightKg: editWeight,
+        durationMinutes: editDuration,
+        distanceMiles: editDistance,
+        score: editScore,
+      },
+      editBaseline.id,
+    );
+    if (!parsed.ok) {
+      themedAlert(parsed.title, parsed.message);
       return;
     }
     try {
       setLibraryMutationBusy(true);
       await updateExercisesMatchingSignatureAcrossWorkouts(
         {
+          activityType: editBaseline.activityType,
           name: editBaseline.name,
           sets: editBaseline.sets,
           reps: editBaseline.reps,
           weightKg: editBaseline.weightKg,
+          durationMinutes: editBaseline.durationMinutes,
+          distanceMiles: editBaseline.distanceMiles,
+          score: editBaseline.score,
         },
-        { name, sets, reps, weightKg },
+        parsed.exercise,
       );
       closeEditForm();
       await reloadLibrary();
     } finally {
       setLibraryMutationBusy(false);
     }
-  }, [editBaseline, editName, editSets, editReps, editWeight, reloadLibrary, closeEditForm]);
+  }, [
+    editBaseline,
+    editName,
+    editSets,
+    editReps,
+    editWeight,
+    editDuration,
+    editDistance,
+    editScore,
+    reloadLibrary,
+    closeEditForm,
+  ]);
 
   const addSelectedToWorkout = useCallback(() => {
     const byId = new Map(items.map((item) => [item.id, item]));
@@ -290,10 +324,14 @@ export default function ExerciseLibraryScreen() {
     const nonce = String(Date.now());
     const newSeeds: ExerciseDraftSeed[] = selected.map((exercise) => ({
       sourceExerciseId: exercise.id,
+      activityType: exercise.activityType,
       name: exercise.name,
       sets: String(exercise.sets),
       reps: String(exercise.reps),
       weightKg: String(exercise.weightKg),
+      durationMinutes: exercise.durationMinutes > 0 ? String(exercise.durationMinutes) : '',
+      distanceMiles: exercise.distanceMiles > 0 ? String(exercise.distanceMiles) : '',
+      score: exercise.score,
     }));
     const importPayload: ImportExercisesPayload = {
       nonce,
@@ -372,15 +410,13 @@ export default function ExerciseLibraryScreen() {
                       { borderColor, opacity: disabled ? 0.65 : 1 },
                     ]}
                     accessibilityRole="text"
-                    accessibilityLabel={`${item.name}, ${item.sets} set${item.sets === 1 ? '' : 's'}, ${item.reps} reps, ${item.weightKg} lb`}>
+                    accessibilityLabel={`${item.name}, ${activityTypeLabel(item.activityType)}, ${formatPlannedExerciseSummary(item)}`}>
                     <View
                       style={[styles.cardText, styles.cardTextBrowse]}
                       lightColor="transparent"
                       darkColor="transparent">
                       <Text style={styles.exerciseName}>{item.name}</Text>
-                      <Text style={styles.meta}>
-                        {item.sets} set{item.sets === 1 ? '' : 's'} x {item.reps} reps @ {item.weightKg} lb
-                      </Text>
+                      <Text style={styles.meta}>{activityTypeLabel(item.activityType)} · {formatPlannedExerciseSummary(item)}</Text>
                     </View>
                     <RNView style={styles.cardRowActions}>
                       <Pressable
@@ -424,9 +460,7 @@ export default function ExerciseLibraryScreen() {
                   accessibilityState={{ selected: isSelected }}>
                   <View style={styles.cardText} lightColor="transparent" darkColor="transparent">
                     <Text style={styles.exerciseName}>{item.name}</Text>
-                    <Text style={styles.meta}>
-                      {item.sets} set{item.sets === 1 ? '' : 's'} x {item.reps} reps @ {item.weightKg} lb
-                    </Text>
+                    <Text style={styles.meta}>{activityTypeLabel(item.activityType)} · {formatPlannedExerciseSummary(item)}</Text>
                   </View>
                 </Pressable>
               );
@@ -507,59 +541,130 @@ export default function ExerciseLibraryScreen() {
                 editable={!libraryMutationBusy}
                 style={exerciseNameInputStyle}
               />
-              <RNView style={styles.draftSetRow}>
-                <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+              {editBaseline?.activityType === 'strength' ? (
+                <RNView style={styles.draftSetRow}>
+                  <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                    <TextInput
+                      value={editSets}
+                      onChangeText={setEditSets}
+                      placeholder="0"
+                      keyboardType="number-pad"
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      editable={!libraryMutationBusy}
+                      style={setRowInputStyle}
+                    />
+                    <Text
+                      style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                      lightColor="transparent"
+                      darkColor="transparent">
+                      sets
+                    </Text>
+                  </View>
+                  <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                    <TextInput
+                      value={editReps}
+                      onChangeText={setEditReps}
+                      placeholder="0"
+                      keyboardType="number-pad"
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      editable={!libraryMutationBusy}
+                      style={setRowInputStyle}
+                    />
+                    <Text
+                      style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                      lightColor="transparent"
+                      darkColor="transparent">
+                      reps
+                    </Text>
+                  </View>
+                  <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                    <TextInput
+                      value={editWeight}
+                      onChangeText={setEditWeight}
+                      placeholder="0"
+                      keyboardType="decimal-pad"
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      editable={!libraryMutationBusy}
+                      style={setRowInputStyle}
+                    />
+                    <Text
+                      style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                      lightColor="transparent"
+                      darkColor="transparent">
+                      lb
+                    </Text>
+                  </View>
+                </RNView>
+              ) : null}
+              {editBaseline?.activityType === 'cardio' ? (
+                <RNView style={styles.draftSetRow}>
+                  <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                    <TextInput
+                      value={editDuration}
+                      onChangeText={setEditDuration}
+                      placeholder="0"
+                      keyboardType="number-pad"
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      editable={!libraryMutationBusy}
+                      style={setRowInputStyle}
+                    />
+                    <Text
+                      style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                      lightColor="transparent"
+                      darkColor="transparent">
+                      min
+                    </Text>
+                  </View>
+                  <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                    <TextInput
+                      value={editDistance}
+                      onChangeText={setEditDistance}
+                      placeholder="Optional"
+                      keyboardType="decimal-pad"
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      editable={!libraryMutationBusy}
+                      style={setRowInputStyle}
+                    />
+                    <Text
+                      style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                      lightColor="transparent"
+                      darkColor="transparent">
+                      mi
+                    </Text>
+                  </View>
+                </RNView>
+              ) : null}
+              {editBaseline?.activityType === 'sport' ? (
+                <>
+                  <RNView style={styles.draftSetRow}>
+                    <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
+                      <TextInput
+                        value={editDuration}
+                        onChangeText={setEditDuration}
+                        placeholder="0"
+                        keyboardType="number-pad"
+                        placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                        editable={!libraryMutationBusy}
+                        style={setRowInputStyle}
+                      />
+                      <Text
+                        style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                        lightColor="transparent"
+                        darkColor="transparent">
+                        min
+                      </Text>
+                    </View>
+                  </RNView>
                   <TextInput
-                    value={editSets}
-                    onChangeText={setEditSets}
-                    placeholder="0"
-                    keyboardType="number-pad"
+                    value={editScore}
+                    onChangeText={setEditScore}
+                    placeholder="Score (optional)"
                     placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                     editable={!libraryMutationBusy}
-                    style={setRowInputStyle}
+                    style={exerciseNameInputStyle}
                   />
-                  <Text
-                    style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
-                    lightColor="transparent"
-                    darkColor="transparent">
-                    sets
-                  </Text>
-                </View>
-                <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
-                  <TextInput
-                    value={editReps}
-                    onChangeText={setEditReps}
-                    placeholder="0"
-                    keyboardType="number-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    editable={!libraryMutationBusy}
-                    style={setRowInputStyle}
-                  />
-                  <Text
-                    style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
-                    lightColor="transparent"
-                    darkColor="transparent">
-                    reps
-                  </Text>
-                </View>
-                <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
-                  <TextInput
-                    value={editWeight}
-                    onChangeText={setEditWeight}
-                    placeholder="0"
-                    keyboardType="decimal-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    editable={!libraryMutationBusy}
-                    style={setRowInputStyle}
-                  />
-                  <Text
-                    style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
-                    lightColor="transparent"
-                    darkColor="transparent">
-                    lb
-                  </Text>
-                </View>
-              </RNView>
+                </>
+              ) : null}
               <Pressable
                 onPress={() => void saveEditedExercise()}
                 disabled={libraryMutationBusy}

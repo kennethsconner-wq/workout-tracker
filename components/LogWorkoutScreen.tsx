@@ -28,6 +28,9 @@ import { themedAlert } from '@/lib/themedAlert';
 import { newId } from '@/lib/ids';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import type { LoggedWorkout, LoggedWorkoutExercise, Workout } from '@/lib/types';
+import { normalizeActivityType } from '@/lib/activityTypes';
+import { formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
+import { hasLoggedExerciseInput, parseLoggedExerciseFromDraft } from '@/lib/logExerciseDraft';
 import { clearNewLogDraft, isNewLogFormPristine, newLogDraftStorageKey } from '@/lib/logWorkoutDraft';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { addLoggedWorkout, loadLoggedWorkouts, loadWorkouts, updateLoggedWorkout } from '@/lib/workoutsStorage';
@@ -38,8 +41,14 @@ type DraftActualSet = {
   actualWeightKgInput: string;
 };
 
-type DraftExercise = Omit<LoggedWorkoutExercise, 'actualSets'> & {
+type DraftExercise = Omit<
+  LoggedWorkoutExercise,
+  'actualSets' | 'actualDurationMinutes' | 'actualDistanceMiles' | 'actualScore'
+> & {
   actualSets: DraftActualSet[];
+  actualDurationMinutesInput: string;
+  actualDistanceMilesInput: string;
+  actualScoreInput: string;
 };
 
 type LogWorkoutDraft = {
@@ -83,20 +92,69 @@ function loggedActualToDraftSet(as: LoggedWorkoutExercise['actualSets'][number])
   };
 }
 
-function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): DraftExercise {
+function hasCardioActualValues(exercise: DraftExercise): boolean {
+  return exercise.actualDurationMinutesInput.trim().length > 0 || exercise.actualDistanceMilesInput.trim().length > 0;
+}
+
+function hasSportActualValues(exercise: DraftExercise): boolean {
+  return exercise.actualDurationMinutesInput.trim().length > 0 || exercise.actualScoreInput.trim().length > 0;
+}
+
+function loggedExerciseToDraftExercise(loggedExercise: LoggedWorkoutExercise): DraftExercise {
   return {
+    id: loggedExercise.id,
+    workoutExerciseId: loggedExercise.workoutExerciseId,
+    activityType: loggedExercise.activityType,
+    name: loggedExercise.name,
+    sets: loggedExercise.sets,
+    reps: loggedExercise.reps,
+    weightKg: loggedExercise.weightKg,
+    durationMinutes: loggedExercise.durationMinutes,
+    distanceMiles: loggedExercise.distanceMiles,
+    score: loggedExercise.score,
+    actualSets:
+      loggedExercise.activityType === 'strength'
+        ? loggedExercise.actualSets.map((actualSet) => loggedActualToDraftSet(actualSet))
+        : [],
+    actualDurationMinutesInput:
+      loggedExercise.actualDurationMinutes > 0 ? String(loggedExercise.actualDurationMinutes) : '',
+    actualDistanceMilesInput:
+      loggedExercise.actualDistanceMiles > 0 ? String(loggedExercise.actualDistanceMiles) : '',
+    actualScoreInput: loggedExercise.actualScore,
+  };
+}
+
+function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): DraftExercise {
+  const base: DraftExercise = {
     id: newId(),
     workoutExerciseId: exercise.id,
+    activityType: exercise.activityType,
     name: exercise.name,
     sets: exercise.sets,
     reps: exercise.reps,
     weightKg: exercise.weightKg,
-    actualSets: Array.from({ length: exercise.sets }, () => ({
-      id: newId(),
-      actualRepsInput: '',
-      actualWeightKgInput: '',
-    })),
+    durationMinutes: exercise.durationMinutes,
+    distanceMiles: exercise.distanceMiles,
+    score: exercise.score,
+    actualSets: [],
+    actualDurationMinutesInput: '',
+    actualDistanceMilesInput: '',
+    actualScoreInput: '',
   };
+
+  if (exercise.activityType === 'strength') {
+    const setCount = Math.max(exercise.sets, 1);
+    return {
+      ...base,
+      actualSets: Array.from({ length: setCount }, () => ({
+        id: newId(),
+        actualRepsInput: '',
+        actualWeightKgInput: '',
+      })),
+    };
+  }
+
+  return base;
 }
 
 /** Hydrate the log form from a saved session plus the current template (new template exercises get empty actuals). */
@@ -108,15 +166,7 @@ function buildDraftExercisesFromLogged(logged: LoggedWorkout, template: Workout)
   for (const te of template.exercises) {
     const le = loggedByWorkoutExerciseId.get(te.id);
     if (le) {
-      out.push({
-        id: le.id,
-        workoutExerciseId: le.workoutExerciseId,
-        name: le.name,
-        sets: le.sets,
-        reps: le.reps,
-        weightKg: le.weightKg,
-        actualSets: le.actualSets.map((as) => loggedActualToDraftSet(as)),
-      });
+      out.push(loggedExerciseToDraftExercise(le));
     } else {
       out.push(emptyDraftForTemplateExercise(te));
     }
@@ -124,15 +174,7 @@ function buildDraftExercisesFromLogged(logged: LoggedWorkout, template: Workout)
 
   for (const le of logged.exercises) {
     if (!templateIds.has(le.workoutExerciseId)) {
-      out.push({
-        id: le.id,
-        workoutExerciseId: le.workoutExerciseId,
-        name: le.name,
-        sets: le.sets,
-        reps: le.reps,
-        weightKg: le.weightKg,
-        actualSets: le.actualSets.map((as) => loggedActualToDraftSet(as)),
-      });
+      out.push(loggedExerciseToDraftExercise(le));
     }
   }
 
@@ -180,11 +222,18 @@ function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
     out.push({
       id: o.id,
       workoutExerciseId: o.workoutExerciseId,
+      activityType: normalizeActivityType(o.activityType),
       name: o.name,
       sets: o.sets,
       reps: o.reps,
       weightKg: o.weightKg,
+      durationMinutes: typeof o.durationMinutes === 'number' ? o.durationMinutes : 0,
+      distanceMiles: typeof o.distanceMiles === 'number' ? o.distanceMiles : 0,
+      score: typeof o.score === 'string' ? o.score : '',
       actualSets,
+      actualDurationMinutesInput: typeof o.actualDurationMinutesInput === 'string' ? o.actualDurationMinutesInput : '',
+      actualDistanceMilesInput: typeof o.actualDistanceMilesInput === 'string' ? o.actualDistanceMilesInput : '',
+      actualScoreInput: typeof o.actualScoreInput === 'string' ? o.actualScoreInput : '',
     });
   }
   return out;
@@ -207,40 +256,41 @@ function normalizeDraftExercises(
     .map((exercise) => {
       const saved = byWorkoutExerciseId.get(exercise.id);
       const savedLen = saved?.actualSets?.length ?? 0;
-      const setCount = Math.max(exercise.sets, savedLen);
+      const setCount = exercise.activityType === 'strength' ? Math.max(exercise.sets, savedLen, 1) : 0;
       return {
         id: saved?.id && typeof saved.id === 'string' ? saved.id : newId(),
         workoutExerciseId: exercise.id,
+        activityType: saved?.activityType ?? exercise.activityType,
         name: exercise.name,
         sets: exercise.sets,
         reps: exercise.reps,
         weightKg: exercise.weightKg,
-        actualSets: Array.from({ length: setCount }, (_, setIndex) => {
-          const savedSet = saved?.actualSets?.[setIndex];
-          return {
-            id: savedSet?.id && typeof savedSet.id === 'string' ? savedSet.id : newId(),
-            actualRepsInput: typeof savedSet?.actualRepsInput === 'string' ? savedSet.actualRepsInput : '',
-            actualWeightKgInput: typeof savedSet?.actualWeightKgInput === 'string' ? savedSet.actualWeightKgInput : '',
-          };
-        }),
+        durationMinutes: exercise.durationMinutes,
+        distanceMiles: exercise.distanceMiles,
+        score: exercise.score,
+        actualSets:
+          exercise.activityType === 'strength'
+            ? Array.from({ length: setCount }, (_, setIndex) => {
+                const savedSet = saved?.actualSets?.[setIndex];
+                return {
+                  id: savedSet?.id && typeof savedSet.id === 'string' ? savedSet.id : newId(),
+                  actualRepsInput: typeof savedSet?.actualRepsInput === 'string' ? savedSet.actualRepsInput : '',
+                  actualWeightKgInput:
+                    typeof savedSet?.actualWeightKgInput === 'string' ? savedSet.actualWeightKgInput : '',
+                };
+              })
+            : [],
+        actualDurationMinutesInput:
+          typeof saved?.actualDurationMinutesInput === 'string' ? saved.actualDurationMinutesInput : '',
+        actualDistanceMilesInput:
+          typeof saved?.actualDistanceMilesInput === 'string' ? saved.actualDistanceMilesInput : '',
+        actualScoreInput: typeof saved?.actualScoreInput === 'string' ? saved.actualScoreInput : '',
       };
     });
 }
 
 function toDraftExercises(workout: Workout): DraftExercise[] {
-  return workout.exercises.map((exercise) => ({
-    id: newId(),
-    workoutExerciseId: exercise.id,
-    name: exercise.name,
-    sets: exercise.sets,
-    reps: exercise.reps,
-    weightKg: exercise.weightKg,
-    actualSets: Array.from({ length: exercise.sets }, () => ({
-      id: newId(),
-      actualRepsInput: '',
-      actualWeightKgInput: '',
-    })),
-  }));
+  return workout.exercises.map((exercise) => emptyDraftForTemplateExercise(exercise));
 }
 
 export default function LogWorkoutScreen() {
@@ -542,6 +592,52 @@ export default function LogWorkoutScreen() {
     );
   };
 
+  const updateExerciseActualField = (
+    exerciseId: string,
+    field: 'actualDurationMinutesInput' | 'actualDistanceMilesInput' | 'actualScoreInput',
+    value: string,
+  ) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.id === exerciseId ? { ...ex, [field]: value } : ex)),
+    );
+  };
+
+  const toggleCardioPlannedValues = (exerciseId: string) => {
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) {
+          return ex;
+        }
+        if (hasCardioActualValues(ex)) {
+          return { ...ex, actualDurationMinutesInput: '', actualDistanceMilesInput: '' };
+        }
+        return {
+          ...ex,
+          actualDurationMinutesInput: ex.durationMinutes > 0 ? String(ex.durationMinutes) : '',
+          actualDistanceMilesInput: ex.distanceMiles > 0 ? String(ex.distanceMiles) : '',
+        };
+      }),
+    );
+  };
+
+  const toggleSportPlannedValues = (exerciseId: string) => {
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) {
+          return ex;
+        }
+        if (hasSportActualValues(ex)) {
+          return { ...ex, actualDurationMinutesInput: '', actualScoreInput: '' };
+        }
+        return {
+          ...ex,
+          actualDurationMinutesInput: ex.durationMinutes > 0 ? String(ex.durationMinutes) : '',
+          actualScoreInput: ex.score,
+        };
+      }),
+    );
+  };
+
   const parseWorkout = (): { workout: Workout; exercises: LoggedWorkoutExercise[] } | null => {
     if (!workout) {
       return null;
@@ -550,38 +646,33 @@ export default function LogWorkoutScreen() {
     const parsedExercises: LoggedWorkoutExercise[] = [];
 
     for (const ex of exercises) {
-      const parsedActualSets: LoggedWorkoutExercise['actualSets'] = [];
-      for (let setIndex = 0; setIndex < ex.actualSets.length; setIndex++) {
-        const actualSet = ex.actualSets[setIndex];
-        const actualReps = Number.parseInt(actualSet.actualRepsInput.trim(), 10);
-        const actualWeightKg = Number.parseFloat(actualSet.actualWeightKgInput.trim().replace(',', '.'));
-
-        if (!Number.isFinite(actualReps) || actualReps <= 0) {
-          themedAlert('Check your numbers', `Enter positive reps for set ${setIndex + 1} of "${ex.name}".`);
-          return null;
-        }
-        if (!Number.isFinite(actualWeightKg) || actualWeightKg < 0) {
-          themedAlert(
-            'Check your numbers',
-            `Enter a valid weight (0 for bodyweight) for set ${setIndex + 1} of "${ex.name}".`,
-          );
-          return null;
-        }
-
-        parsedActualSets.push({
-          actualReps,
-          actualWeightKg,
-        });
+      const parsedActual = parseLoggedExerciseFromDraft(
+        {
+          activityType: ex.activityType,
+          actualSets: ex.actualSets,
+          actualDurationMinutesInput: ex.actualDurationMinutesInput,
+          actualDistanceMilesInput: ex.actualDistanceMilesInput,
+          actualScoreInput: ex.actualScoreInput,
+        },
+        ex.name,
+      );
+      if (!parsedActual.ok) {
+        themedAlert(parsedActual.title, parsedActual.message);
+        return null;
       }
 
       parsedExercises.push({
         id: ex.id,
         workoutExerciseId: ex.workoutExerciseId,
+        activityType: ex.activityType,
         name: ex.name,
         sets: ex.sets,
         reps: ex.reps,
         weightKg: ex.weightKg,
-        actualSets: parsedActualSets,
+        durationMinutes: ex.durationMinutes,
+        distanceMiles: ex.distanceMiles,
+        score: ex.score,
+        ...parsedActual.exercise,
       });
     }
 
@@ -744,80 +835,179 @@ export default function LogWorkoutScreen() {
               </Pressable>
             </View>
             <Text style={[styles.exerciseName, { color: textColor }]}>{exercise.name}</Text>
-            <Text style={styles.plannedLine}>
-              Planned: {exercise.sets} set{exercise.sets === 1 ? '' : 's'} x {exercise.reps} reps @ {exercise.weightKg} lb
-            </Text>
-            <View style={styles.actualSetsContainer}>
-              {exercise.actualSets.map((actualSet, setIndex) => (
-                <View key={actualSet.id} style={styles.actualSetRow}>
-                  <Text style={[styles.setLabel, { color: textColor }]}>Set {setIndex + 1}</Text>
-                  <View style={styles.setRowWithCheckbox}>
-                    <Pressable
-                      accessibilityRole="checkbox"
-                      accessibilityLabel={`Use planned reps and weight for set ${setIndex + 1}`}
-                      accessibilityState={{ checked: hasActualSetValues(actualSet) }}
-                      onPress={() => toggleActualSetPlannedValues(exercise.id, actualSet.id)}
-                      style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
-                      hitSlop={8}>
-                      <Ionicons
-                        name={hasActualSetValues(actualSet) ? 'checkbox' : 'square-outline'}
-                        size={22}
-                        color={Colors[activeScheme].tint}
-                      />
-                    </Pressable>
-                    <View style={styles.setRow}>
-                      <View style={styles.unitInputWrap}>
-                        <TextInput
-                          value={actualSet.actualRepsInput}
-                          onChangeText={(value) => updateActualSetField(exercise.id, actualSet.id, 'actualRepsInput', value)}
-                          placeholder="0"
-                          keyboardType="number-pad"
-                          placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                          style={[
-                            styles.input,
-                            styles.setInput,
-                            styles.unitInput,
-                            { color: textColor, borderColor, backgroundColor: inputBackground },
-                          ]}
-                        />
-                        <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>reps</Text>
-                      </View>
-                      <View style={styles.unitInputWrap}>
-                        <TextInput
-                          value={actualSet.actualWeightKgInput}
-                          onChangeText={(value) =>
-                            updateActualSetField(exercise.id, actualSet.id, 'actualWeightKgInput', value)
-                          }
-                          placeholder="Weight"
-                          keyboardType="decimal-pad"
-                          placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                          style={[
-                            styles.input,
-                            styles.setInput,
-                            styles.unitInput,
-                            { color: textColor, borderColor, backgroundColor: inputBackground },
-                          ]}
-                        />
-                        <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>lb</Text>
+            <Text style={styles.plannedLine}>Planned: {formatPlannedExerciseSummary(exercise)}</Text>
+
+            {exercise.activityType === 'strength' ? (
+              <>
+                <View style={styles.actualSetsContainer}>
+                  {exercise.actualSets.map((actualSet, setIndex) => (
+                    <View key={actualSet.id} style={styles.actualSetRow}>
+                      <Text style={[styles.setLabel, { color: textColor }]}>Set {setIndex + 1}</Text>
+                      <View style={styles.setRowWithCheckbox}>
+                        <Pressable
+                          accessibilityRole="checkbox"
+                          accessibilityLabel={`Use planned reps and weight for set ${setIndex + 1}`}
+                          accessibilityState={{ checked: hasActualSetValues(actualSet) }}
+                          onPress={() => toggleActualSetPlannedValues(exercise.id, actualSet.id)}
+                          style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                          hitSlop={8}>
+                          <Ionicons
+                            name={hasActualSetValues(actualSet) ? 'checkbox' : 'square-outline'}
+                            size={22}
+                            color={Colors[activeScheme].tint}
+                          />
+                        </Pressable>
+                        <View style={styles.setRow}>
+                          <View style={styles.unitInputWrap}>
+                            <TextInput
+                              value={actualSet.actualRepsInput}
+                              onChangeText={(value) => updateActualSetField(exercise.id, actualSet.id, 'actualRepsInput', value)}
+                              placeholder="0"
+                              keyboardType="number-pad"
+                              placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                              style={[
+                                styles.input,
+                                styles.setInput,
+                                styles.unitInput,
+                                { color: textColor, borderColor, backgroundColor: inputBackground },
+                              ]}
+                            />
+                            <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>reps</Text>
+                          </View>
+                          <View style={styles.unitInputWrap}>
+                            <TextInput
+                              value={actualSet.actualWeightKgInput}
+                              onChangeText={(value) =>
+                                updateActualSetField(exercise.id, actualSet.id, 'actualWeightKgInput', value)
+                              }
+                              placeholder="Weight"
+                              keyboardType="decimal-pad"
+                              placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                              style={[
+                                styles.input,
+                                styles.setInput,
+                                styles.unitInput,
+                                { color: textColor, borderColor, backgroundColor: inputBackground },
+                              ]}
+                            />
+                            <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>lb</Text>
+                          </View>
+                        </View>
+                        <Pressable
+                          onPress={() => deleteActualSet(exercise.id, actualSet.id)}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Delete set ${setIndex + 1}`}
+                          style={({ pressed }) => [styles.deleteSetButton, pressed && styles.checkboxButtonPressed]}>
+                          <Ionicons name="close" size={20} color="#ef4444" />
+                        </Pressable>
                       </View>
                     </View>
-                    <Pressable
-                      onPress={() => deleteActualSet(exercise.id, actualSet.id)}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete set ${setIndex + 1}`}
-                      style={({ pressed }) => [styles.deleteSetButton, pressed && styles.checkboxButtonPressed]}>
-                      <Ionicons name="close" size={20} color="#ef4444" />
-                    </Pressable>
+                  ))}
+                </View>
+                <Pressable
+                  onPress={() => addActualSet(exercise.id)}
+                  style={({ pressed }) => [styles.addSetButton, { borderColor }, pressed && styles.checkboxButtonPressed]}>
+                  <Text style={[styles.addSetButtonLabel, { color: textColor }]}>+ Add set</Text>
+                </Pressable>
+              </>
+            ) : null}
+
+            {exercise.activityType === 'cardio' ? (
+              <View style={styles.actualSetRow}>
+                <View style={styles.setRowWithCheckbox}>
+                  <Pressable
+                    accessibilityRole="checkbox"
+                    accessibilityLabel="Use planned duration and distance"
+                    accessibilityState={{ checked: hasCardioActualValues(exercise) }}
+                    onPress={() => toggleCardioPlannedValues(exercise.id)}
+                    style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                    hitSlop={8}>
+                    <Ionicons
+                      name={hasCardioActualValues(exercise) ? 'checkbox' : 'square-outline'}
+                      size={22}
+                      color={Colors[activeScheme].tint}
+                    />
+                  </Pressable>
+                  <View style={styles.setRow}>
+                    <View style={styles.unitInputWrap}>
+                      <TextInput
+                        value={exercise.actualDurationMinutesInput}
+                        onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationMinutesInput', value)}
+                        placeholder="0"
+                        keyboardType="number-pad"
+                        placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                        style={[
+                          styles.input,
+                          styles.setInput,
+                          styles.unitInput,
+                          { color: textColor, borderColor, backgroundColor: inputBackground },
+                        ]}
+                      />
+                      <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>min</Text>
+                    </View>
+                    <View style={styles.unitInputWrap}>
+                      <TextInput
+                        value={exercise.actualDistanceMilesInput}
+                        onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDistanceMilesInput', value)}
+                        placeholder="Optional"
+                        keyboardType="decimal-pad"
+                        placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                        style={[
+                          styles.input,
+                          styles.setInput,
+                          styles.unitInput,
+                          { color: textColor, borderColor, backgroundColor: inputBackground },
+                        ]}
+                      />
+                      <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>mi</Text>
+                    </View>
                   </View>
                 </View>
-              ))}
-            </View>
-            <Pressable
-              onPress={() => addActualSet(exercise.id)}
-              style={({ pressed }) => [styles.addSetButton, { borderColor }, pressed && styles.checkboxButtonPressed]}>
-              <Text style={[styles.addSetButtonLabel, { color: textColor }]}>+ Add set</Text>
-            </Pressable>
+              </View>
+            ) : null}
+
+            {exercise.activityType === 'sport' ? (
+              <View style={styles.fieldColumn}>
+                <View style={styles.setRowWithCheckbox}>
+                  <Pressable
+                    accessibilityRole="checkbox"
+                    accessibilityLabel="Use planned duration and score"
+                    accessibilityState={{ checked: hasSportActualValues(exercise) }}
+                    onPress={() => toggleSportPlannedValues(exercise.id)}
+                    style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                    hitSlop={8}>
+                    <Ionicons
+                      name={hasSportActualValues(exercise) ? 'checkbox' : 'square-outline'}
+                      size={22}
+                      color={Colors[activeScheme].tint}
+                    />
+                  </Pressable>
+                  <View style={[styles.unitInputWrap, styles.flexField]}>
+                    <TextInput
+                      value={exercise.actualDurationMinutesInput}
+                      onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationMinutesInput', value)}
+                      placeholder="0"
+                      keyboardType="number-pad"
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      style={[
+                        styles.input,
+                        styles.unitInput,
+                        { color: textColor, borderColor, backgroundColor: inputBackground },
+                      ]}
+                    />
+                    <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>min</Text>
+                  </View>
+                </View>
+                <TextInput
+                  value={exercise.actualScoreInput}
+                  onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualScoreInput', value)}
+                  placeholder="Score (optional)"
+                  placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                  style={[styles.input, { color: textColor, borderColor, backgroundColor: inputBackground }]}
+                />
+              </View>
+            ) : null}
           </View>
         ))}
         </ScrollView>
@@ -835,6 +1025,13 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 16,
     gap: 14,
+  },
+  fieldColumn: {
+    gap: 10,
+  },
+  flexField: {
+    flex: 1,
+    minWidth: 0,
   },
   workoutTitle: {
     fontSize: 20,

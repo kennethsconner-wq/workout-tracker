@@ -1,13 +1,21 @@
 import type { WorkoutIconId } from '@/lib/workoutIcons';
+import type { ActivityType } from '@/lib/activityTypes';
 
 export type LoggedWorkoutExercise = {
   id: string;
   workoutExerciseId: string;
+  activityType: ActivityType;
   name: string;
   sets: number;
   reps: number;
   weightKg: number;
+  durationMinutes: number;
+  distanceMiles: number;
+  score: string;
   actualSets: LoggedActualSet[];
+  actualDurationMinutes: number;
+  actualDistanceMiles: number;
+  actualScore: string;
 };
 
 export type LoggedActualSet = {
@@ -27,10 +35,14 @@ export type LoggedWorkout = {
 
 export type WorkoutExercise = {
   id: string;
+  activityType: ActivityType;
   name: string;
   sets: number;
   reps: number;
   weightKg: number;
+  durationMinutes: number;
+  distanceMiles: number;
+  score: string;
 };
 
 export const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
