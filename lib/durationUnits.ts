@@ -1,31 +1,95 @@
-export const DURATION_UNITS = ['minutes', 'seconds', 'hours'] as const;
+export const STANDARD_DURATION_UNITS = ['minutes', 'seconds', 'hours', 'breaths'] as const;
 
-export type DurationUnit = (typeof DURATION_UNITS)[number];
+export type StandardDurationUnit = (typeof STANDARD_DURATION_UNITS)[number];
+
+/** Stretch uses standard units including `breaths`. */
+export const STRETCH_DURATION_UNITS = STANDARD_DURATION_UNITS;
+
+/** Sport: time units only; excludes `breaths`. */
+export const SPORT_DURATION_UNITS = ['minutes', 'seconds', 'hours'] as const;
+
+export type SportDurationUnit = (typeof SPORT_DURATION_UNITS)[number];
+
+/** Cardio duration: time units only (`sets` is a distance unit). */
+export const CARDIO_DURATION_UNITS = SPORT_DURATION_UNITS;
+
+export type CardioDurationUnit = SportDurationUnit;
+
+export const DURATION_UNITS = STANDARD_DURATION_UNITS;
+
+export type DurationUnit = StandardDurationUnit;
 
 export const DEFAULT_DURATION_UNIT: DurationUnit = 'minutes';
+
+export const DEFAULT_STANDARD_DURATION_UNIT: StandardDurationUnit = 'minutes';
+
+export const DEFAULT_CARDIO_DURATION_UNIT: CardioDurationUnit = 'minutes';
+
+export const DEFAULT_SPORT_DURATION_UNIT: SportDurationUnit = 'minutes';
+
+/** Default duration unit for stretch exercises in create/edit workout forms. */
+export const DEFAULT_STRETCH_DURATION_UNIT: DurationUnit = 'seconds';
 
 export const DURATION_UNIT_LABELS: Record<DurationUnit, string> = {
   minutes: 'Minutes',
   seconds: 'Seconds',
   hours: 'Hours',
+  breaths: 'Breaths',
 };
 
 export const DURATION_UNIT_ABBREVIATIONS: Record<DurationUnit, string> = {
   minutes: 'min',
   seconds: 'sec',
   hours: 'hr',
+  breaths: 'br',
 };
 
 export function isDurationUnit(value: string): value is DurationUnit {
   return (DURATION_UNITS as readonly string[]).includes(value);
 }
 
+export function isStandardDurationUnit(value: string): value is StandardDurationUnit {
+  return (STANDARD_DURATION_UNITS as readonly string[]).includes(value);
+}
+
+export function isCardioDurationUnit(value: string): value is CardioDurationUnit {
+  return (CARDIO_DURATION_UNITS as readonly string[]).includes(value);
+}
+
+export function isSportDurationUnit(value: string): value is SportDurationUnit {
+  return (SPORT_DURATION_UNITS as readonly string[]).includes(value);
+}
+
 export function normalizeDurationUnit(value: unknown): DurationUnit {
-  return typeof value === 'string' && isDurationUnit(value) ? value : DEFAULT_DURATION_UNIT;
+  if (typeof value === 'string' && isDurationUnit(value)) {
+    return value;
+  }
+  return DEFAULT_DURATION_UNIT;
+}
+
+/** Use for stretch exercises (includes `breaths`). */
+export function normalizeStretchDurationUnit(value: unknown): StandardDurationUnit {
+  if (typeof value === 'string' && isStandardDurationUnit(value)) {
+    return value;
+  }
+  return DEFAULT_STANDARD_DURATION_UNIT;
+}
+
+/** Use for sport exercises (excludes `breaths`). */
+export function normalizeSportDurationUnit(value: unknown): SportDurationUnit {
+  if (typeof value === 'string' && isSportDurationUnit(value)) {
+    return value;
+  }
+  return DEFAULT_SPORT_DURATION_UNIT;
+}
+
+/** Use for cardio duration (excludes `breaths`; `sets` is a distance unit). */
+export function normalizeCardioDurationUnit(value: unknown): CardioDurationUnit {
+  return normalizeSportDurationUnit(value);
 }
 
 export function usesIntegerDurationInput(unit: DurationUnit): boolean {
-  return unit === 'minutes' || unit === 'seconds';
+  return unit === 'minutes' || unit === 'seconds' || unit === 'breaths';
 }
 
 export function parseDurationInput(raw: string, unit: DurationUnit): number {

@@ -43,7 +43,7 @@ type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
   exercises: Array<
     Pick<
       Workout['exercises'][number],
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score' | 'scoreUnit'
     >
   >;
 };
@@ -296,12 +296,14 @@ export function WorkoutsList() {
         name: ex.name,
         sets: ex.sets,
         reps: ex.reps,
-        weightKg: ex.weightKg,
+        weight: ex.weight,
+        weightUnit: ex.weightUnit,
         duration: ex.duration,
         durationUnit: ex.durationUnit,
         distance: ex.distance,
         distanceUnit: ex.distanceUnit,
         score: ex.score,
+        scoreUnit: ex.scoreUnit,
       })),
     };
 

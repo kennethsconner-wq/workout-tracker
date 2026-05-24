@@ -1,4 +1,4 @@
-export const ACTIVITY_TYPES = ['strength', 'cardio', 'sport'] as const;
+export const ACTIVITY_TYPES = ['strength', 'cardio', 'sport', 'stretch'] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -8,6 +8,7 @@ export const ACTIVITY_TYPE_LABELS: Record<ActivityType, string> = {
   strength: 'Strength',
   cardio: 'Cardio',
   sport: 'Sport',
+  stretch: 'Stretch',
 };
 
 export function isActivityType(value: string): value is ActivityType {

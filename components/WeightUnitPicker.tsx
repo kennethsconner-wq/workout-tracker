@@ -5,30 +5,21 @@ import { Text } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import {
-  DURATION_UNIT_ABBREVIATIONS,
-  DURATION_UNIT_LABELS,
-  SPORT_DURATION_UNITS,
-  type DurationUnit,
-} from '@/lib/durationUnits';
+  WEIGHT_UNITS,
+  WEIGHT_UNIT_ABBREVIATIONS,
+  WEIGHT_UNIT_LABELS,
+  type WeightUnit,
+} from '@/lib/weightUnits';
 
 type Props = {
-  value: DurationUnit;
-  onChange: (next: DurationUnit) => void;
-  /** Defaults to sport/time units (excludes `breaths`; cardio `sets` is a distance unit). */
-  units?: readonly DurationUnit[];
+  value: WeightUnit;
+  onChange: (next: WeightUnit) => void;
   disabled?: boolean;
   borderColor: string;
   textColor: string;
 };
 
-export function DurationUnitPicker({
-  value,
-  onChange,
-  units = SPORT_DURATION_UNITS,
-  disabled = false,
-  borderColor,
-  textColor,
-}: Props) {
+export function WeightUnitPicker({ value, onChange, disabled = false, borderColor, textColor }: Props) {
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
   const tint = Colors[activeScheme].tint;
@@ -38,7 +29,7 @@ export function DurationUnitPicker({
     <>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Duration unit: ${DURATION_UNIT_LABELS[value]}. Tap to change.`}
+        accessibilityLabel={`Weight unit: ${WEIGHT_UNIT_LABELS[value]}. Tap to change.`}
         disabled={disabled}
         onPress={() => setOpen(true)}
         style={({ pressed }) => [
@@ -48,7 +39,7 @@ export function DurationUnitPicker({
           pressed && !disabled && styles.buttonPressed,
         ]}>
         <Text style={[styles.buttonLabel, { color: textColor }]} numberOfLines={1}>
-          {DURATION_UNIT_ABBREVIATIONS[value]}
+          {WEIGHT_UNIT_ABBREVIATIONS[value]}
         </Text>
       </Pressable>
 
@@ -57,9 +48,9 @@ export function DurationUnitPicker({
           <Pressable
             style={[styles.sheet, { backgroundColor: activeScheme === 'dark' ? '#171717' : '#fff', borderColor }]}
             onPress={(event) => event.stopPropagation()}>
-            <Text style={[styles.sheetTitle, { color: textColor }]}>Duration unit</Text>
+            <Text style={[styles.sheetTitle, { color: textColor }]}>Weight unit</Text>
             <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-              {units.map((unit) => {
+              {WEIGHT_UNITS.map((unit) => {
                 const selected = unit === value;
                 return (
                   <Pressable
@@ -76,9 +67,9 @@ export function DurationUnitPicker({
                       selected && { borderColor: tint, backgroundColor: activeScheme === 'dark' ? 'rgba(35, 213, 213, 0.12)' : 'rgba(57, 170, 170, 0.12)' },
                       pressed && styles.optionPressed,
                     ]}>
-                    <Text style={[styles.optionLabel, { color: textColor }]}>{DURATION_UNIT_LABELS[unit]}</Text>
+                    <Text style={[styles.optionLabel, { color: textColor }]}>{WEIGHT_UNIT_LABELS[unit]}</Text>
                     <Text style={[styles.optionAbbrev, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                      {DURATION_UNIT_ABBREVIATIONS[unit]}
+                      {WEIGHT_UNIT_ABBREVIATIONS[unit]}
                     </Text>
                   </Pressable>
                 );

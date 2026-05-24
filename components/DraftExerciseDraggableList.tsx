@@ -12,22 +12,27 @@ import {
 } from 'react-native';
 
 import { ActivityTypePicker } from '@/components/ActivityTypePicker';
+import { CardioDistanceModePicker } from '@/components/CardioDistanceModePicker';
 import { CardioDistanceUnitPicker } from '@/components/CardioDistanceUnitPicker';
 import { DurationUnitPicker } from '@/components/DurationUnitPicker';
+import { ScoreUnitPicker } from '@/components/ScoreUnitPicker';
+import { WeightUnitPicker } from '@/components/WeightUnitPicker';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import type { ActivityType } from '@/lib/activityTypes';
+import type { CardioDistanceMode } from '@/lib/cardioDistanceMode';
 import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
 import { usesIntegerDistanceInput } from '@/lib/cardioDistanceUnits';
-import type { DurationUnit } from '@/lib/durationUnits';
-import { usesIntegerDurationInput } from '@/lib/durationUnits';
+import { CARDIO_DURATION_UNITS, SPORT_DURATION_UNITS, STRETCH_DURATION_UNITS, usesIntegerDurationInput, type DurationUnit } from '@/lib/durationUnits';
+import type { ScoreUnit } from '@/lib/scoreUnits';
+import type { WeightUnit } from '@/lib/weightUnits';
 import type { ExerciseDraftRow } from '@/lib/exerciseDraft';
 import { confirmEditLinkedExercise } from '@/lib/linkedExerciseEdit';
 import { themedAlert } from '@/lib/themedAlert';
 
 export type { ExerciseDraftRow } from '@/lib/exerciseDraft';
 
-type NumericDraftField = 'sets' | 'reps' | 'weightKg' | 'duration' | 'distance';
+type NumericDraftField = 'sets' | 'reps' | 'weight' | 'duration' | 'distance';
 type TextDraftField = 'score';
 type DraftField = NumericDraftField | TextDraftField;
 
@@ -48,7 +53,10 @@ type Props = {
   onUpdateExerciseActivityType: (clientId: string, activityType: ActivityType) => void;
   onUpdateExerciseField: (clientId: string, field: DraftField, value: string) => void;
   onUpdateExerciseDistanceUnit: (clientId: string, unit: CardioDistanceUnit) => void;
+  onUpdateExerciseCardioDistanceMode: (clientId: string, mode: CardioDistanceMode) => void;
   onUpdateExerciseDurationUnit: (clientId: string, unit: DurationUnit) => void;
+  onUpdateExerciseScoreUnit: (clientId: string, unit: ScoreUnit) => void;
+  onUpdateExerciseWeightUnit: (clientId: string, unit: WeightUnit) => void;
   onRemoveExercise: (clientId: string) => void;
   /** When true (e.g. Edit Workout), show a confirmation before removing an exercise. */
   confirmBeforeRemoveExercise?: boolean;
@@ -108,7 +116,10 @@ export function DraftExerciseDraggableList({
   onUpdateExerciseActivityType,
   onUpdateExerciseField,
   onUpdateExerciseDistanceUnit,
+  onUpdateExerciseCardioDistanceMode,
   onUpdateExerciseDurationUnit,
+  onUpdateExerciseScoreUnit,
+  onUpdateExerciseWeightUnit,
   onRemoveExercise,
   confirmBeforeRemoveExercise = false,
 }: Props) {
@@ -227,37 +238,47 @@ export function DraftExerciseDraggableList({
               />
 
               {exercise.activityType === 'strength' ? (
-                <View style={styles.setRow}>
-                  <UnitField
-                    value={exercise.sets}
-                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'sets', value)}
-                    placeholder="0"
-                    suffix="sets"
-                    keyboardType="number-pad"
-                    editable={!fieldsLocked}
-                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
-                    suffixColor={suffixColor}
-                  />
-                  <UnitField
-                    value={exercise.reps}
-                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'reps', value)}
-                    placeholder="0"
-                    suffix="reps"
-                    keyboardType="number-pad"
-                    editable={!fieldsLocked}
-                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
-                    suffixColor={suffixColor}
-                  />
-                  <UnitField
-                    value={exercise.weightKg}
-                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'weightKg', value)}
-                    placeholder="Weight"
-                    suffix="lb"
-                    keyboardType="decimal-pad"
-                    editable={!fieldsLocked}
-                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
-                    suffixColor={suffixColor}
-                  />
+                <View style={styles.strengthFieldsColumn}>
+                  <View style={styles.setRow}>
+                    <UnitField
+                      value={exercise.sets}
+                      onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'sets', value)}
+                      placeholder="0"
+                      suffix="sets"
+                      keyboardType="number-pad"
+                      editable={!fieldsLocked}
+                      setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
+                      suffixColor={suffixColor}
+                    />
+                    <UnitField
+                      value={exercise.reps}
+                      onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'reps', value)}
+                      placeholder="0"
+                      suffix="reps"
+                      keyboardType="number-pad"
+                      editable={!fieldsLocked}
+                      setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
+                      suffixColor={suffixColor}
+                    />
+                  </View>
+                  <View style={styles.strengthWeightWrap}>
+                    <TextInput
+                      value={exercise.weight}
+                      onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'weight', value)}
+                      placeholder="Weight"
+                      keyboardType="decimal-pad"
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      editable={!fieldsLocked}
+                      style={[setRowInputStyle, lockedFieldStyle, styles.strengthWeightInput]}
+                    />
+                    <WeightUnitPicker
+                      value={exercise.weightUnit}
+                      onChange={(unit) => onUpdateExerciseWeightUnit(exercise.clientId, unit)}
+                      disabled={fieldsLocked}
+                      borderColor={borderColor}
+                      textColor={textColor}
+                    />
+                  </View>
                 </View>
               ) : null}
 
@@ -267,7 +288,7 @@ export function DraftExerciseDraggableList({
                     <TextInput
                       value={exercise.duration}
                       onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'duration', value)}
-                      placeholder="Time"
+                      placeholder={exercise.cardioDistanceMode === 'total' ? 'Duration (Optional)' : 'Duration'}
                       keyboardType={usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'}
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       editable={!fieldsLocked}
@@ -276,16 +297,36 @@ export function DraftExerciseDraggableList({
                     <DurationUnitPicker
                       value={exercise.durationUnit}
                       onChange={(unit) => onUpdateExerciseDurationUnit(exercise.clientId, unit)}
+                      units={CARDIO_DURATION_UNITS}
                       disabled={fieldsLocked}
                       borderColor={borderColor}
                       textColor={textColor}
                     />
+                    <CardioDistanceModePicker
+                      value={exercise.cardioDistanceMode}
+                      onChange={(mode) => onUpdateExerciseCardioDistanceMode(exercise.clientId, mode)}
+                      disabled={fieldsLocked}
+                      borderColor={borderColor}
+                      textColor={textColor}
+                    />
+                    {exercise.cardioDistanceMode === 'per' ? (
+                      <CardioDistanceUnitPicker
+                        value={exercise.distanceUnit}
+                        onChange={(unit) => onUpdateExerciseDistanceUnit(exercise.clientId, unit)}
+                        disabled={fieldsLocked}
+                        borderColor={borderColor}
+                        textColor={textColor}
+                      />
+                    ) : null}
                   </View>
                   <View style={styles.cardioDistanceWrap}>
+                    {exercise.cardioDistanceMode === 'per' ? (
+                      <Text style={[styles.cardioForLabel, { color: textColor }]}>For</Text>
+                    ) : null}
                     <TextInput
                       value={exercise.distance}
                       onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'distance', value)}
-                      placeholder="Distance"
+                      placeholder={exercise.cardioDistanceMode === 'total' ? 'Distance (Optional)' : 'Distance'}
                       keyboardType={usesIntegerDistanceInput(exercise.distanceUnit) ? 'number-pad' : 'decimal-pad'}
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       editable={!fieldsLocked}
@@ -294,7 +335,7 @@ export function DraftExerciseDraggableList({
                     <CardioDistanceUnitPicker
                       value={exercise.distanceUnit}
                       onChange={(unit) => onUpdateExerciseDistanceUnit(exercise.clientId, unit)}
-                      disabled={fieldsLocked}
+                      disabled={fieldsLocked || exercise.cardioDistanceMode === 'per'}
                       borderColor={borderColor}
                       textColor={textColor}
                     />
@@ -303,12 +344,12 @@ export function DraftExerciseDraggableList({
               ) : null}
 
               {exercise.activityType === 'sport' ? (
-                <View style={styles.setRow}>
+                <View style={styles.cardioFieldsColumn}>
                   <View style={styles.cardioDurationWrap}>
                     <TextInput
                       value={exercise.duration}
                       onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'duration', value)}
-                      placeholder="Time"
+                      placeholder="Duration (Optional)"
                       keyboardType={usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'}
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       editable={!fieldsLocked}
@@ -317,19 +358,62 @@ export function DraftExerciseDraggableList({
                     <DurationUnitPicker
                       value={exercise.durationUnit}
                       onChange={(unit) => onUpdateExerciseDurationUnit(exercise.clientId, unit)}
+                      units={SPORT_DURATION_UNITS}
                       disabled={fieldsLocked}
                       borderColor={borderColor}
                       textColor={textColor}
                     />
                   </View>
-                  <View style={styles.scoreInputWrap}>
+                  <View style={styles.sportScoreRow}>
                     <TextInput
                       value={exercise.score}
                       onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'score', value)}
-                      placeholder="Score (optional)"
+                      placeholder="Score (Optional)"
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       editable={!fieldsLocked}
-                      style={[setRowInputStyle, lockedFieldStyle]}
+                      style={[setRowInputStyle, lockedFieldStyle, styles.sportScoreInput]}
+                    />
+                    <ScoreUnitPicker
+                      value={exercise.scoreUnit}
+                      onChange={(unit) => onUpdateExerciseScoreUnit(exercise.clientId, unit)}
+                      disabled={fieldsLocked}
+                      borderColor={borderColor}
+                      textColor={textColor}
+                    />
+                  </View>
+                </View>
+              ) : null}
+
+              {exercise.activityType === 'stretch' ? (
+                <View style={styles.stretchRow}>
+                  <UnitField
+                    value={exercise.sets}
+                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'sets', value)}
+                    placeholder="0"
+                    suffix="sets"
+                    keyboardType="number-pad"
+                    editable={!fieldsLocked}
+                    setRowInputStyle={[setRowInputStyle, lockedFieldStyle]}
+                    suffixColor={suffixColor}
+                    wrapStyle={styles.stretchSetsWrap}
+                  />
+                  <View style={styles.stretchDurationWrap}>
+                    <TextInput
+                      value={exercise.duration}
+                      onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'duration', value)}
+                      placeholder="Duration"
+                      keyboardType={usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'}
+                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                      editable={!fieldsLocked}
+                      style={[setRowInputStyle, lockedFieldStyle, styles.stretchDurationInput]}
+                    />
+                    <DurationUnitPicker
+                      value={exercise.durationUnit}
+                      onChange={(unit) => onUpdateExerciseDurationUnit(exercise.clientId, unit)}
+                      units={STRETCH_DURATION_UNITS}
+                      disabled={fieldsLocked}
+                      borderColor={borderColor}
+                      textColor={textColor}
                     />
                   </View>
                 </View>
@@ -410,6 +494,44 @@ const styles = StyleSheet.create({
     minWidth: 108,
     maxWidth: 108,
   },
+  stretchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  stretchSetsWrap: {
+    flexGrow: 0,
+    flexShrink: 0,
+    width: 108,
+    minWidth: 108,
+    maxWidth: 108,
+  },
+  stretchDurationWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  stretchDurationInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  strengthFieldsColumn: {
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  strengthWeightWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  strengthWeightInput: {
+    flex: 1,
+    minWidth: 0,
+  },
   cardioFieldsColumn: {
     gap: 8,
     alignSelf: 'stretch',
@@ -430,7 +552,21 @@ const styles = StyleSheet.create({
     gap: 8,
     alignSelf: 'stretch',
   },
+  cardioForLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
   cardioDistanceInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sportScoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  sportScoreInput: {
     flex: 1,
     minWidth: 0,
   },

@@ -14,6 +14,7 @@ import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatLoggedExerciseSummary, formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
+import { formatWeightWithUnit } from '@/lib/weightUnits';
 import { navigateToEditLoggedWorkout } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
 import { deleteLoggedWorkout, loadLoggedWorkouts } from '@/lib/workoutsStorage';
@@ -220,7 +221,7 @@ export function LoggedWorkoutLogList() {
           {ex.activityType === 'strength'
             ? ex.actualSets.map((actualSet, setIndex) => (
                 <Text key={`${ex.id}-actual-set-${setIndex}`} style={[styles.setLine, { color: textColor }]}>
-                  Actual set {setIndex + 1}: {actualSet.actualReps} reps @ {actualSet.actualWeightKg} lb
+                  Actual set {setIndex + 1}: {actualSet.actualReps} reps @ {formatWeightWithUnit(actualSet.actualWeight, ex.actualWeightUnit)}
                 </Text>
               ))
             : (

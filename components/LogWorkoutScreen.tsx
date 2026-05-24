@@ -16,6 +16,8 @@ import {
 import { SessionDateTimeField } from '@/components/SessionDateTimeField';
 import { CardioDistanceUnitPicker } from '@/components/CardioDistanceUnitPicker';
 import { DurationUnitPicker } from '@/components/DurationUnitPicker';
+import { ScoreUnitPicker } from '@/components/ScoreUnitPicker';
+import { WeightUnitPicker } from '@/components/WeightUnitPicker';
 import { StickySaveFooter } from '@/components/StickySaveFooter';
 import { Text, View } from '@/components/Themed';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
@@ -29,7 +31,15 @@ import {
 import { themedAlert } from '@/lib/themedAlert';
 import { newId } from '@/lib/ids';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
-import type { LoggedWorkout, LoggedWorkoutExercise, Workout } from '@/lib/types';
+import {
+  buildDraftCardioPerActualSets,
+  cardioPerRowLabel,
+  cardioPerSegmentCount,
+  isCardioPerMode,
+} from '@/lib/cardioPerLog';
+import { normalizeCardioDistanceMode } from '@/lib/cardioDistanceMode';
+import { readStretchSetsFromExercise, stretchActualSetsFromLogged } from '@/lib/stretchSets';
+import type { LoggedWorkout, LoggedWorkoutExercise, StretchSet, Workout } from '@/lib/types';
 import { normalizeActivityType } from '@/lib/activityTypes';
 import {
   formatCardioDistanceValue,
@@ -43,8 +53,14 @@ import {
   usesIntegerDurationInput,
   type DurationUnit,
 } from '@/lib/durationUnits';
+import {
+  normalizeScoreUnit,
+  type ScoreUnit,
+} from '@/lib/scoreUnits';
+import { DEFAULT_WEIGHT_UNIT, normalizeWeightUnit, type WeightUnit } from '@/lib/weightUnits';
 import { formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
 import { hasLoggedExerciseInput, parseLoggedExerciseFromDraft } from '@/lib/logExerciseDraft';
+import { resolveExerciseSetCount } from '@/lib/exerciseDraft';
 import { clearNewLogDraft, isNewLogFormPristine, newLogDraftStorageKey } from '@/lib/logWorkoutDraft';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { addLoggedWorkout, loadLoggedWorkouts, loadWorkouts, updateLoggedWorkout } from '@/lib/workoutsStorage';
@@ -52,19 +68,42 @@ import { addLoggedWorkout, loadLoggedWorkouts, loadWorkouts, updateLoggedWorkout
 type DraftActualSet = {
   id: string;
   actualRepsInput: string;
-  actualWeightKgInput: string;
+  actualWeightInput: string;
+};
+
+type DraftStretchActualSet = {
+  id: string;
+  actualDurationInput: string;
+  actualDurationUnit: DurationUnit;
+};
+
+type DraftCardioPerActualSet = {
+  id: string;
+  actualDurationInput: string;
+  actualDurationUnit: DurationUnit;
 };
 
 type DraftExercise = Omit<
   LoggedWorkoutExercise,
-  'actualSets' | 'actualDuration' | 'actualDistance' | 'actualScore'
+  | 'actualSets'
+  | 'actualStretchSets'
+  | 'actualCardioPerSets'
+  | 'actualDuration'
+  | 'actualDistance'
+  | 'actualScore'
+  | 'actualSetCount'
 > & {
   actualSets: DraftActualSet[];
+  actualStretchSets: DraftStretchActualSet[];
+  actualCardioPerSets: DraftCardioPerActualSet[];
+  /** Template per-set plan — used for planned-value toggle and summary. */
+  stretchSets?: StretchSet[];
   actualDurationInput: string;
   actualDurationUnit: DurationUnit;
   actualDistanceInput: string;
   actualDistanceUnit: CardioDistanceUnit;
   actualScoreInput: string;
+  actualScoreUnit: ScoreUnit;
 };
 
 type LogWorkoutDraft = {
@@ -88,7 +127,7 @@ function parseSessionDateFromIso(iso: string | undefined, fallback: Date): Date 
 }
 
 function hasActualSetValues(actualSet: DraftActualSet): boolean {
-  return actualSet.actualRepsInput.trim().length > 0 && actualSet.actualWeightKgInput.trim().length > 0;
+  return actualSet.actualRepsInput.trim().length > 0 && actualSet.actualWeightInput.trim().length > 0;
 }
 
 function draftStorageKey(workoutId: string): string {
@@ -104,19 +143,62 @@ function loggedActualToDraftSet(as: LoggedWorkoutExercise['actualSets'][number])
   return {
     id: newId(),
     actualRepsInput: String(as.actualReps),
-    actualWeightKgInput: String(as.actualWeightKg),
+    actualWeightInput: String(as.actualWeight),
   };
 }
 
-function hasCardioActualValues(exercise: DraftExercise): boolean {
+function hasCardioTotalActualValues(exercise: DraftExercise): boolean {
   return exercise.actualDurationInput.trim().length > 0 || exercise.actualDistanceInput.trim().length > 0;
+}
+
+function hasCardioPerActualSetValues(actualSet: DraftCardioPerActualSet): boolean {
+  return actualSet.actualDurationInput.trim().length > 0;
 }
 
 function hasSportActualValues(exercise: DraftExercise): boolean {
   return exercise.actualDurationInput.trim().length > 0 || exercise.actualScoreInput.trim().length > 0;
 }
 
+function hasStretchActualSetValues(actualSet: DraftStretchActualSet): boolean {
+  return actualSet.actualDurationInput.trim().length > 0;
+}
+
+function plannedStretchDurationUnitForSet(
+  exercise: Pick<DraftExercise, 'sets' | 'duration' | 'durationUnit' | 'stretchSets'>,
+  setIndex: number,
+): DurationUnit {
+  const planned = readStretchSetsFromExercise(exercise);
+  const plannedSet = planned[setIndex] ?? planned[0];
+  return plannedSet?.durationUnit ?? exercise.durationUnit;
+}
+
+function buildDraftStretchActualSets(
+  exercise: Pick<Workout['exercises'][number], 'activityType' | 'sets' | 'duration' | 'durationUnit' | 'stretchSets'>,
+  loggedSets: LoggedWorkoutExercise['actualStretchSets'],
+): DraftStretchActualSet[] {
+  const planned = readStretchSetsFromExercise(exercise);
+  const rows = stretchActualSetsFromLogged(loggedSets, planned);
+  const setCount = Math.max(rows.length, planned.length, exercise.sets, 1);
+  return Array.from({ length: setCount }, (_, setIndex) => {
+    const row = rows[setIndex];
+    const plannedSet = planned[setIndex] ?? planned[0];
+    return {
+      id: newId(),
+      actualDurationInput: row?.actualDurationInput ?? '',
+      actualDurationUnit: plannedSet?.durationUnit ?? exercise.durationUnit,
+    };
+  });
+}
+
 function loggedExerciseToDraftExercise(loggedExercise: LoggedWorkoutExercise): DraftExercise {
+  const cardioPerDraft =
+    loggedExercise.activityType === 'cardio' && isCardioPerMode(loggedExercise)
+      ? buildDraftCardioPerActualSets(loggedExercise, loggedExercise.actualCardioPerSets ?? []).map((set) => ({
+          id: newId(),
+          ...set,
+        }))
+      : [];
+
   return {
     id: loggedExercise.id,
     workoutExerciseId: loggedExercise.workoutExerciseId,
@@ -124,27 +206,46 @@ function loggedExerciseToDraftExercise(loggedExercise: LoggedWorkoutExercise): D
     name: loggedExercise.name,
     sets: loggedExercise.sets,
     reps: loggedExercise.reps,
-    weightKg: loggedExercise.weightKg,
+    weight: loggedExercise.weight,
+    weightUnit: loggedExercise.weightUnit,
     duration: loggedExercise.duration,
     durationUnit: loggedExercise.durationUnit,
     distance: loggedExercise.distance,
     distanceUnit: loggedExercise.distanceUnit,
+    cardioDistanceMode: loggedExercise.cardioDistanceMode,
     score: loggedExercise.score,
+    scoreUnit: loggedExercise.scoreUnit,
     actualSets:
       loggedExercise.activityType === 'strength'
         ? loggedExercise.actualSets.map((actualSet) => loggedActualToDraftSet(actualSet))
         : [],
+    actualStretchSets:
+      loggedExercise.activityType === 'stretch'
+        ? buildDraftStretchActualSets(
+            {
+              activityType: loggedExercise.activityType,
+              sets: loggedExercise.sets,
+              duration: loggedExercise.duration,
+              durationUnit: loggedExercise.durationUnit,
+            },
+            loggedExercise.actualStretchSets,
+          )
+        : [],
+    actualCardioPerSets: cardioPerDraft,
+    stretchSets: undefined,
     actualDurationInput:
       loggedExercise.actualDuration > 0
-        ? formatDurationValue(loggedExercise.actualDuration, loggedExercise.actualDurationUnit)
+        ? formatDurationValue(loggedExercise.actualDuration, loggedExercise.durationUnit)
         : '',
-    actualDurationUnit: loggedExercise.actualDurationUnit,
+    actualDurationUnit: loggedExercise.durationUnit,
     actualDistanceInput:
       loggedExercise.actualDistance > 0
-        ? formatCardioDistanceValue(loggedExercise.actualDistance, loggedExercise.actualDistanceUnit)
+        ? formatCardioDistanceValue(loggedExercise.actualDistance, loggedExercise.distanceUnit)
         : '',
-    actualDistanceUnit: loggedExercise.actualDistanceUnit,
+    actualDistanceUnit: loggedExercise.distanceUnit,
     actualScoreInput: loggedExercise.actualScore,
+    actualScoreUnit: loggedExercise.scoreUnit,
+    actualWeightUnit: loggedExercise.weightUnit,
   };
 }
 
@@ -156,18 +257,26 @@ function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): 
     name: exercise.name,
     sets: exercise.sets,
     reps: exercise.reps,
-    weightKg: exercise.weightKg,
+    weight: exercise.weight,
+    weightUnit: exercise.weightUnit,
     duration: exercise.duration,
     durationUnit: exercise.durationUnit,
     distance: exercise.distance,
     distanceUnit: exercise.distanceUnit,
+    cardioDistanceMode: exercise.cardioDistanceMode,
     score: exercise.score,
+    scoreUnit: exercise.scoreUnit,
     actualSets: [],
+    actualStretchSets: [],
+    actualCardioPerSets: [],
+    stretchSets: exercise.stretchSets,
     actualDurationInput: '',
     actualDurationUnit: exercise.durationUnit,
     actualDistanceInput: '',
     actualDistanceUnit: exercise.distanceUnit,
     actualScoreInput: '',
+    actualScoreUnit: exercise.scoreUnit,
+    actualWeightUnit: exercise.weightUnit,
   };
 
   if (exercise.activityType === 'strength') {
@@ -177,7 +286,24 @@ function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): 
       actualSets: Array.from({ length: setCount }, () => ({
         id: newId(),
         actualRepsInput: '',
-        actualWeightKgInput: '',
+        actualWeightInput: '',
+      })),
+    };
+  }
+
+  if (exercise.activityType === 'stretch') {
+    return {
+      ...base,
+      actualStretchSets: buildDraftStretchActualSets(exercise, []),
+    };
+  }
+
+  if (exercise.activityType === 'cardio' && isCardioPerMode(exercise)) {
+    return {
+      ...base,
+      actualCardioPerSets: buildDraftCardioPerActualSets(exercise, []).map((set) => ({
+        id: newId(),
+        ...set,
       })),
     };
   }
@@ -225,7 +351,7 @@ function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
       typeof o.name !== 'string' ||
       typeof o.sets !== 'number' ||
       typeof o.reps !== 'number' ||
-      typeof o.weightKg !== 'number'
+      (typeof o.weight !== 'number' && typeof o.weightKg !== 'number')
     ) {
       return null;
     }
@@ -244,8 +370,69 @@ function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
       actualSets.push({
         id: so.id,
         actualRepsInput: typeof so.actualRepsInput === 'string' ? so.actualRepsInput : '',
-        actualWeightKgInput: typeof so.actualWeightKgInput === 'string' ? so.actualWeightKgInput : '',
+        actualWeightInput:
+          typeof so.actualWeightInput === 'string'
+            ? so.actualWeightInput
+            : typeof so.actualWeightKgInput === 'string'
+              ? so.actualWeightKgInput
+              : '',
       });
+    }
+    const actualStretchSets: DraftStretchActualSet[] = [];
+    if (Array.isArray(o.actualStretchSets)) {
+      for (const s of o.actualStretchSets) {
+        if (!s || typeof s !== 'object') {
+          return null;
+        }
+        const so = s as Record<string, unknown>;
+        actualStretchSets.push({
+          id: typeof so.id === 'string' ? so.id : newId(),
+          actualDurationInput: typeof so.actualDurationInput === 'string' ? so.actualDurationInput : '',
+          actualDurationUnit:
+            typeof so.actualDurationUnit === 'string'
+              ? normalizeDurationUnit(so.actualDurationUnit)
+              : normalizeDurationUnit(undefined),
+        });
+      }
+    }
+    const actualCardioPerSets: DraftCardioPerActualSet[] = [];
+    if (Array.isArray(o.actualCardioPerSets)) {
+      for (const s of o.actualCardioPerSets) {
+        if (!s || typeof s !== 'object') {
+          return null;
+        }
+        const so = s as Record<string, unknown>;
+        actualCardioPerSets.push({
+          id: typeof so.id === 'string' ? so.id : newId(),
+          actualDurationInput: typeof so.actualDurationInput === 'string' ? so.actualDurationInput : '',
+          actualDurationUnit:
+            typeof so.actualDurationUnit === 'string'
+              ? normalizeDurationUnit(so.actualDurationUnit)
+              : normalizeDurationUnit(undefined),
+        });
+      }
+    }
+    if (actualStretchSets.length === 0 && normalizeActivityType(o.activityType) === 'stretch') {
+      const legacyCountRaw = typeof o.actualSetCountInput === 'string' ? o.actualSetCountInput.trim() : '';
+      const legacyDurationRaw =
+        typeof o.actualDurationInput === 'string'
+          ? o.actualDurationInput
+          : typeof o.actualDurationMinutesInput === 'string'
+            ? o.actualDurationMinutesInput
+            : '';
+      const legacyCount = Number.parseInt(legacyCountRaw, 10);
+      const setCount = Number.isFinite(legacyCount) && legacyCount > 0 ? legacyCount : 1;
+      const legacyDurationUnit =
+        typeof o.actualDurationUnit === 'string'
+          ? normalizeDurationUnit(o.actualDurationUnit)
+          : normalizeDurationUnit(undefined);
+      for (let i = 0; i < setCount; i++) {
+        actualStretchSets.push({
+          id: newId(),
+          actualDurationInput: legacyDurationRaw,
+          actualDurationUnit: legacyDurationUnit,
+        });
+      }
     }
     out.push({
       id: o.id,
@@ -254,7 +441,16 @@ function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
       name: o.name,
       sets: o.sets,
       reps: o.reps,
-      weightKg: o.weightKg,
+      weight:
+        typeof o.weight === 'number'
+          ? o.weight
+          : typeof o.weightKg === 'number'
+            ? o.weightKg
+            : 0,
+      weightUnit:
+        typeof o.weightUnit === 'string'
+          ? normalizeWeightUnit(o.weightUnit)
+          : DEFAULT_WEIGHT_UNIT,
       duration:
         typeof o.duration === 'number'
           ? o.duration
@@ -275,8 +471,19 @@ function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
         typeof o.distanceUnit === 'string'
           ? normalizeCardioDistanceUnit(o.distanceUnit)
           : normalizeCardioDistanceUnit(undefined),
+      cardioDistanceMode:
+        normalizeActivityType(o.activityType) === 'cardio'
+          ? normalizeCardioDistanceMode(o.cardioDistanceMode)
+          : undefined,
       score: typeof o.score === 'string' ? o.score : '',
+      scoreUnit:
+        typeof o.scoreUnit === 'string'
+          ? normalizeScoreUnit(o.scoreUnit)
+          : normalizeScoreUnit(undefined),
       actualSets,
+      actualStretchSets,
+      actualCardioPerSets,
+      stretchSets: undefined,
       actualDurationInput:
         typeof o.actualDurationInput === 'string'
           ? o.actualDurationInput
@@ -302,6 +509,18 @@ function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
             ? normalizeCardioDistanceUnit(o.distanceUnit)
             : normalizeCardioDistanceUnit(undefined),
       actualScoreInput: typeof o.actualScoreInput === 'string' ? o.actualScoreInput : '',
+      actualScoreUnit:
+        typeof o.actualScoreUnit === 'string'
+          ? normalizeScoreUnit(o.actualScoreUnit)
+          : typeof o.scoreUnit === 'string'
+            ? normalizeScoreUnit(o.scoreUnit)
+            : normalizeScoreUnit(undefined),
+      actualWeightUnit:
+        typeof o.actualWeightUnit === 'string'
+          ? normalizeWeightUnit(o.actualWeightUnit)
+          : typeof o.weightUnit === 'string'
+            ? normalizeWeightUnit(o.weightUnit)
+            : DEFAULT_WEIGHT_UNIT,
     });
   }
   return out;
@@ -323,8 +542,19 @@ function normalizeDraftExercises(
     .filter((exercise) => !omit.has(exercise.id))
     .map((exercise) => {
       const saved = byWorkoutExerciseId.get(exercise.id);
-      const savedLen = saved?.actualSets?.length ?? 0;
-      const setCount = exercise.activityType === 'strength' ? Math.max(exercise.sets, savedLen, 1) : 0;
+      const savedStrengthLen = saved?.actualSets?.length ?? 0;
+      const strengthSetCount =
+        exercise.activityType === 'strength' ? Math.max(exercise.sets, savedStrengthLen, 1) : 0;
+      const plannedStretch = readStretchSetsFromExercise(exercise);
+      const savedStretchLen = saved?.actualStretchSets?.length ?? 0;
+      const stretchSetCount =
+        exercise.activityType === 'stretch'
+          ? Math.max(plannedStretch.length, exercise.sets, savedStretchLen, 1)
+          : 0;
+      const cardioPerCount =
+        exercise.activityType === 'cardio' && isCardioPerMode(exercise)
+          ? Math.max(cardioPerSegmentCount(exercise), saved?.actualCardioPerSets?.length ?? 0, 1)
+          : 0;
       return {
         id: saved?.id && typeof saved.id === 'string' ? saved.id : newId(),
         workoutExerciseId: exercise.id,
@@ -332,21 +562,54 @@ function normalizeDraftExercises(
         name: exercise.name,
         sets: exercise.sets,
         reps: exercise.reps,
-        weightKg: exercise.weightKg,
+        weight: exercise.weight,
+        weightUnit: exercise.weightUnit,
         duration: exercise.duration,
         durationUnit: exercise.durationUnit,
         distance: exercise.distance,
         distanceUnit: exercise.distanceUnit,
+        cardioDistanceMode: exercise.cardioDistanceMode,
         score: exercise.score,
+        scoreUnit: exercise.scoreUnit,
+        stretchSets: exercise.stretchSets,
         actualSets:
           exercise.activityType === 'strength'
-            ? Array.from({ length: setCount }, (_, setIndex) => {
+            ? Array.from({ length: strengthSetCount }, (_, setIndex) => {
                 const savedSet = saved?.actualSets?.[setIndex];
                 return {
                   id: savedSet?.id && typeof savedSet.id === 'string' ? savedSet.id : newId(),
                   actualRepsInput: typeof savedSet?.actualRepsInput === 'string' ? savedSet.actualRepsInput : '',
-                  actualWeightKgInput:
-                    typeof savedSet?.actualWeightKgInput === 'string' ? savedSet.actualWeightKgInput : '',
+                  actualWeightInput:
+                    typeof savedSet?.actualWeightInput === 'string'
+                      ? savedSet.actualWeightInput
+                      : typeof (savedSet as unknown as { actualWeightKgInput?: string } | undefined)?.actualWeightKgInput === 'string'
+                        ? (savedSet as unknown as { actualWeightKgInput: string }).actualWeightKgInput
+                        : '',
+                };
+              })
+            : [],
+        actualStretchSets:
+          exercise.activityType === 'stretch'
+            ? Array.from({ length: stretchSetCount }, (_, setIndex) => {
+                const savedSet = saved?.actualStretchSets?.[setIndex];
+                const plannedSet = plannedStretch[setIndex] ?? plannedStretch[0];
+                return {
+                  id: savedSet?.id && typeof savedSet.id === 'string' ? savedSet.id : newId(),
+                  actualDurationInput:
+                    typeof savedSet?.actualDurationInput === 'string' ? savedSet.actualDurationInput : '',
+                  actualDurationUnit: plannedSet?.durationUnit ?? exercise.durationUnit,
+                };
+              })
+            : [],
+        actualCardioPerSets:
+          exercise.activityType === 'cardio' && isCardioPerMode(exercise)
+            ? Array.from({ length: cardioPerCount }, (_, setIndex) => {
+                const savedSet = saved?.actualCardioPerSets?.[setIndex];
+                return {
+                  id: savedSet?.id && typeof savedSet.id === 'string' ? savedSet.id : newId(),
+                  actualDurationInput:
+                    typeof savedSet?.actualDurationInput === 'string' ? savedSet.actualDurationInput : '',
+                  actualDurationUnit: exercise.durationUnit,
                 };
               })
             : [],
@@ -356,21 +619,17 @@ function normalizeDraftExercises(
             : typeof (saved as unknown as { actualDurationMinutesInput?: string } | undefined)?.actualDurationMinutesInput === 'string'
               ? (saved as unknown as { actualDurationMinutesInput: string }).actualDurationMinutesInput
               : '',
-        actualDurationUnit:
-          typeof saved?.actualDurationUnit === 'string'
-            ? normalizeDurationUnit(saved.actualDurationUnit)
-            : exercise.durationUnit,
+        actualDurationUnit: exercise.durationUnit,
         actualDistanceInput:
           typeof saved?.actualDistanceInput === 'string'
             ? saved.actualDistanceInput
             : typeof (saved as unknown as { actualDistanceMilesInput?: string } | undefined)?.actualDistanceMilesInput === 'string'
               ? (saved as unknown as { actualDistanceMilesInput: string }).actualDistanceMilesInput
               : '',
-        actualDistanceUnit:
-          typeof saved?.actualDistanceUnit === 'string'
-            ? normalizeCardioDistanceUnit(saved.actualDistanceUnit)
-            : exercise.distanceUnit,
+        actualDistanceUnit: exercise.distanceUnit,
         actualScoreInput: typeof saved?.actualScoreInput === 'string' ? saved.actualScoreInput : '',
+        actualScoreUnit: exercise.scoreUnit,
+        actualWeightUnit: exercise.weightUnit,
       };
     });
 }
@@ -576,7 +835,7 @@ export default function LogWorkoutScreen() {
   const updateActualSetField = (
     exerciseId: string,
     actualSetId: string,
-    field: keyof Pick<DraftActualSet, 'actualRepsInput' | 'actualWeightKgInput'>,
+    field: keyof Pick<DraftActualSet, 'actualRepsInput' | 'actualWeightInput'>,
     value: string,
   ) => {
     setExercises((prev) =>
@@ -600,20 +859,29 @@ export default function LogWorkoutScreen() {
         if (ex.id !== exerciseId) {
           return ex;
         }
+        const targetSet = ex.actualSets.find((actualSet) => actualSet.id === actualSetId);
+        if (!targetSet) {
+          return ex;
+        }
+        const isChecked = hasActualSetValues(targetSet);
+        if (isChecked) {
+          return {
+            ...ex,
+            actualSets: ex.actualSets.map((actualSet) =>
+              actualSet.id === actualSetId ? { ...actualSet, actualRepsInput: '', actualWeightInput: '' } : actualSet,
+            ),
+          };
+        }
+        const plannedReps = String(ex.reps);
+        const plannedWeight = String(ex.weight);
         return {
           ...ex,
-          actualSets: ex.actualSets.map((actualSet) => {
-            if (actualSet.id !== actualSetId) {
-              return actualSet;
-            }
-            const isChecked = hasActualSetValues(actualSet);
-            if (isChecked) {
-              return { ...actualSet, actualRepsInput: '', actualWeightKgInput: '' };
-            }
-            const plannedReps = String(ex.reps);
-            const plannedWeight = String(ex.weightKg);
-            return { ...actualSet, actualRepsInput: plannedReps, actualWeightKgInput: plannedWeight };
-          }),
+          actualWeightUnit: ex.weightUnit,
+          actualSets: ex.actualSets.map((actualSet) =>
+            actualSet.id === actualSetId
+              ? { ...actualSet, actualRepsInput: plannedReps, actualWeightInput: plannedWeight }
+              : actualSet,
+          ),
         };
       }),
     );
@@ -632,7 +900,7 @@ export default function LogWorkoutScreen() {
             {
               id: newId(),
               actualRepsInput: '',
-              actualWeightKgInput: '',
+              actualWeightInput: '',
             },
           ],
         };
@@ -688,25 +956,13 @@ export default function LogWorkoutScreen() {
     );
   };
 
-  const updateExerciseActualDurationUnit = (exerciseId: string, unit: DurationUnit) => {
-    setExercises((prev) =>
-      prev.map((ex) => (ex.id === exerciseId ? { ...ex, actualDurationUnit: unit } : ex)),
-    );
-  };
-
-  const updateExerciseActualDistanceUnit = (exerciseId: string, unit: CardioDistanceUnit) => {
-    setExercises((prev) =>
-      prev.map((ex) => (ex.id === exerciseId ? { ...ex, actualDistanceUnit: unit } : ex)),
-    );
-  };
-
-  const toggleCardioPlannedValues = (exerciseId: string) => {
+  const toggleCardioTotalPlannedValues = (exerciseId: string) => {
     setExercises((prev) =>
       prev.map((ex) => {
         if (ex.id !== exerciseId) {
           return ex;
         }
-        if (hasCardioActualValues(ex)) {
+        if (hasCardioTotalActualValues(ex)) {
           return { ...ex, actualDurationInput: '', actualDistanceInput: '' };
         }
         return {
@@ -717,6 +973,58 @@ export default function LogWorkoutScreen() {
           actualDistanceInput:
             ex.distance > 0 ? formatCardioDistanceValue(ex.distance, ex.distanceUnit) : '',
           actualDistanceUnit: ex.distanceUnit,
+        };
+      }),
+    );
+  };
+
+  const toggleCardioPerActualSetPlannedValues = (exerciseId: string, actualSetId: string) => {
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) {
+          return ex;
+        }
+        const setIndex = ex.actualCardioPerSets.findIndex((actualSet) => actualSet.id === actualSetId);
+        if (setIndex < 0) {
+          return ex;
+        }
+        const targetSet = ex.actualCardioPerSets[setIndex];
+        if (hasCardioPerActualSetValues(targetSet)) {
+          return {
+            ...ex,
+            actualCardioPerSets: ex.actualCardioPerSets.map((actualSet) =>
+              actualSet.id === actualSetId ? { ...actualSet, actualDurationInput: '' } : actualSet,
+            ),
+          };
+        }
+        return {
+          ...ex,
+          actualCardioPerSets: ex.actualCardioPerSets.map((actualSet) =>
+            actualSet.id === actualSetId
+              ? {
+                  ...actualSet,
+                  actualDurationInput:
+                    ex.duration > 0 ? formatDurationValue(ex.duration, ex.durationUnit) : '',
+                  actualDurationUnit: ex.durationUnit,
+                }
+              : actualSet,
+          ),
+        };
+      }),
+    );
+  };
+
+  const updateCardioPerActualSetField = (exerciseId: string, actualSetId: string, value: string) => {
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) {
+          return ex;
+        }
+        return {
+          ...ex,
+          actualCardioPerSets: ex.actualCardioPerSets.map((actualSet) =>
+            actualSet.id === actualSetId ? { ...actualSet, actualDurationInput: value } : actualSet,
+          ),
         };
       }),
     );
@@ -737,6 +1045,111 @@ export default function LogWorkoutScreen() {
             ex.duration > 0 ? formatDurationValue(ex.duration, ex.durationUnit) : '',
           actualDurationUnit: ex.durationUnit,
           actualScoreInput: ex.score,
+          actualScoreUnit: ex.scoreUnit,
+        };
+      }),
+    );
+  };
+
+  const toggleStretchActualSetPlannedValues = (exerciseId: string, actualSetId: string) => {
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) {
+          return ex;
+        }
+        const setIndex = ex.actualStretchSets.findIndex((actualSet) => actualSet.id === actualSetId);
+        if (setIndex < 0) {
+          return ex;
+        }
+        const targetSet = ex.actualStretchSets[setIndex];
+        if (hasStretchActualSetValues(targetSet)) {
+          return {
+            ...ex,
+            actualStretchSets: ex.actualStretchSets.map((actualSet) =>
+              actualSet.id === actualSetId ? { ...actualSet, actualDurationInput: '' } : actualSet,
+            ),
+          };
+        }
+        const planned = readStretchSetsFromExercise({
+          sets: ex.sets,
+          duration: ex.duration,
+          durationUnit: ex.durationUnit,
+          stretchSets: ex.stretchSets,
+        });
+        const plannedSet = planned[setIndex] ?? planned[0];
+        return {
+          ...ex,
+          actualStretchSets: ex.actualStretchSets.map((actualSet) =>
+            actualSet.id === actualSetId
+              ? {
+                  ...actualSet,
+                  actualDurationInput:
+                    plannedSet && plannedSet.duration > 0
+                      ? formatDurationValue(plannedSet.duration, plannedSet.durationUnit)
+                      : '',
+                  actualDurationUnit: plannedSet?.durationUnit ?? ex.durationUnit,
+                }
+              : actualSet,
+          ),
+        };
+      }),
+    );
+  };
+
+  const updateStretchActualSetField = (
+    exerciseId: string,
+    actualSetId: string,
+    value: string,
+  ) => {
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) {
+          return ex;
+        }
+        return {
+          ...ex,
+          actualStretchSets: ex.actualStretchSets.map((actualSet) =>
+            actualSet.id === actualSetId ? { ...actualSet, actualDurationInput: value } : actualSet,
+          ),
+        };
+      }),
+    );
+  };
+
+  const addStretchActualSet = (exerciseId: string) => {
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) {
+          return ex;
+        }
+        return {
+          ...ex,
+          actualStretchSets: [
+            ...ex.actualStretchSets,
+            {
+              id: newId(),
+              actualDurationInput: '',
+              actualDurationUnit: ex.durationUnit,
+            },
+          ],
+        };
+      }),
+    );
+  };
+
+  const deleteStretchActualSet = (exerciseId: string, actualSetId: string) => {
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== exerciseId) {
+          return ex;
+        }
+        if (ex.actualStretchSets.length <= 1) {
+          themedAlert('Keep one set', 'Each exercise needs at least one set. Add another set before deleting this one.');
+          return ex;
+        }
+        return {
+          ...ex,
+          actualStretchSets: ex.actualStretchSets.filter((set) => set.id !== actualSetId),
         };
       }),
     );
@@ -754,11 +1167,24 @@ export default function LogWorkoutScreen() {
         {
           activityType: ex.activityType,
           actualSets: ex.actualSets,
+          actualWeightUnit: ex.weightUnit,
+          actualStretchSets: ex.actualStretchSets.map((set, setIndex) => ({
+            actualDurationInput: set.actualDurationInput,
+            actualDurationUnit: plannedStretchDurationUnitForSet(ex, setIndex),
+          })),
+          actualCardioPerSets: ex.actualCardioPerSets.map((set) => ({
+            actualDurationInput: set.actualDurationInput,
+            actualDurationUnit: ex.durationUnit,
+          })),
+          cardioDistanceMode: ex.cardioDistanceMode,
+          plannedDuration: ex.duration,
+          plannedDistance: ex.distance,
           actualDurationInput: ex.actualDurationInput,
-          actualDurationUnit: ex.actualDurationUnit,
+          actualDurationUnit: ex.durationUnit,
           actualDistanceInput: ex.actualDistanceInput,
-          actualDistanceUnit: ex.actualDistanceUnit,
+          actualDistanceUnit: ex.distanceUnit,
           actualScoreInput: ex.actualScoreInput,
+          actualScoreUnit: ex.scoreUnit,
         },
         ex.name,
       );
@@ -772,14 +1198,20 @@ export default function LogWorkoutScreen() {
         workoutExerciseId: ex.workoutExerciseId,
         activityType: ex.activityType,
         name: ex.name,
-        sets: ex.sets,
+        sets:
+          ex.activityType === 'strength' || ex.activityType === 'stretch'
+            ? resolveExerciseSetCount(ex.sets)
+            : ex.sets,
         reps: ex.reps,
-        weightKg: ex.weightKg,
+        weight: ex.weight,
+        weightUnit: ex.weightUnit,
         duration: ex.duration,
         durationUnit: ex.durationUnit,
         distance: ex.distance,
         distanceUnit: ex.distanceUnit,
+        cardioDistanceMode: ex.cardioDistanceMode,
         score: ex.score,
+        scoreUnit: ex.scoreUnit,
         ...parsedActual.exercise,
       });
     }
@@ -966,7 +1398,7 @@ export default function LogWorkoutScreen() {
                           />
                         </Pressable>
                         <View style={styles.setRow}>
-                          <View style={styles.unitInputWrap}>
+                          <View style={styles.strengthRepsInputWrap}>
                             <TextInput
                               value={actualSet.actualRepsInput}
                               onChangeText={(value) => updateActualSetField(exercise.id, actualSet.id, 'actualRepsInput', value)}
@@ -975,18 +1407,18 @@ export default function LogWorkoutScreen() {
                               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                               style={[
                                 styles.input,
-                                styles.setInput,
+                                styles.strengthRepsLogInput,
                                 styles.unitInput,
                                 { color: textColor, borderColor, backgroundColor: inputBackground },
                               ]}
                             />
                             <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>reps</Text>
                           </View>
-                          <View style={styles.unitInputWrap}>
+                          <View style={styles.strengthWeightWrap}>
                             <TextInput
-                              value={actualSet.actualWeightKgInput}
+                              value={actualSet.actualWeightInput}
                               onChangeText={(value) =>
-                                updateActualSetField(exercise.id, actualSet.id, 'actualWeightKgInput', value)
+                                updateActualSetField(exercise.id, actualSet.id, 'actualWeightInput', value)
                               }
                               placeholder="Weight"
                               keyboardType="decimal-pad"
@@ -994,11 +1426,17 @@ export default function LogWorkoutScreen() {
                               style={[
                                 styles.input,
                                 styles.setInput,
-                                styles.unitInput,
+                                styles.strengthWeightLogInput,
                                 { color: textColor, borderColor, backgroundColor: inputBackground },
                               ]}
                             />
-                            <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>lb</Text>
+                            <WeightUnitPicker
+                              value={exercise.weightUnit}
+                              onChange={() => {}}
+                              disabled
+                              borderColor={borderColor}
+                              textColor={textColor}
+                            />
                           </View>
                         </View>
                         <Pressable
@@ -1021,18 +1459,69 @@ export default function LogWorkoutScreen() {
               </>
             ) : null}
 
-            {exercise.activityType === 'cardio' ? (
+            {exercise.activityType === 'cardio' && isCardioPerMode(exercise) ? (
+              <View style={styles.actualSetsContainer}>
+                {exercise.actualCardioPerSets.map((actualSet, setIndex) => (
+                  <View key={actualSet.id} style={styles.actualSetRow}>
+                    <Text style={[styles.setLabel, { color: textColor }]}>
+                      {cardioPerRowLabel(setIndex, exercise.distanceUnit)}
+                    </Text>
+                    <View style={styles.setRowWithCheckbox}>
+                      <Pressable
+                        accessibilityRole="checkbox"
+                        accessibilityLabel={`Use planned duration for ${cardioPerRowLabel(setIndex, exercise.distanceUnit)}`}
+                        accessibilityState={{ checked: hasCardioPerActualSetValues(actualSet) }}
+                        onPress={() => toggleCardioPerActualSetPlannedValues(exercise.id, actualSet.id)}
+                        style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                        hitSlop={8}>
+                        <Ionicons
+                          name={hasCardioPerActualSetValues(actualSet) ? 'checkbox' : 'square-outline'}
+                          size={22}
+                          color={Colors[activeScheme].tint}
+                        />
+                      </Pressable>
+                      <View style={styles.stretchDurationLogWrap}>
+                        <TextInput
+                          value={actualSet.actualDurationInput}
+                          onChangeText={(value) => updateCardioPerActualSetField(exercise.id, actualSet.id, value)}
+                          placeholder="Duration"
+                          keyboardType={
+                            usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'
+                          }
+                          placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                          style={[
+                            styles.input,
+                            styles.setInput,
+                            styles.stretchDurationLogInput,
+                            { color: textColor, borderColor, backgroundColor: inputBackground },
+                          ]}
+                        />
+                        <DurationUnitPicker
+                          value={exercise.durationUnit}
+                          onChange={() => {}}
+                          disabled
+                          borderColor={borderColor}
+                          textColor={textColor}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {exercise.activityType === 'cardio' && !isCardioPerMode(exercise) ? (
               <View style={styles.actualSetRow}>
                 <View style={styles.setRowWithCheckbox}>
                   <Pressable
                     accessibilityRole="checkbox"
                     accessibilityLabel="Use planned duration and distance"
-                    accessibilityState={{ checked: hasCardioActualValues(exercise) }}
-                    onPress={() => toggleCardioPlannedValues(exercise.id)}
+                    accessibilityState={{ checked: hasCardioTotalActualValues(exercise) }}
+                    onPress={() => toggleCardioTotalPlannedValues(exercise.id)}
                     style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
                     hitSlop={8}>
                     <Ionicons
-                      name={hasCardioActualValues(exercise) ? 'checkbox' : 'square-outline'}
+                      name={hasCardioTotalActualValues(exercise) ? 'checkbox' : 'square-outline'}
                       size={22}
                       color={Colors[activeScheme].tint}
                     />
@@ -1042,8 +1531,8 @@ export default function LogWorkoutScreen() {
                       <TextInput
                         value={exercise.actualDurationInput}
                         onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
-                        placeholder="Time"
-                        keyboardType={usesIntegerDurationInput(exercise.actualDurationUnit) ? 'number-pad' : 'decimal-pad'}
+                        placeholder={exercise.duration > 0 ? 'Duration' : 'Duration (Optional)'}
+                        keyboardType={usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'}
                         placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                         style={[
                           styles.input,
@@ -1053,8 +1542,9 @@ export default function LogWorkoutScreen() {
                         ]}
                       />
                       <DurationUnitPicker
-                        value={exercise.actualDurationUnit}
-                        onChange={(unit) => updateExerciseActualDurationUnit(exercise.id, unit)}
+                        value={exercise.durationUnit}
+                        onChange={() => {}}
+                        disabled
                         borderColor={borderColor}
                         textColor={textColor}
                       />
@@ -1063,8 +1553,8 @@ export default function LogWorkoutScreen() {
                       <TextInput
                         value={exercise.actualDistanceInput}
                         onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDistanceInput', value)}
-                        placeholder="Distance"
-                        keyboardType={usesIntegerDistanceInput(exercise.actualDistanceUnit) ? 'number-pad' : 'decimal-pad'}
+                        placeholder={exercise.distance > 0 ? 'Distance' : 'Distance (Optional)'}
+                        keyboardType={usesIntegerDistanceInput(exercise.distanceUnit) ? 'number-pad' : 'decimal-pad'}
                         placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                         style={[
                           styles.input,
@@ -1074,8 +1564,9 @@ export default function LogWorkoutScreen() {
                         ]}
                       />
                       <CardioDistanceUnitPicker
-                        value={exercise.actualDistanceUnit}
-                        onChange={(unit) => updateExerciseActualDistanceUnit(exercise.id, unit)}
+                        value={exercise.distanceUnit}
+                        onChange={() => {}}
+                        disabled
                         borderColor={borderColor}
                         textColor={textColor}
                       />
@@ -1100,13 +1591,13 @@ export default function LogWorkoutScreen() {
                     color={Colors[activeScheme].tint}
                   />
                 </Pressable>
-                <View style={styles.setRow}>
-                  <View style={[styles.cardioDurationRow, styles.durationInputWrap]}>
+                <View style={[styles.cardioFieldsColumn, styles.flexField]}>
+                  <View style={styles.cardioDurationRow}>
                     <TextInput
                       value={exercise.actualDurationInput}
                       onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
-                      placeholder="Time"
-                      keyboardType={usesIntegerDurationInput(exercise.actualDurationUnit) ? 'number-pad' : 'decimal-pad'}
+                      placeholder="Duration"
+                      keyboardType={usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'}
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       style={[
                         styles.input,
@@ -1116,27 +1607,102 @@ export default function LogWorkoutScreen() {
                       ]}
                     />
                     <DurationUnitPicker
-                      value={exercise.actualDurationUnit}
-                      onChange={(unit) => updateExerciseActualDurationUnit(exercise.id, unit)}
+                      value={exercise.durationUnit}
+                      onChange={() => {}}
+                      disabled
                       borderColor={borderColor}
                       textColor={textColor}
                     />
                   </View>
-                  <View style={[styles.unitInputWrap, styles.scoreInputWrap]}>
+                  <View style={styles.sportScoreRow}>
                     <TextInput
                       value={exercise.actualScoreInput}
                       onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualScoreInput', value)}
-                      placeholder="Score (optional)"
+                      placeholder="Score"
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       style={[
                         styles.input,
                         styles.setInput,
+                        styles.sportScoreInput,
                         { color: textColor, borderColor, backgroundColor: inputBackground },
                       ]}
+                    />
+                    <ScoreUnitPicker
+                      value={exercise.scoreUnit}
+                      onChange={() => {}}
+                      disabled
+                      borderColor={borderColor}
+                      textColor={textColor}
                     />
                   </View>
                 </View>
               </View>
+            ) : null}
+
+            {exercise.activityType === 'stretch' ? (
+              <>
+                <View style={styles.actualSetsContainer}>
+                  {exercise.actualStretchSets.map((actualSet, setIndex) => (
+                    <View key={actualSet.id} style={styles.actualSetRow}>
+                      <Text style={[styles.setLabel, { color: textColor }]}>Set {setIndex + 1}</Text>
+                      <View style={styles.setRowWithCheckbox}>
+                        <Pressable
+                          accessibilityRole="checkbox"
+                          accessibilityLabel={`Use planned duration for set ${setIndex + 1}`}
+                          accessibilityState={{ checked: hasStretchActualSetValues(actualSet) }}
+                          onPress={() => toggleStretchActualSetPlannedValues(exercise.id, actualSet.id)}
+                          style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                          hitSlop={8}>
+                          <Ionicons
+                            name={hasStretchActualSetValues(actualSet) ? 'checkbox' : 'square-outline'}
+                            size={22}
+                            color={Colors[activeScheme].tint}
+                          />
+                        </Pressable>
+                        <View style={styles.stretchDurationLogWrap}>
+                          <TextInput
+                            value={actualSet.actualDurationInput}
+                            onChangeText={(value) => updateStretchActualSetField(exercise.id, actualSet.id, value)}
+                            placeholder="Duration"
+                            keyboardType={
+                              usesIntegerDurationInput(plannedStretchDurationUnitForSet(exercise, setIndex))
+                                ? 'number-pad'
+                                : 'decimal-pad'
+                            }
+                            placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                            style={[
+                              styles.input,
+                              styles.setInput,
+                              styles.stretchDurationLogInput,
+                              { color: textColor, borderColor, backgroundColor: inputBackground },
+                            ]}
+                          />
+                          <DurationUnitPicker
+                            value={plannedStretchDurationUnitForSet(exercise, setIndex)}
+                            onChange={() => {}}
+                            disabled
+                            borderColor={borderColor}
+                            textColor={textColor}
+                          />
+                        </View>
+                        <Pressable
+                          onPress={() => deleteStretchActualSet(exercise.id, actualSet.id)}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Delete set ${setIndex + 1}`}
+                          style={({ pressed }) => [styles.deleteSetButton, pressed && styles.checkboxButtonPressed]}>
+                          <Ionicons name="close" size={20} color="#ef4444" />
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+                <Pressable
+                  onPress={() => addStretchActualSet(exercise.id)}
+                  style={({ pressed }) => [styles.addSetButton, { borderColor }, pressed && styles.checkboxButtonPressed]}>
+                  <Text style={[styles.addSetButtonLabel, { color: textColor }]}>+ Add set</Text>
+                </Pressable>
+              </>
             ) : null}
           </View>
         ))}
@@ -1194,6 +1760,16 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   cardioDistanceInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sportScoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  sportScoreInput: {
     flex: 1,
     minWidth: 0,
   },
@@ -1277,6 +1853,54 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   setInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  strengthRepsInputWrap: {
+    flexGrow: 0,
+    flexShrink: 0,
+    width: 96,
+    minWidth: 96,
+    maxWidth: 96,
+    position: 'relative',
+  },
+  strengthRepsLogInput: {
+    width: '100%',
+  },
+  strengthWeightWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  strengthWeightLogInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  stretchLogRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  stretchSetsInputWrap: {
+    flexGrow: 0,
+    flexShrink: 0,
+    width: 108,
+    minWidth: 108,
+    maxWidth: 108,
+    position: 'relative',
+  },
+  stretchDurationLogWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  stretchDurationLogInput: {
     flex: 1,
     minWidth: 0,
   },

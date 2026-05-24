@@ -18,13 +18,17 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import type { ActivityType } from '@/lib/activityTypes';
 import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
-import type { DurationUnit } from '@/lib/durationUnits';
+import { DEFAULT_DURATION_UNIT, DEFAULT_STRETCH_DURATION_UNIT, normalizeCardioDurationUnit, normalizeSportDurationUnit, type DurationUnit } from '@/lib/durationUnits';
+import { DEFAULT_CARDIO_DISTANCE_MODE, type CardioDistanceMode } from '@/lib/cardioDistanceMode';
+import type { ScoreUnit } from '@/lib/scoreUnits';
+import type { WeightUnit } from '@/lib/weightUnits';
 import {
   emptyExerciseDraftRow,
   exerciseDraftRowFromSeed,
   exerciseDraftSeedFromRow,
   isExerciseDraftRowEmpty,
   parseWorkoutExerciseFromDraft,
+  sanitizeExerciseDraftRow,
   workoutExerciseToDraftRow,
   type ExerciseDraftRow,
   type ExerciseDraftSeed,
@@ -41,7 +45,7 @@ type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
   exercises: Array<
     Pick<
       WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score' | 'scoreUnit'
     >
   >;
 };
@@ -143,13 +147,30 @@ export default function LogWorkoutScreen() {
 
   const updateExerciseActivityType = (exerciseId: string, activityType: ActivityType) => {
     setExercises((prev) =>
-      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, activityType } : ex)),
+      prev.map((ex) => {
+        if (ex.clientId !== exerciseId) {
+          return ex;
+        }
+        const next = sanitizeExerciseDraftRow({ ...ex, activityType });
+        if (activityType === 'stretch') {
+          return { ...next, durationUnit: DEFAULT_STRETCH_DURATION_UNIT };
+        }
+        if (activityType === 'cardio') {
+          const durationUnit =
+            next.durationUnit === 'breaths' ? DEFAULT_DURATION_UNIT : normalizeCardioDurationUnit(next.durationUnit);
+          return { ...next, cardioDistanceMode: DEFAULT_CARDIO_DISTANCE_MODE, durationUnit };
+        }
+        if (activityType === 'sport') {
+          return { ...next, durationUnit: normalizeSportDurationUnit(next.durationUnit) };
+        }
+        return next;
+      }),
     );
   };
 
   const updateExerciseField = (
     exerciseId: string,
-    field: 'sets' | 'reps' | 'weightKg' | 'duration' | 'distance' | 'score',
+    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'score',
     value: string,
   ) => {
     setExercises((prev) =>
@@ -163,9 +184,27 @@ export default function LogWorkoutScreen() {
     );
   };
 
+  const updateExerciseCardioDistanceMode = (exerciseId: string, mode: CardioDistanceMode) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, cardioDistanceMode: mode } : ex)),
+    );
+  };
+
   const updateExerciseDurationUnit = (exerciseId: string, unit: DurationUnit) => {
     setExercises((prev) =>
       prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, durationUnit: unit } : ex)),
+    );
+  };
+
+  const updateExerciseScoreUnit = (exerciseId: string, unit: ScoreUnit) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, scoreUnit: unit } : ex)),
+    );
+  };
+
+  const updateExerciseWeightUnit = (exerciseId: string, unit: WeightUnit) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, weightUnit: unit } : ex)),
     );
   };
 
@@ -347,7 +386,10 @@ export default function LogWorkoutScreen() {
         onUpdateExerciseActivityType={updateExerciseActivityType}
         onUpdateExerciseField={updateExerciseField}
         onUpdateExerciseDistanceUnit={updateExerciseDistanceUnit}
+        onUpdateExerciseCardioDistanceMode={updateExerciseCardioDistanceMode}
         onUpdateExerciseDurationUnit={updateExerciseDurationUnit}
+        onUpdateExerciseScoreUnit={updateExerciseScoreUnit}
+        onUpdateExerciseWeightUnit={updateExerciseWeightUnit}
         onRemoveExercise={removeExercise}
         contentContainerStyle={styles.scroll}
         listHeader={

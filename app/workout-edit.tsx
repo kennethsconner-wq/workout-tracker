@@ -20,13 +20,17 @@ import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
 import type { ActivityType } from '@/lib/activityTypes';
 import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
-import type { DurationUnit } from '@/lib/durationUnits';
+import { DEFAULT_DURATION_UNIT, DEFAULT_STRETCH_DURATION_UNIT, normalizeCardioDurationUnit, normalizeSportDurationUnit, type DurationUnit } from '@/lib/durationUnits';
+import { DEFAULT_CARDIO_DISTANCE_MODE, type CardioDistanceMode } from '@/lib/cardioDistanceMode';
+import type { ScoreUnit } from '@/lib/scoreUnits';
+import type { WeightUnit } from '@/lib/weightUnits';
 import {
   emptyExerciseDraftRow,
   exerciseDraftRowFromSeed,
   exerciseDraftSeedFromRow,
   isExerciseDraftRowEmpty,
   parseWorkoutExerciseFromDraft,
+  sanitizeExerciseDraftRow,
   workoutExerciseToDraftRow,
   type ExerciseDraftRow,
   type ExerciseDraftSeed,
@@ -200,12 +204,31 @@ export default function WorkoutEditScreen() {
   };
 
   const updateExerciseActivityType = (exerciseId: string, activityType: ActivityType) => {
-    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, activityType } : ex)));
+    setExercises((prev) =>
+      prev.map((ex) => {
+        if (ex.clientId !== exerciseId) {
+          return ex;
+        }
+        const next = sanitizeExerciseDraftRow({ ...ex, activityType });
+        if (activityType === 'stretch') {
+          return { ...next, durationUnit: DEFAULT_STRETCH_DURATION_UNIT };
+        }
+        if (activityType === 'cardio') {
+          const durationUnit =
+            next.durationUnit === 'breaths' ? DEFAULT_DURATION_UNIT : normalizeCardioDurationUnit(next.durationUnit);
+          return { ...next, cardioDistanceMode: DEFAULT_CARDIO_DISTANCE_MODE, durationUnit };
+        }
+        if (activityType === 'sport') {
+          return { ...next, durationUnit: normalizeSportDurationUnit(next.durationUnit) };
+        }
+        return next;
+      }),
+    );
   };
 
   const updateExerciseField = (
     exerciseId: string,
-    field: 'sets' | 'reps' | 'weightKg' | 'duration' | 'distance' | 'score',
+    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'score',
     value: string,
   ) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, [field]: value } : ex)));
@@ -215,8 +238,22 @@ export default function WorkoutEditScreen() {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, distanceUnit: unit } : ex)));
   };
 
+  const updateExerciseCardioDistanceMode = (exerciseId: string, mode: CardioDistanceMode) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, cardioDistanceMode: mode } : ex)),
+    );
+  };
+
   const updateExerciseDurationUnit = (exerciseId: string, unit: DurationUnit) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, durationUnit: unit } : ex)));
+  };
+
+  const updateExerciseScoreUnit = (exerciseId: string, unit: ScoreUnit) => {
+    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, scoreUnit: unit } : ex)));
+  };
+
+  const updateExerciseWeightUnit = (exerciseId: string, unit: WeightUnit) => {
+    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, weightUnit: unit } : ex)));
   };
 
   const parseWorkout = (): Omit<Workout, 'id' | 'createdAt'> | null => {
@@ -318,7 +355,10 @@ export default function WorkoutEditScreen() {
         onUpdateExerciseActivityType={updateExerciseActivityType}
         onUpdateExerciseField={updateExerciseField}
         onUpdateExerciseDistanceUnit={updateExerciseDistanceUnit}
+        onUpdateExerciseCardioDistanceMode={updateExerciseCardioDistanceMode}
         onUpdateExerciseDurationUnit={updateExerciseDurationUnit}
+        onUpdateExerciseScoreUnit={updateExerciseScoreUnit}
+        onUpdateExerciseWeightUnit={updateExerciseWeightUnit}
         onRemoveExercise={removeExercise}
         confirmBeforeRemoveExercise
         contentContainerStyle={styles.scroll}

@@ -61,7 +61,7 @@ export function getTotalWeightMovedForExercise(logged: LoggedWorkout[], workoutE
         continue;
       }
       for (const set of ex.actualSets) {
-        total += set.actualReps * set.actualWeightKg;
+        total += set.actualReps * set.actualWeight;
       }
     }
   }
@@ -108,13 +108,13 @@ export function getLoggedExerciseWeightSnapshots(
       }
       let sumW = 0;
       for (const set of ex.actualSets) {
-        sumW += set.actualWeightKg;
+        sumW += set.actualWeight;
       }
       const avgActual = sumW / setsCompleted;
       if (!Number.isFinite(avgActual) || avgActual < 0) {
         continue;
       }
-      const planned = ex.weightKg;
+      const planned = ex.weight;
       if (!Number.isFinite(planned) || planned < 0) {
         continue;
       }
@@ -147,7 +147,7 @@ export function getLoggedExerciseExecutionSnapshots(
       if (setsCompleted === 0) {
         continue;
       }
-      const plannedScore = ex.sets * ex.reps * ex.weightKg;
+      const plannedScore = ex.sets * ex.reps * ex.weight;
       if (plannedScore <= 0) {
         continue;
       }
@@ -155,7 +155,7 @@ export function getLoggedExerciseExecutionSnapshots(
       let sumWeight = 0;
       for (const set of ex.actualSets) {
         sumReps += set.actualReps;
-        sumWeight += set.actualWeightKg;
+        sumWeight += set.actualWeight;
       }
       const avgReps = sumReps / setsCompleted;
       const avgWeight = sumWeight / setsCompleted;
@@ -222,7 +222,7 @@ export function getExercisePersonalRecords(
         maxSets = maxSets === null ? setCount : Math.max(maxSets, setCount);
       }
       for (const set of ex.actualSets) {
-        maxWeight = maxWeight === null ? set.actualWeightKg : Math.max(maxWeight, set.actualWeightKg);
+        maxWeight = maxWeight === null ? set.actualWeight : Math.max(maxWeight, set.actualWeight);
         maxReps = maxReps === null ? set.actualReps : Math.max(maxReps, set.actualReps);
       }
     }

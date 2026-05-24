@@ -5,22 +5,35 @@ import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
 import { DEFAULT_CARDIO_DISTANCE_UNIT } from '@/lib/cardioDistanceUnits';
 import type { DurationUnit } from '@/lib/durationUnits';
 import { DEFAULT_DURATION_UNIT } from '@/lib/durationUnits';
+import type { ScoreUnit } from '@/lib/scoreUnits';
+import { DEFAULT_SCORE_UNIT } from '@/lib/scoreUnits';
+import type { WeightUnit } from '@/lib/weightUnits';
+import { DEFAULT_WEIGHT_UNIT } from '@/lib/weightUnits';
+import { cardioPerSegmentCount, isCardioPerMode } from '@/lib/cardioPerLog';
 import { hasLoggedExerciseInput, type LogExerciseDraftFields } from '@/lib/logExerciseDraft';
+import { readStretchSetsFromExercise } from '@/lib/stretchSets';
 import type { Workout } from '@/lib/types';
 
 export const NEW_LOG_DRAFT_KEY_PREFIX = 'workout-log-draft@v1:';
 
-type DraftSetFields = { actualRepsInput: string; actualWeightKgInput: string };
+type DraftSetFields = { actualRepsInput: string; actualWeightInput: string };
+type DraftStretchSetFields = { actualDurationInput: string; actualDurationUnit: DurationUnit };
+type DraftCardioPerSetFields = { actualDurationInput: string; actualDurationUnit: DurationUnit };
 
 type DraftExerciseFields = {
   workoutExerciseId: string;
   activityType: ActivityType;
   actualSets: DraftSetFields[];
+  actualWeightUnit?: WeightUnit;
+  actualStretchSets?: DraftStretchSetFields[];
+  actualCardioPerSets?: DraftCardioPerSetFields[];
+  cardioDistanceMode?: import('@/lib/cardioDistanceMode').CardioDistanceMode;
   actualDurationInput?: string;
   actualDurationUnit?: DurationUnit;
   actualDistanceInput?: string;
   actualDistanceUnit?: CardioDistanceUnit;
   actualScoreInput?: string;
+  actualScoreUnit?: ScoreUnit;
 };
 
 export function newLogDraftStorageKey(workoutId: string): string {
@@ -100,11 +113,18 @@ export function isNewLogFormPristine(
     const draftFields: LogExerciseDraftFields = {
       activityType: exercise.activityType,
       actualSets: exercise.actualSets,
+      actualWeightUnit: exercise.actualWeightUnit ?? DEFAULT_WEIGHT_UNIT,
+      actualStretchSets: exercise.actualStretchSets ?? [],
+      actualCardioPerSets: exercise.actualCardioPerSets ?? [],
+      cardioDistanceMode: exercise.cardioDistanceMode ?? template.cardioDistanceMode,
+      plannedDuration: template.duration,
+      plannedDistance: template.distance,
       actualDurationInput: exercise.actualDurationInput ?? '',
       actualDurationUnit: exercise.actualDurationUnit ?? DEFAULT_DURATION_UNIT,
       actualDistanceInput: exercise.actualDistanceInput ?? '',
       actualDistanceUnit: exercise.actualDistanceUnit ?? DEFAULT_CARDIO_DISTANCE_UNIT,
       actualScoreInput: exercise.actualScoreInput ?? '',
+      actualScoreUnit: exercise.actualScoreUnit ?? DEFAULT_SCORE_UNIT,
     };
 
     if (hasLoggedExerciseInput(draftFields)) {
@@ -113,6 +133,18 @@ export function isNewLogFormPristine(
 
     if (template.activityType === 'strength' && exercise.actualSets.length !== template.sets) {
       return false;
+    }
+    if (template.activityType === 'stretch') {
+      const plannedCount = Math.max(readStretchSetsFromExercise(template).length, template.sets, 1);
+      if ((exercise.actualStretchSets ?? []).length !== plannedCount) {
+        return false;
+      }
+    }
+    if (template.activityType === 'cardio' && isCardioPerMode(template)) {
+      const plannedCount = cardioPerSegmentCount(template);
+      if ((exercise.actualCardioPerSets ?? []).length !== plannedCount) {
+        return false;
+      }
     }
   }
 

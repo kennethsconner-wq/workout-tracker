@@ -1,8 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { normalizeActivityType } from '@/lib/activityTypes';
-import { DEFAULT_CARDIO_DISTANCE_UNIT, normalizeCardioDistanceUnit } from '@/lib/cardioDistanceUnits';
+import { sanitizeWorkoutExercise } from '@/lib/exerciseDraft';
+import { readActualStretchSetsFromStored, readStretchSetsFromStored } from '@/lib/stretchSets';
+import { DEFAULT_CARDIO_DISTANCE_UNIT, migrateLegacyCardioSetsDurationToDistance, normalizeCardioDistanceUnit } from '@/lib/cardioDistanceUnits';
+import { readActualCardioPerSetsFromStored } from '@/lib/cardioPerLog';
+import { normalizeCardioDistanceMode } from '@/lib/cardioDistanceMode';
 import { DEFAULT_DURATION_UNIT, normalizeDurationUnit } from '@/lib/durationUnits';
+import { DEFAULT_SCORE_UNIT, normalizeScoreUnit } from '@/lib/scoreUnits';
+import { DEFAULT_WEIGHT_UNIT, normalizeWeightUnit } from '@/lib/weightUnits';
 import { newId } from '@/lib/ids';
 import { normalizeWorkoutIconId } from '@/lib/workoutIcons';
 import {
@@ -53,21 +59,59 @@ function readExerciseDurationUnit(exercise: Record<string, unknown>): ReturnType
   return DEFAULT_DURATION_UNIT;
 }
 
+function readExerciseScoreUnit(exercise: Record<string, unknown>): ReturnType<typeof normalizeScoreUnit> {
+  if (typeof exercise.scoreUnit === 'string') {
+    return normalizeScoreUnit(exercise.scoreUnit);
+  }
+  return DEFAULT_SCORE_UNIT;
+}
+
+function readExerciseWeight(exercise: Record<string, unknown>): number {
+  if (typeof exercise.weight === 'number') {
+    return exercise.weight;
+  }
+  if (typeof exercise.weightKg === 'number') {
+    return exercise.weightKg;
+  }
+  return 0;
+}
+
+function readExerciseWeightUnit(exercise: Record<string, unknown>): ReturnType<typeof normalizeWeightUnit> {
+  if (typeof exercise.weightUnit === 'string') {
+    return normalizeWeightUnit(exercise.weightUnit);
+  }
+  return DEFAULT_WEIGHT_UNIT;
+}
+
 function normalizeWorkoutExercise(raw: unknown): WorkoutExercise {
   const exercise = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  return {
+  const activityType = normalizeActivityType(exercise.activityType);
+  const rawDurationUnit = typeof exercise.durationUnit === 'string' ? exercise.durationUnit : undefined;
+  const migrated = migrateLegacyCardioSetsDurationToDistance({
+    activityType,
+    duration: readExerciseDuration(exercise),
+    durationUnit: rawDurationUnit ?? readExerciseDurationUnit(exercise),
+    distance: readExerciseDistance(exercise),
+    distanceUnit: readExerciseDistanceUnit(exercise),
+  });
+  return sanitizeWorkoutExercise({
     id: typeof exercise.id === 'string' ? exercise.id : newId(),
-    activityType: normalizeActivityType(exercise.activityType),
+    activityType,
     name: typeof exercise.name === 'string' ? exercise.name : '',
     sets: typeof exercise.sets === 'number' ? exercise.sets : 0,
     reps: typeof exercise.reps === 'number' ? exercise.reps : 0,
-    weightKg: typeof exercise.weightKg === 'number' ? exercise.weightKg : 0,
-    duration: readExerciseDuration(exercise),
-    durationUnit: readExerciseDurationUnit(exercise),
-    distance: readExerciseDistance(exercise),
-    distanceUnit: readExerciseDistanceUnit(exercise),
+    weight: readExerciseWeight(exercise),
+    weightUnit: readExerciseWeightUnit(exercise),
+    duration: migrated.duration,
+    durationUnit: normalizeDurationUnit(migrated.durationUnit),
+    distance: migrated.distance,
+    distanceUnit: normalizeCardioDistanceUnit(migrated.distanceUnit),
+    cardioDistanceMode:
+      activityType === 'cardio' ? normalizeCardioDistanceMode(exercise.cardioDistanceMode) : undefined,
     score: typeof exercise.score === 'string' ? exercise.score : '',
-  };
+    scoreUnit: readExerciseScoreUnit(exercise),
+    stretchSets: readStretchSetsFromStored(exercise, activityType),
+  });
 }
 
 function normalizeWorkoutExercises(raw: unknown): WorkoutExercise[] {
@@ -127,27 +171,71 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
           typeof (exercise as unknown as { actualReps?: unknown }).actualReps === 'number'
             ? (exercise as unknown as { actualReps: number }).actualReps
             : legacyPlannedReps;
-        const legacyActualWeightKg =
-          typeof (exercise as unknown as { actualWeightKg?: unknown }).actualWeightKg === 'number'
-            ? (exercise as unknown as { actualWeightKg: number }).actualWeightKg
-            : legacyPlannedWeight;
+        const legacyActualWeight =
+          typeof (exercise as unknown as { actualWeight?: unknown }).actualWeight === 'number'
+            ? (exercise as unknown as { actualWeight: number }).actualWeight
+            : typeof (exercise as unknown as { actualWeightKg?: unknown }).actualWeightKg === 'number'
+              ? (exercise as unknown as { actualWeightKg: number }).actualWeightKg
+              : legacyPlannedWeight;
+        const legacyActualWeightUnit = readExerciseWeightUnit(exercise as Record<string, unknown>);
         const legacyActualSetCount =
           typeof (exercise as unknown as { actualSets?: unknown }).actualSets === 'number'
             ? Math.max(0, Math.floor((exercise as unknown as { actualSets: number }).actualSets))
             : legacyPlannedSetCount;
         const actualSetsFromNewShape = Array.isArray((exercise as { actualSets?: unknown }).actualSets)
-          ? ((exercise as { actualSets: Array<{ actualReps?: unknown; actualWeightKg?: unknown }> }).actualSets ?? [])
+          ? ((exercise as { actualSets: Array<{ actualReps?: unknown; actualWeight?: unknown; actualWeightKg?: unknown }> }).actualSets ?? [])
               .map((actualSet) => ({
                 actualReps: typeof actualSet.actualReps === 'number' ? actualSet.actualReps : legacyActualReps,
-                actualWeightKg: typeof actualSet.actualWeightKg === 'number' ? actualSet.actualWeightKg : legacyActualWeightKg,
+                actualWeight:
+                  typeof actualSet.actualWeight === 'number'
+                    ? actualSet.actualWeight
+                    : typeof actualSet.actualWeightKg === 'number'
+                      ? actualSet.actualWeightKg
+                      : legacyActualWeight,
               }))
           : null;
         const normalizedActualSets =
           actualSetsFromNewShape ??
           Array.from({ length: legacyActualSetCount }, () => ({
             actualReps: legacyActualReps,
-            actualWeightKg: legacyActualWeightKg,
+            actualWeight: legacyActualWeight,
           }));
+
+        const activityType = normalizeActivityType((exercise as { activityType?: unknown }).activityType);
+        const rawDurationUnit =
+          typeof (exercise as { durationUnit?: unknown }).durationUnit === 'string'
+            ? (exercise as { durationUnit: string }).durationUnit
+            : undefined;
+        const migratedPlan = migrateLegacyCardioSetsDurationToDistance({
+          activityType,
+          duration: readExerciseDuration(exercise as Record<string, unknown>),
+          durationUnit: rawDurationUnit ?? readExerciseDurationUnit(exercise as Record<string, unknown>),
+          distance: readExerciseDistance(exercise as Record<string, unknown>),
+          distanceUnit: readExerciseDistanceUnit(exercise as Record<string, unknown>),
+        });
+        const rawActualDurationUnit =
+          typeof (exercise as { actualDurationUnit?: unknown }).actualDurationUnit === 'string'
+            ? (exercise as { actualDurationUnit: string }).actualDurationUnit
+            : undefined;
+        const actualDurationRaw =
+          typeof (exercise as { actualDuration?: unknown }).actualDuration === 'number'
+            ? (exercise as { actualDuration: number }).actualDuration
+            : typeof (exercise as unknown as { actualDurationMinutes?: unknown }).actualDurationMinutes === 'number'
+              ? (exercise as unknown as { actualDurationMinutes: number }).actualDurationMinutes
+              : 0;
+        const actualDistanceRaw =
+          typeof (exercise as { actualDistance?: unknown }).actualDistance === 'number'
+            ? (exercise as { actualDistance: number }).actualDistance
+            : typeof (exercise as unknown as { actualDistanceMiles?: unknown }).actualDistanceMiles === 'number'
+              ? (exercise as unknown as { actualDistanceMiles: number }).actualDistanceMiles
+              : 0;
+        const migratedActual = migrateLegacyCardioSetsDurationToDistance({
+          activityType,
+          duration: actualDurationRaw,
+          durationUnit: rawActualDurationUnit ?? readExerciseDurationUnit(exercise as Record<string, unknown>),
+          distance: actualDistanceRaw,
+          distanceUnit: readExerciseDistanceUnit(exercise as Record<string, unknown>),
+        });
 
         return {
           id: typeof exercise.id === 'string' ? exercise.id : newId(),
@@ -157,47 +245,44 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
               : typeof exercise.id === 'string'
                 ? exercise.id
                 : newId(),
-          activityType: normalizeActivityType((exercise as { activityType?: unknown }).activityType),
+          activityType,
           name: typeof exercise.name === 'string' ? exercise.name : '',
           sets:
             typeof (exercise as { sets?: unknown }).sets === 'number'
               ? (exercise as { sets: number }).sets
               : legacyPlannedSetCount,
           reps: typeof (exercise as { reps?: unknown }).reps === 'number' ? (exercise as { reps: number }).reps : legacyPlannedReps,
-          weightKg:
-            typeof (exercise as { weightKg?: unknown }).weightKg === 'number'
-              ? (exercise as { weightKg: number }).weightKg
-              : legacyPlannedWeight,
-          duration: readExerciseDuration(exercise as Record<string, unknown>),
-          durationUnit: readExerciseDurationUnit(exercise as Record<string, unknown>),
-          distance: readExerciseDistance(exercise as Record<string, unknown>),
-          distanceUnit: readExerciseDistanceUnit(exercise as Record<string, unknown>),
+          weight: readExerciseWeight(exercise as Record<string, unknown>),
+          weightUnit: readExerciseWeightUnit(exercise as Record<string, unknown>),
+          duration: migratedPlan.duration,
+          durationUnit: normalizeDurationUnit(migratedPlan.durationUnit),
+          distance: migratedPlan.distance,
+          distanceUnit: normalizeCardioDistanceUnit(migratedPlan.distanceUnit),
+          cardioDistanceMode:
+            activityType === 'cardio'
+              ? normalizeCardioDistanceMode((exercise as { cardioDistanceMode?: unknown }).cardioDistanceMode)
+              : undefined,
           score: typeof (exercise as { score?: unknown }).score === 'string' ? (exercise as { score: string }).score : '',
+          scoreUnit: readExerciseScoreUnit(exercise as Record<string, unknown>),
           actualSets: normalizedActualSets,
-          actualDuration:
-            typeof (exercise as { actualDuration?: unknown }).actualDuration === 'number'
-              ? (exercise as { actualDuration: number }).actualDuration
-              : typeof (exercise as unknown as { actualDurationMinutes?: unknown }).actualDurationMinutes === 'number'
-                ? (exercise as unknown as { actualDurationMinutes: number }).actualDurationMinutes
-                : 0,
-          actualDurationUnit:
-            typeof (exercise as { actualDurationUnit?: unknown }).actualDurationUnit === 'string'
-              ? normalizeDurationUnit((exercise as { actualDurationUnit: string }).actualDurationUnit)
-              : readExerciseDurationUnit(exercise as Record<string, unknown>),
-          actualDistance:
-            typeof (exercise as { actualDistance?: unknown }).actualDistance === 'number'
-              ? (exercise as { actualDistance: number }).actualDistance
-              : typeof (exercise as unknown as { actualDistanceMiles?: unknown }).actualDistanceMiles === 'number'
-                ? (exercise as unknown as { actualDistanceMiles: number }).actualDistanceMiles
-                : 0,
-          actualDistanceUnit:
-            typeof (exercise as { actualDistanceUnit?: unknown }).actualDistanceUnit === 'string'
-              ? normalizeCardioDistanceUnit((exercise as { actualDistanceUnit: string }).actualDistanceUnit)
-              : readExerciseDistanceUnit(exercise as Record<string, unknown>),
+          actualWeightUnit:
+            typeof (exercise as { actualWeightUnit?: unknown }).actualWeightUnit === 'string'
+              ? normalizeWeightUnit((exercise as { actualWeightUnit: string }).actualWeightUnit)
+              : legacyActualWeightUnit,
+          actualDuration: migratedActual.duration,
+          actualDurationUnit: normalizeDurationUnit(migratedActual.durationUnit),
+          actualDistance: migratedActual.distance,
+          actualDistanceUnit: normalizeCardioDistanceUnit(migratedActual.distanceUnit),
           actualScore:
             typeof (exercise as { actualScore?: unknown }).actualScore === 'string'
               ? (exercise as { actualScore: string }).actualScore
               : '',
+          actualScoreUnit:
+            typeof (exercise as { actualScoreUnit?: unknown }).actualScoreUnit === 'string'
+              ? normalizeScoreUnit((exercise as { actualScoreUnit: string }).actualScoreUnit)
+              : readExerciseScoreUnit(exercise as Record<string, unknown>),
+          actualStretchSets: readActualStretchSetsFromStored(exercise as Record<string, unknown>),
+          actualCardioPerSets: readActualCardioPerSetsFromStored(exercise as Record<string, unknown>),
         };
       })
     : [];
@@ -363,7 +448,7 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
   exercises: Array<
     Pick<
       WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
     >
   >,
 ): Promise<void> {
@@ -379,19 +464,22 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
       if (!definition) {
         return exercise;
       }
-      return {
+      return sanitizeWorkoutExercise({
         ...exercise,
         activityType: definition.activityType,
         name: definition.name,
         sets: definition.sets,
         reps: definition.reps,
-        weightKg: definition.weightKg,
+        weight: definition.weight,
+        weightUnit: definition.weightUnit,
         duration: definition.duration,
         durationUnit: definition.durationUnit,
         distance: definition.distance,
         distanceUnit: definition.distanceUnit,
+        cardioDistanceMode: definition.cardioDistanceMode,
         score: definition.score,
-      };
+        scoreUnit: definition.scoreUnit,
+      });
     }),
   }));
   await saveWorkouts(next);
@@ -400,11 +488,11 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
 function matchesExerciseDefinition(
   ex: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
   def: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
 ): boolean {
   return (
@@ -412,12 +500,15 @@ function matchesExerciseDefinition(
     ex.name === def.name &&
     ex.sets === def.sets &&
     ex.reps === def.reps &&
-    ex.weightKg === def.weightKg &&
+    ex.weight === def.weight &&
+    ex.weightUnit === def.weightUnit &&
     ex.duration === def.duration &&
     ex.durationUnit === def.durationUnit &&
     ex.distance === def.distance &&
     ex.distanceUnit === def.distanceUnit &&
-    ex.score === def.score
+    normalizeCardioDistanceMode(ex.cardioDistanceMode) === normalizeCardioDistanceMode(def.cardioDistanceMode) &&
+    ex.score === def.score &&
+    ex.scoreUnit === def.scoreUnit
   );
 }
 
@@ -428,18 +519,18 @@ function matchesExerciseDefinition(
 export async function updateExercisesMatchingSignatureAcrossWorkouts(
   oldDef: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
   nextDef: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
 ): Promise<void> {
   const all = await loadWorkouts();
   const updates: Array<
     Pick<
       WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
     >
   > = [];
   const affectedIds = new Set<string>();
@@ -455,6 +546,22 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
   if (affectedIds.size === 0) {
     return;
   }
+  const cleanNext = sanitizeWorkoutExercise({
+    id: 'sanitize',
+    activityType: nextDef.activityType,
+    name: nextDef.name,
+    sets: nextDef.sets,
+    reps: nextDef.reps,
+    weight: nextDef.weight,
+    weightUnit: nextDef.weightUnit,
+    duration: nextDef.duration,
+    durationUnit: nextDef.durationUnit,
+    distance: nextDef.distance,
+    distanceUnit: nextDef.distanceUnit,
+    cardioDistanceMode: nextDef.cardioDistanceMode,
+    score: nextDef.score,
+    scoreUnit: nextDef.scoreUnit,
+  });
   const logs = await loadLoggedWorkouts();
   const nextLogs = logs.map((log) => ({
     ...log,
@@ -462,16 +569,19 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
       affectedIds.has(lex.workoutExerciseId)
         ? {
             ...lex,
-            activityType: nextDef.activityType,
-            name: nextDef.name,
-            sets: nextDef.sets,
-            reps: nextDef.reps,
-            weightKg: nextDef.weightKg,
-            duration: nextDef.duration,
-            durationUnit: nextDef.durationUnit,
-            distance: nextDef.distance,
-            distanceUnit: nextDef.distanceUnit,
-            score: nextDef.score,
+            activityType: cleanNext.activityType,
+            name: cleanNext.name,
+            sets: cleanNext.sets,
+            reps: cleanNext.reps,
+            weight: cleanNext.weight,
+            weightUnit: cleanNext.weightUnit,
+            duration: cleanNext.duration,
+            durationUnit: cleanNext.durationUnit,
+            distance: cleanNext.distance,
+            distanceUnit: cleanNext.distanceUnit,
+            cardioDistanceMode: cleanNext.cardioDistanceMode,
+            score: cleanNext.score,
+            scoreUnit: cleanNext.scoreUnit,
           }
         : lex,
     ),
@@ -483,7 +593,7 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
 export async function removeExercisesMatchingSignatureFromAllWorkouts(
   def: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weightKg' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
 ): Promise<void> {
   const all = await loadWorkouts();
