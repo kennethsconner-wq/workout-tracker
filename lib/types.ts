@@ -1,7 +1,12 @@
 import type { WorkoutIconId } from '@/lib/workoutIcons';
 import type { ActivityType } from '@/lib/activityTypes';
 import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
-import type { CardioDistanceMode } from '@/lib/cardioDistanceMode';
+import type {
+  CardioDistanceTracking,
+  CardioDurationTracking,
+  CardioObjective,
+  LegacyCardioDistanceMode,
+} from '@/lib/cardioPlan';
 import type { DurationUnit } from '@/lib/durationUnits';
 import type { ScoreUnit } from '@/lib/scoreUnits';
 import type { WeightUnit } from '@/lib/weightUnits';
@@ -19,6 +24,8 @@ export type LoggedStretchActualSet = {
 export type LoggedCardioPerActualSet = {
   actualDuration: number;
   actualDurationUnit: DurationUnit;
+  actualDistance: number;
+  actualDistanceUnit: CardioDistanceUnit;
 };
 
 export type LoggedWorkoutExercise = {
@@ -34,8 +41,14 @@ export type LoggedWorkoutExercise = {
   durationUnit: DurationUnit;
   distance: number;
   distanceUnit: CardioDistanceUnit;
-  /** Cardio only: per-unit vs total distance semantics. */
-  cardioDistanceMode?: CardioDistanceMode;
+  /** Cardio only: primary plan objective. */
+  cardioObjective?: CardioObjective;
+  /** Cardio + distance objective: how duration is tracked. */
+  cardioDurationTracking?: CardioDurationTracking;
+  /** Cardio + duration objective: how distance is tracked. */
+  cardioDistanceTracking?: CardioDistanceTracking;
+  /** @deprecated Migrated to cardioObjective + tracking fields. */
+  cardioDistanceMode?: LegacyCardioDistanceMode;
   score: string;
   scoreUnit: ScoreUnit;
   actualSets: LoggedActualSet[];
@@ -47,8 +60,10 @@ export type LoggedWorkoutExercise = {
   actualScoreUnit: ScoreUnit;
   actualWeightUnit: WeightUnit;
   actualStretchSets: LoggedStretchActualSet[];
-  /** Per-segment durations for cardio per-distance logging. */
+  /** Per-segment values for cardio per-unit logging (duration or distance per segment). */
   actualCardioPerSets: LoggedCardioPerActualSet[];
+  /** Per-set planned durations for stretch activities (snapshot at log time). */
+  stretchSets?: StretchSet[];
   /** @deprecated Legacy stretch logs used actualSetCount + actualDuration. */
   actualSetCount?: number;
 };
@@ -80,8 +95,14 @@ export type WorkoutExercise = {
   durationUnit: DurationUnit;
   distance: number;
   distanceUnit: CardioDistanceUnit;
-  /** Cardio only: per-unit vs total distance semantics. */
-  cardioDistanceMode?: CardioDistanceMode;
+  /** Cardio only: primary plan objective. */
+  cardioObjective?: CardioObjective;
+  /** Cardio + distance objective: how duration is tracked. */
+  cardioDurationTracking?: CardioDurationTracking;
+  /** Cardio + duration objective: how distance is tracked. */
+  cardioDistanceTracking?: CardioDistanceTracking;
+  /** @deprecated Migrated to cardioObjective + tracking fields. */
+  cardioDistanceMode?: LegacyCardioDistanceMode;
   score: string;
   scoreUnit: ScoreUnit;
   /** Per-set planned durations for stretch activities. */

@@ -3,9 +3,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { normalizeActivityType } from '@/lib/activityTypes';
 import { sanitizeWorkoutExercise } from '@/lib/exerciseDraft';
 import { readActualStretchSetsFromStored, readStretchSetsFromStored } from '@/lib/stretchSets';
+import { cardioPlansMatch, normalizeCardioDistanceTracking, normalizeCardioDurationTracking, normalizeCardioObjective } from '@/lib/cardioPlan';
 import { DEFAULT_CARDIO_DISTANCE_UNIT, migrateLegacyCardioSetsDurationToDistance, normalizeCardioDistanceUnit } from '@/lib/cardioDistanceUnits';
 import { readActualCardioPerSetsFromStored } from '@/lib/cardioPerLog';
-import { normalizeCardioDistanceMode } from '@/lib/cardioDistanceMode';
 import { DEFAULT_DURATION_UNIT, normalizeDurationUnit } from '@/lib/durationUnits';
 import { DEFAULT_SCORE_UNIT, normalizeScoreUnit } from '@/lib/scoreUnits';
 import { DEFAULT_WEIGHT_UNIT, normalizeWeightUnit } from '@/lib/weightUnits';
@@ -106,8 +106,16 @@ function normalizeWorkoutExercise(raw: unknown): WorkoutExercise {
     durationUnit: normalizeDurationUnit(migrated.durationUnit),
     distance: migrated.distance,
     distanceUnit: normalizeCardioDistanceUnit(migrated.distanceUnit),
+    cardioObjective: activityType === 'cardio' ? normalizeCardioObjective(exercise.cardioObjective) : undefined,
+    cardioDurationTracking:
+      activityType === 'cardio' ? normalizeCardioDurationTracking(exercise.cardioDurationTracking) : undefined,
+    cardioDistanceTracking:
+      activityType === 'cardio' ? normalizeCardioDistanceTracking(exercise.cardioDistanceTracking) : undefined,
     cardioDistanceMode:
-      activityType === 'cardio' ? normalizeCardioDistanceMode(exercise.cardioDistanceMode) : undefined,
+      activityType === 'cardio' &&
+      (exercise.cardioDistanceMode === 'per' || exercise.cardioDistanceMode === 'total')
+        ? exercise.cardioDistanceMode
+        : undefined,
     score: typeof exercise.score === 'string' ? exercise.score : '',
     scoreUnit: readExerciseScoreUnit(exercise),
     stretchSets: readStretchSetsFromStored(exercise, activityType),
@@ -258,9 +266,23 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
           durationUnit: normalizeDurationUnit(migratedPlan.durationUnit),
           distance: migratedPlan.distance,
           distanceUnit: normalizeCardioDistanceUnit(migratedPlan.distanceUnit),
-          cardioDistanceMode:
+          cardioObjective:
             activityType === 'cardio'
-              ? normalizeCardioDistanceMode((exercise as { cardioDistanceMode?: unknown }).cardioDistanceMode)
+              ? normalizeCardioObjective((exercise as { cardioObjective?: unknown }).cardioObjective)
+              : undefined,
+          cardioDurationTracking:
+            activityType === 'cardio'
+              ? normalizeCardioDurationTracking((exercise as { cardioDurationTracking?: unknown }).cardioDurationTracking)
+              : undefined,
+          cardioDistanceTracking:
+            activityType === 'cardio'
+              ? normalizeCardioDistanceTracking((exercise as { cardioDistanceTracking?: unknown }).cardioDistanceTracking)
+              : undefined,
+          cardioDistanceMode:
+            activityType === 'cardio' &&
+            ((exercise as { cardioDistanceMode?: unknown }).cardioDistanceMode === 'per' ||
+              (exercise as { cardioDistanceMode?: unknown }).cardioDistanceMode === 'total')
+              ? ((exercise as { cardioDistanceMode: 'per' | 'total' }).cardioDistanceMode)
               : undefined,
           score: typeof (exercise as { score?: unknown }).score === 'string' ? (exercise as { score: string }).score : '',
           scoreUnit: readExerciseScoreUnit(exercise as Record<string, unknown>),
@@ -283,6 +305,7 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
               : readExerciseScoreUnit(exercise as Record<string, unknown>),
           actualStretchSets: readActualStretchSetsFromStored(exercise as Record<string, unknown>),
           actualCardioPerSets: readActualCardioPerSetsFromStored(exercise as Record<string, unknown>),
+          stretchSets: readStretchSetsFromStored(exercise as Record<string, unknown>, activityType),
         };
       })
     : [];
@@ -448,7 +471,7 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
   exercises: Array<
     Pick<
       WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
     >
   >,
 ): Promise<void> {
@@ -476,7 +499,9 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
         durationUnit: definition.durationUnit,
         distance: definition.distance,
         distanceUnit: definition.distanceUnit,
-        cardioDistanceMode: definition.cardioDistanceMode,
+        cardioObjective: definition.cardioObjective,
+        cardioDurationTracking: definition.cardioDurationTracking,
+        cardioDistanceTracking: definition.cardioDistanceTracking,
         score: definition.score,
         scoreUnit: definition.scoreUnit,
       });
@@ -488,11 +513,11 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
 function matchesExerciseDefinition(
   ex: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
   def: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
 ): boolean {
   return (
@@ -506,7 +531,7 @@ function matchesExerciseDefinition(
     ex.durationUnit === def.durationUnit &&
     ex.distance === def.distance &&
     ex.distanceUnit === def.distanceUnit &&
-    normalizeCardioDistanceMode(ex.cardioDistanceMode) === normalizeCardioDistanceMode(def.cardioDistanceMode) &&
+    cardioPlansMatch(ex, def) &&
     ex.score === def.score &&
     ex.scoreUnit === def.scoreUnit
   );
@@ -519,18 +544,18 @@ function matchesExerciseDefinition(
 export async function updateExercisesMatchingSignatureAcrossWorkouts(
   oldDef: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
   nextDef: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
 ): Promise<void> {
   const all = await loadWorkouts();
   const updates: Array<
     Pick<
       WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
     >
   > = [];
   const affectedIds = new Set<string>();
@@ -558,7 +583,9 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
     durationUnit: nextDef.durationUnit,
     distance: nextDef.distance,
     distanceUnit: nextDef.distanceUnit,
-    cardioDistanceMode: nextDef.cardioDistanceMode,
+    cardioObjective: nextDef.cardioObjective,
+    cardioDurationTracking: nextDef.cardioDurationTracking,
+    cardioDistanceTracking: nextDef.cardioDistanceTracking,
     score: nextDef.score,
     scoreUnit: nextDef.scoreUnit,
   });
@@ -579,7 +606,9 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
             durationUnit: cleanNext.durationUnit,
             distance: cleanNext.distance,
             distanceUnit: cleanNext.distanceUnit,
-            cardioDistanceMode: cleanNext.cardioDistanceMode,
+            cardioObjective: cleanNext.cardioObjective,
+            cardioDurationTracking: cleanNext.cardioDurationTracking,
+            cardioDistanceTracking: cleanNext.cardioDistanceTracking,
             score: cleanNext.score,
             scoreUnit: cleanNext.scoreUnit,
           }
@@ -593,7 +622,7 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
 export async function removeExercisesMatchingSignatureFromAllWorkouts(
   def: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
   >,
 ): Promise<void> {
   const all = await loadWorkouts();

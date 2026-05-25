@@ -1,13 +1,20 @@
 import type { ActivityType } from '@/lib/activityTypes';
-import { isCardioPerMode } from '@/lib/cardioPerLog';
 import {
   DEFAULT_CARDIO_DISTANCE_UNIT,
   normalizeCardioDistanceUnit,
   parseCardioDistanceInput,
   type CardioDistanceUnit,
 } from '@/lib/cardioDistanceUnits';
-import type { CardioDistanceMode } from '@/lib/cardioDistanceMode';
-import { normalizeCardioDistanceMode } from '@/lib/cardioDistanceMode';
+import {
+  getCardioLogLayout,
+  isCardioDistancePerDuration,
+  isCardioDurationPerDistance,
+  normalizeCardioPlanFields,
+  type CardioDistanceTracking,
+  type CardioDurationTracking,
+  type CardioObjective,
+  type LegacyCardioDistanceMode,
+} from '@/lib/cardioPlan';
 import {
   DEFAULT_DURATION_UNIT,
   normalizeDurationUnit,
@@ -20,6 +27,7 @@ import {
   type ScoreUnit,
 } from '@/lib/scoreUnits';
 import { DEFAULT_WEIGHT_UNIT, normalizeWeightUnit, type WeightUnit } from '@/lib/weightUnits';
+import { perSegmentObjectiveInputValue } from '@/lib/cardioPerLog';
 import type { LoggedWorkoutExercise } from '@/lib/types';
 
 export type LogExerciseDraftFields = {
@@ -27,8 +35,17 @@ export type LogExerciseDraftFields = {
   actualSets: Array<{ actualRepsInput: string; actualWeightInput: string }>;
   actualWeightUnit: WeightUnit;
   actualStretchSets: Array<{ actualDurationInput: string; actualDurationUnit: DurationUnit }>;
-  actualCardioPerSets: Array<{ actualDurationInput: string; actualDurationUnit: DurationUnit }>;
-  cardioDistanceMode?: CardioDistanceMode;
+  actualCardioPerSets: Array<{
+    actualDurationInput: string;
+    actualDurationUnit: DurationUnit;
+    actualDistanceInput: string;
+    actualDistanceUnit: CardioDistanceUnit;
+  }>;
+  cardioObjective?: CardioObjective;
+  cardioDurationTracking?: CardioDurationTracking;
+  cardioDistanceTracking?: CardioDistanceTracking;
+  /** @deprecated Migrated to cardioObjective + tracking fields. */
+  cardioDistanceMode?: LegacyCardioDistanceMode;
   plannedDuration: number;
   plannedDistance: number;
   actualDurationInput: string;
@@ -58,17 +75,90 @@ export type ParseLoggedExerciseResult =
     }
   | { ok: false; title: string; message: string };
 
+function emptyCardioActuals(): Pick<
+  LoggedWorkoutExercise,
+  | 'actualSets'
+  | 'actualWeightUnit'
+  | 'actualStretchSets'
+  | 'actualCardioPerSets'
+  | 'actualDuration'
+  | 'actualDurationUnit'
+  | 'actualDistance'
+  | 'actualDistanceUnit'
+  | 'actualScore'
+  | 'actualScoreUnit'
+> {
+  return {
+    actualSets: [],
+    actualWeightUnit: DEFAULT_WEIGHT_UNIT,
+    actualStretchSets: [],
+    actualCardioPerSets: [],
+    actualDuration: 0,
+    actualDurationUnit: DEFAULT_DURATION_UNIT,
+    actualDistance: 0,
+    actualDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
+    actualScore: '',
+    actualScoreUnit: DEFAULT_SCORE_UNIT,
+  };
+}
+
 export function hasLoggedExerciseInput(exercise: LogExerciseDraftFields): boolean {
   switch (exercise.activityType) {
     case 'strength':
       return exercise.actualSets.some(
         (set) => set.actualRepsInput.trim().length > 0 || set.actualWeightInput.trim().length > 0,
       );
-    case 'cardio':
-      if (isCardioPerMode(exercise)) {
-        return exercise.actualCardioPerSets.some((set) => set.actualDurationInput.trim().length > 0);
+    case 'cardio': {
+      const layout = getCardioLogLayout({
+        activityType: exercise.activityType,
+        cardioObjective: exercise.cardioObjective,
+        cardioDurationTracking: exercise.cardioDurationTracking,
+        cardioDistanceTracking: exercise.cardioDistanceTracking,
+        cardioDistanceMode: exercise.cardioDistanceMode,
+        duration: exercise.plannedDuration,
+        distance: exercise.plannedDistance,
+      });
+      if (layout === 'per_segment') {
+        const segmentExercise = {
+          activityType: 'cardio' as const,
+          cardioObjective: exercise.cardioObjective,
+          cardioDurationTracking: exercise.cardioDurationTracking,
+          cardioDistanceTracking: exercise.cardioDistanceTracking,
+          cardioDistanceMode: exercise.cardioDistanceMode,
+          distance: exercise.plannedDistance,
+          duration: exercise.plannedDuration,
+          durationUnit: exercise.actualDurationUnit,
+          distanceUnit: exercise.actualDistanceUnit,
+        };
+        const objectiveField = perSegmentObjectiveInputValue(segmentExercise);
+        if (
+          (objectiveField === 'actualDistanceInput' && exercise.actualDistanceInput.trim().length > 0) ||
+          (objectiveField === 'actualDurationInput' && exercise.actualDurationInput.trim().length > 0)
+        ) {
+          return true;
+        }
+        if (isCardioDurationPerDistance(exercise)) {
+          return exercise.actualCardioPerSets.some((set) => set.actualDurationInput.trim().length > 0);
+        }
+        return exercise.actualCardioPerSets.some((set) => set.actualDistanceInput.trim().length > 0);
+      }
+      if (layout === 'objective_only') {
+        const plan = normalizeCardioPlanFields({
+          activityType: 'cardio',
+          duration: exercise.plannedDuration,
+          distance: exercise.plannedDistance,
+          cardioObjective: exercise.cardioObjective,
+          cardioDurationTracking: exercise.cardioDurationTracking,
+          cardioDistanceTracking: exercise.cardioDistanceTracking,
+          cardioDistanceMode: exercise.cardioDistanceMode,
+        });
+        if (plan.cardioObjective === 'distance') {
+          return exercise.actualDistanceInput.trim().length > 0;
+        }
+        return exercise.actualDurationInput.trim().length > 0;
       }
       return exercise.actualDurationInput.trim().length > 0 || exercise.actualDistanceInput.trim().length > 0;
+    }
     case 'sport':
       return exercise.actualDurationInput.trim().length > 0 || exercise.actualScoreInput.trim().length > 0;
     case 'stretch':
@@ -108,120 +198,234 @@ export function parseLoggedExerciseFromDraft(
       parsedActualSets.push({ actualReps, actualWeight });
     }
 
-    return {
-      ok: true,
-      exercise: {
-        actualSets: parsedActualSets,
-        actualWeightUnit,
-        actualStretchSets: [],
-        actualCardioPerSets: [],
-        actualDuration: 0,
-        actualDurationUnit: DEFAULT_DURATION_UNIT,
-        actualDistance: 0,
-        actualDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
-        actualScore: '',
-        actualScoreUnit: DEFAULT_SCORE_UNIT,
-      },
-    };
+    return { ok: true, exercise: { ...emptyCardioActuals(), actualSets: parsedActualSets, actualWeightUnit } };
   }
 
   if (exercise.activityType === 'cardio') {
-    const mode = normalizeCardioDistanceMode(exercise.cardioDistanceMode);
+    const layout = getCardioLogLayout({
+      activityType: exercise.activityType,
+      cardioObjective: exercise.cardioObjective,
+      cardioDurationTracking: exercise.cardioDurationTracking,
+      cardioDistanceTracking: exercise.cardioDistanceTracking,
+      cardioDistanceMode: exercise.cardioDistanceMode,
+      duration: exercise.plannedDuration,
+      distance: exercise.plannedDistance,
+    });
 
-    if (mode === 'per') {
+    if (layout === 'per_segment') {
+      const segmentExercise = {
+        activityType: 'cardio' as const,
+        cardioObjective: exercise.cardioObjective,
+        cardioDurationTracking: exercise.cardioDurationTracking,
+        cardioDistanceTracking: exercise.cardioDistanceTracking,
+        cardioDistanceMode: exercise.cardioDistanceMode,
+        distance: exercise.plannedDistance,
+        duration: exercise.plannedDuration,
+        durationUnit: exercise.actualDurationUnit,
+        distanceUnit: exercise.actualDistanceUnit,
+      };
+      const objectiveField = perSegmentObjectiveInputValue(segmentExercise);
+      const objectiveInput =
+        objectiveField === 'actualDistanceInput'
+          ? exercise.actualDistanceInput
+          : exercise.actualDurationInput;
+      const hasObjectiveInput = objectiveInput.trim().length > 0;
       const parsedActualCardioPerSets: LoggedWorkoutExercise['actualCardioPerSets'] = [];
-      for (let setIndex = 0; setIndex < exercise.actualCardioPerSets.length; setIndex++) {
-        const actualSet = exercise.actualCardioPerSets[setIndex];
-        const actualDurationUnit = normalizeDurationUnit(actualSet.actualDurationUnit);
-        const actualDuration = parseDurationInput(actualSet.actualDurationInput, actualDurationUnit);
+      let parsedObjectiveDistance = 0;
+      let parsedObjectiveDuration = 0;
 
-        if (!Number.isFinite(actualDuration) || actualDuration <= 0) {
-          return {
-            ok: false,
-            title: 'Check your numbers',
-            message: `Enter a positive duration for segment ${setIndex + 1} of "${exerciseName}".`,
-          };
+      if (hasObjectiveInput) {
+        if (isCardioDurationPerDistance(exercise)) {
+          parsedObjectiveDistance = parseCardioDistanceInput(objectiveInput, exercise.actualDistanceUnit);
+          if (!Number.isFinite(parsedObjectiveDistance) || parsedObjectiveDistance <= 0) {
+            return {
+              ok: false,
+              title: 'Check your numbers',
+              message: `Enter a positive total distance for "${exerciseName}".`,
+            };
+          }
+        } else {
+          parsedObjectiveDuration = parseDurationInput(objectiveInput, exercise.actualDurationUnit);
+          if (!Number.isFinite(parsedObjectiveDuration) || parsedObjectiveDuration <= 0) {
+            return {
+              ok: false,
+              title: 'Check your numbers',
+              message: `Enter a positive total duration for "${exerciseName}".`,
+            };
+          }
         }
+      } else {
+        parsedObjectiveDistance = 0;
+        parsedObjectiveDuration = 0;
+      }
 
-        parsedActualCardioPerSets.push({ actualDuration, actualDurationUnit });
+      if (isCardioDurationPerDistance(exercise)) {
+        for (let setIndex = 0; setIndex < exercise.actualCardioPerSets.length; setIndex++) {
+          const actualSet = exercise.actualCardioPerSets[setIndex];
+          const actualDurationUnit = normalizeDurationUnit(actualSet.actualDurationUnit);
+          const actualDuration = parseDurationInput(actualSet.actualDurationInput, actualDurationUnit);
+
+          if (!Number.isFinite(actualDuration) || actualDuration <= 0) {
+            return {
+              ok: false,
+              title: 'Check your numbers',
+              message: `Enter a positive duration for segment ${setIndex + 1} of "${exerciseName}".`,
+            };
+          }
+
+          parsedActualCardioPerSets.push({
+            actualDuration,
+            actualDurationUnit,
+            actualDistance: 0,
+            actualDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
+          });
+        }
+      } else {
+        for (let setIndex = 0; setIndex < exercise.actualCardioPerSets.length; setIndex++) {
+          const actualSet = exercise.actualCardioPerSets[setIndex];
+          const actualDistanceUnit = normalizeCardioDistanceUnit(actualSet.actualDistanceUnit);
+          const actualDistance = parseCardioDistanceInput(actualSet.actualDistanceInput, actualDistanceUnit);
+
+          if (!Number.isFinite(actualDistance) || actualDistance <= 0) {
+            return {
+              ok: false,
+              title: 'Check your numbers',
+              message: `Enter a positive distance for segment ${setIndex + 1} of "${exerciseName}".`,
+            };
+          }
+
+          parsedActualCardioPerSets.push({
+            actualDuration: 0,
+            actualDurationUnit: DEFAULT_DURATION_UNIT,
+            actualDistance,
+            actualDistanceUnit,
+          });
+        }
       }
 
       return {
         ok: true,
         exercise: {
-          actualSets: [],
-          actualWeightUnit: DEFAULT_WEIGHT_UNIT,
-          actualStretchSets: [],
+          ...emptyCardioActuals(),
+          actualDuration: isCardioDistancePerDuration(exercise)
+            ? hasObjectiveInput
+              ? parsedObjectiveDuration
+              : 0
+            : 0,
+          actualDurationUnit: exercise.actualDurationUnit,
+          actualDistance: isCardioDurationPerDistance(exercise)
+            ? hasObjectiveInput
+              ? parsedObjectiveDistance
+              : 0
+            : 0,
+          actualDistanceUnit: exercise.actualDistanceUnit,
           actualCardioPerSets: parsedActualCardioPerSets,
-          actualDuration: 0,
-          actualDurationUnit: DEFAULT_DURATION_UNIT,
-          actualDistance: 0,
-          actualDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
-          actualScore: '',
-          actualScoreUnit: DEFAULT_SCORE_UNIT,
         },
       };
     }
 
-    const durationRaw = exercise.actualDurationInput.trim();
-    const hasDurationInput = durationRaw.length > 0;
-    const hasDistanceInput = exercise.actualDistanceInput.trim().length > 0;
-    const planHasDuration = exercise.plannedDuration > 0;
-    const planHasDistance = exercise.plannedDistance > 0;
     const actualDurationUnit = normalizeDurationUnit(exercise.actualDurationUnit);
     const actualDistanceUnit = normalizeCardioDistanceUnit(exercise.actualDistanceUnit);
     const actualDuration = parseDurationInput(exercise.actualDurationInput, actualDurationUnit);
     const actualDistance = parseCardioDistanceInput(exercise.actualDistanceInput, actualDistanceUnit);
+    const hasDurationInput = exercise.actualDurationInput.trim().length > 0;
+    const hasDistanceInput = exercise.actualDistanceInput.trim().length > 0;
 
-    if (!planHasDuration && !planHasDistance && !hasDurationInput && !hasDistanceInput) {
+    if (layout === 'objective_only') {
+      const plan = normalizeCardioPlanFields({
+        activityType: 'cardio',
+        duration: exercise.plannedDuration,
+        distance: exercise.plannedDistance,
+        cardioObjective: exercise.cardioObjective,
+        cardioDurationTracking: exercise.cardioDurationTracking,
+        cardioDistanceTracking: exercise.cardioDistanceTracking,
+        cardioDistanceMode: exercise.cardioDistanceMode,
+      });
+      if (plan.cardioObjective === 'distance') {
+        if (!hasDistanceInput) {
+          return {
+            ok: false,
+            title: 'Check your numbers',
+            message: `Enter a distance for "${exerciseName}".`,
+          };
+        }
+        if (!Number.isFinite(actualDistance) || actualDistance <= 0) {
+          return {
+            ok: false,
+            title: 'Check your numbers',
+            message: `Enter a positive distance for "${exerciseName}".`,
+          };
+        }
+        return {
+          ok: true,
+          exercise: {
+            ...emptyCardioActuals(),
+            actualDistance,
+            actualDistanceUnit,
+          },
+        };
+      }
+      if (!hasDurationInput) {
+        return {
+          ok: false,
+          title: 'Check your numbers',
+          message: `Enter a duration for "${exerciseName}".`,
+        };
+      }
+      if (!Number.isFinite(actualDuration) || actualDuration <= 0) {
+        return {
+          ok: false,
+          title: 'Check your numbers',
+          message: `Enter a positive duration for "${exerciseName}".`,
+        };
+      }
       return {
-        ok: false,
-        title: 'Check your numbers',
-        message: `"${exerciseName}" needs a duration, a distance, or both.`,
+        ok: true,
+        exercise: {
+          ...emptyCardioActuals(),
+          actualDuration,
+          actualDurationUnit,
+        },
       };
     }
-    if (planHasDuration && !hasDurationInput) {
+
+    if (!hasDurationInput) {
       return {
         ok: false,
         title: 'Check your numbers',
         message: `Enter a duration for "${exerciseName}".`,
       };
     }
-    if (planHasDistance && !hasDistanceInput) {
+    if (!hasDistanceInput) {
       return {
         ok: false,
         title: 'Check your numbers',
         message: `Enter a distance for "${exerciseName}".`,
       };
     }
-    if (hasDurationInput && (!Number.isFinite(actualDuration) || actualDuration <= 0)) {
+    if (!Number.isFinite(actualDuration) || actualDuration <= 0) {
       return {
         ok: false,
         title: 'Check your numbers',
         message: `Enter a positive duration for "${exerciseName}".`,
       };
     }
-    if (hasDistanceInput && (!Number.isFinite(actualDistance) || actualDistance < 0)) {
+    if (!Number.isFinite(actualDistance) || actualDistance <= 0) {
       return {
         ok: false,
         title: 'Check your numbers',
-        message: `Enter a valid distance for "${exerciseName}".`,
+        message: `Enter a positive distance for "${exerciseName}".`,
       };
     }
 
     return {
       ok: true,
       exercise: {
-        actualSets: [],
-        actualWeightUnit: DEFAULT_WEIGHT_UNIT,
-        actualStretchSets: [],
-        actualCardioPerSets: [],
+        ...emptyCardioActuals(),
         actualDuration,
         actualDurationUnit,
         actualDistance,
         actualDistanceUnit,
-        actualScore: '',
-        actualScoreUnit: DEFAULT_SCORE_UNIT,
       },
     };
   }
@@ -254,14 +458,9 @@ export function parseLoggedExerciseFromDraft(
     return {
       ok: true,
       exercise: {
-        actualSets: [],
-        actualWeightUnit: DEFAULT_WEIGHT_UNIT,
-        actualStretchSets: [],
-        actualCardioPerSets: [],
+        ...emptyCardioActuals(),
         actualDuration,
         actualDurationUnit,
-        actualDistance: 0,
-        actualDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
         actualScore,
         actualScoreUnit,
       },
@@ -286,21 +485,7 @@ export function parseLoggedExerciseFromDraft(
       parsedActualStretchSets.push({ actualDuration, actualDurationUnit });
     }
 
-    return {
-      ok: true,
-      exercise: {
-        actualSets: [],
-        actualWeightUnit: DEFAULT_WEIGHT_UNIT,
-        actualStretchSets: parsedActualStretchSets,
-        actualCardioPerSets: [],
-        actualDuration: 0,
-        actualDurationUnit: DEFAULT_DURATION_UNIT,
-        actualDistance: 0,
-        actualDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
-        actualScore: '',
-        actualScoreUnit: DEFAULT_SCORE_UNIT,
-      },
-    };
+    return { ok: true, exercise: { ...emptyCardioActuals(), actualStretchSets: parsedActualStretchSets } };
   }
 
   return { ok: false, title: 'Check your numbers', message: `Unknown activity type for "${exerciseName}".` };

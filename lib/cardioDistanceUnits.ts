@@ -61,15 +61,20 @@ export function parseCardioDistanceInput(raw: string, unit: CardioDistanceUnit):
   return Number.parseFloat(trimmed);
 }
 
-export function formatCardioDistanceValue(value: number, unit: CardioDistanceUnit): string {
+export function formatCardioDistanceValue(
+  value: number,
+  unit: CardioDistanceUnit,
+  decimalPlaces = 1,
+): string {
   if (!Number.isFinite(value) || value <= 0) {
     return '';
   }
   if (usesIntegerDistanceInput(unit)) {
     return String(Math.round(value));
   }
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  const factor = 10 ** decimalPlaces;
+  const rounded = Math.round(value * factor) / factor;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(decimalPlaces);
 }
 
 export function formatCardioDistanceWithUnit(value: number, unit: CardioDistanceUnit): string {

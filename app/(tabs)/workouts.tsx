@@ -18,8 +18,15 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import type { ActivityType } from '@/lib/activityTypes';
 import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
-import { DEFAULT_DURATION_UNIT, DEFAULT_STRETCH_DURATION_UNIT, normalizeCardioDurationUnit, normalizeSportDurationUnit, type DurationUnit } from '@/lib/durationUnits';
-import { DEFAULT_CARDIO_DISTANCE_MODE, type CardioDistanceMode } from '@/lib/cardioDistanceMode';
+import { DEFAULT_DURATION_UNIT, type DurationUnit } from '@/lib/durationUnits';
+import {
+  DEFAULT_CARDIO_DISTANCE_TRACKING,
+  DEFAULT_CARDIO_DURATION_TRACKING,
+  DEFAULT_CARDIO_OBJECTIVE,
+  type CardioDistanceTracking,
+  type CardioDurationTracking,
+  type CardioObjective,
+} from '@/lib/cardioPlan';
 import type { ScoreUnit } from '@/lib/scoreUnits';
 import type { WeightUnit } from '@/lib/weightUnits';
 import {
@@ -28,8 +35,12 @@ import {
   exerciseDraftSeedFromRow,
   isExerciseDraftRowEmpty,
   parseWorkoutExerciseFromDraft,
-  sanitizeExerciseDraftRow,
+  applyActivityTypeChangeToDraftRow,
+  applyCardioObjectiveChangeToDraftRow,
+  applyCardioDurationTrackingChangeToDraftRow,
+  applyCardioDistanceTrackingChangeToDraftRow,
   workoutExerciseToDraftRow,
+  type CopyWorkoutPayload,
   type ExerciseDraftRow,
   type ExerciseDraftSeed,
 } from '@/lib/exerciseDraft';
@@ -41,14 +52,6 @@ import { DAYS_OF_WEEK, type DayOfWeek, type Workout, type WorkoutExercise } from
 import { themedAlert } from '@/lib/themedAlert';
 import { addWorkout, findTemplateExerciseById, loadWorkouts, propagateExerciseDefinitionsAcrossWorkouts } from '@/lib/workoutsStorage';
 
-type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
-  exercises: Array<
-    Pick<
-      WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score' | 'scoreUnit'
-    >
-  >;
-};
 type ImportExercisesPayload = {
   nonce: string;
   exercises: ExerciseDraftSeed[];
@@ -147,24 +150,7 @@ export default function LogWorkoutScreen() {
 
   const updateExerciseActivityType = (exerciseId: string, activityType: ActivityType) => {
     setExercises((prev) =>
-      prev.map((ex) => {
-        if (ex.clientId !== exerciseId) {
-          return ex;
-        }
-        const next = sanitizeExerciseDraftRow({ ...ex, activityType });
-        if (activityType === 'stretch') {
-          return { ...next, durationUnit: DEFAULT_STRETCH_DURATION_UNIT };
-        }
-        if (activityType === 'cardio') {
-          const durationUnit =
-            next.durationUnit === 'breaths' ? DEFAULT_DURATION_UNIT : normalizeCardioDurationUnit(next.durationUnit);
-          return { ...next, cardioDistanceMode: DEFAULT_CARDIO_DISTANCE_MODE, durationUnit };
-        }
-        if (activityType === 'sport') {
-          return { ...next, durationUnit: normalizeSportDurationUnit(next.durationUnit) };
-        }
-        return next;
-      }),
+      prev.map((ex) => (ex.clientId === exerciseId ? applyActivityTypeChangeToDraftRow(ex, activityType) : ex)),
     );
   };
 
@@ -184,9 +170,25 @@ export default function LogWorkoutScreen() {
     );
   };
 
-  const updateExerciseCardioDistanceMode = (exerciseId: string, mode: CardioDistanceMode) => {
+  const updateExerciseCardioObjective = (exerciseId: string, objective: CardioObjective) => {
     setExercises((prev) =>
-      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, cardioDistanceMode: mode } : ex)),
+      prev.map((ex) => (ex.clientId === exerciseId ? applyCardioObjectiveChangeToDraftRow(ex, objective) : ex)),
+    );
+  };
+
+  const updateExerciseCardioDurationTracking = (exerciseId: string, tracking: CardioDurationTracking) => {
+    setExercises((prev) =>
+      prev.map((ex) =>
+        ex.clientId === exerciseId ? applyCardioDurationTrackingChangeToDraftRow(ex, tracking) : ex,
+      ),
+    );
+  };
+
+  const updateExerciseCardioDistanceTracking = (exerciseId: string, tracking: CardioDistanceTracking) => {
+    setExercises((prev) =>
+      prev.map((ex) =>
+        ex.clientId === exerciseId ? applyCardioDistanceTrackingChangeToDraftRow(ex, tracking) : ex,
+      ),
     );
   };
 
@@ -386,7 +388,9 @@ export default function LogWorkoutScreen() {
         onUpdateExerciseActivityType={updateExerciseActivityType}
         onUpdateExerciseField={updateExerciseField}
         onUpdateExerciseDistanceUnit={updateExerciseDistanceUnit}
-        onUpdateExerciseCardioDistanceMode={updateExerciseCardioDistanceMode}
+        onUpdateExerciseCardioObjective={updateExerciseCardioObjective}
+        onUpdateExerciseCardioDurationTracking={updateExerciseCardioDurationTracking}
+        onUpdateExerciseCardioDistanceTracking={updateExerciseCardioDistanceTracking}
         onUpdateExerciseDurationUnit={updateExerciseDurationUnit}
         onUpdateExerciseScoreUnit={updateExerciseScoreUnit}
         onUpdateExerciseWeightUnit={updateExerciseWeightUnit}

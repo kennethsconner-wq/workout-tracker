@@ -2,22 +2,34 @@ export const STANDARD_DURATION_UNITS = ['minutes', 'seconds', 'hours', 'breaths'
 
 export type StandardDurationUnit = (typeof STANDARD_DURATION_UNITS)[number];
 
+/** Sport-only duration units (not used for cardio or stretch). */
+export const SPORT_ONLY_DURATION_UNITS = ['matches', 'games', 'rounds'] as const;
+
+export type SportOnlyDurationUnit = (typeof SPORT_ONLY_DURATION_UNITS)[number];
+
 /** Stretch uses standard units including `breaths`. */
 export const STRETCH_DURATION_UNITS = STANDARD_DURATION_UNITS;
 
-/** Sport: time units only; excludes `breaths`. */
-export const SPORT_DURATION_UNITS = ['minutes', 'seconds', 'hours'] as const;
+/** Sport: time units plus matches/games/rounds; excludes `breaths`. */
+export const SPORT_DURATION_UNITS = [
+  'minutes',
+  'seconds',
+  'hours',
+  'matches',
+  'games',
+  'rounds',
+] as const;
 
 export type SportDurationUnit = (typeof SPORT_DURATION_UNITS)[number];
 
 /** Cardio duration: time units only (`sets` is a distance unit). */
-export const CARDIO_DURATION_UNITS = SPORT_DURATION_UNITS;
+export const CARDIO_DURATION_UNITS = ['minutes', 'seconds', 'hours'] as const;
 
-export type CardioDurationUnit = SportDurationUnit;
+export type CardioDurationUnit = (typeof CARDIO_DURATION_UNITS)[number];
 
-export const DURATION_UNITS = STANDARD_DURATION_UNITS;
+export const DURATION_UNITS = [...STANDARD_DURATION_UNITS, ...SPORT_ONLY_DURATION_UNITS] as const;
 
-export type DurationUnit = StandardDurationUnit;
+export type DurationUnit = StandardDurationUnit | SportOnlyDurationUnit;
 
 export const DEFAULT_DURATION_UNIT: DurationUnit = 'minutes';
 
@@ -35,6 +47,9 @@ export const DURATION_UNIT_LABELS: Record<DurationUnit, string> = {
   seconds: 'Seconds',
   hours: 'Hours',
   breaths: 'Breaths',
+  matches: 'Matches',
+  games: 'Games',
+  rounds: 'Rounds',
 };
 
 export const DURATION_UNIT_ABBREVIATIONS: Record<DurationUnit, string> = {
@@ -42,6 +57,9 @@ export const DURATION_UNIT_ABBREVIATIONS: Record<DurationUnit, string> = {
   seconds: 'sec',
   hours: 'hr',
   breaths: 'br',
+  matches: 'matches',
+  games: 'games',
+  rounds: 'rnd',
 };
 
 export function isDurationUnit(value: string): value is DurationUnit {
@@ -83,13 +101,23 @@ export function normalizeSportDurationUnit(value: unknown): SportDurationUnit {
   return DEFAULT_SPORT_DURATION_UNIT;
 }
 
-/** Use for cardio duration (excludes `breaths`; `sets` is a distance unit). */
+/** Use for cardio duration (excludes `breaths`, matches, and games; `sets` is a distance unit). */
 export function normalizeCardioDurationUnit(value: unknown): CardioDurationUnit {
-  return normalizeSportDurationUnit(value);
+  if (typeof value === 'string' && isCardioDurationUnit(value)) {
+    return value;
+  }
+  return DEFAULT_CARDIO_DURATION_UNIT;
 }
 
 export function usesIntegerDurationInput(unit: DurationUnit): boolean {
-  return unit === 'minutes' || unit === 'seconds' || unit === 'breaths';
+  return (
+    unit === 'minutes' ||
+    unit === 'seconds' ||
+    unit === 'breaths' ||
+    unit === 'matches' ||
+    unit === 'games' ||
+    unit === 'rounds'
+  );
 }
 
 export function parseDurationInput(raw: string, unit: DurationUnit): number {
@@ -103,15 +131,16 @@ export function parseDurationInput(raw: string, unit: DurationUnit): number {
   return Number.parseFloat(trimmed);
 }
 
-export function formatDurationValue(value: number, unit: DurationUnit): string {
+export function formatDurationValue(value: number, unit: DurationUnit, decimalPlaces = 1): string {
   if (!Number.isFinite(value) || value <= 0) {
     return '';
   }
   if (usesIntegerDurationInput(unit)) {
     return String(Math.round(value));
   }
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  const factor = 10 ** decimalPlaces;
+  const rounded = Math.round(value * factor) / factor;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(decimalPlaces);
 }
 
 export function formatDurationWithUnit(value: number, unit: DurationUnit): string {

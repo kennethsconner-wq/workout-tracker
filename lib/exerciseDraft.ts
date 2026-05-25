@@ -19,11 +19,18 @@ import {
 } from '@/lib/cardioDistanceUnits';
 
 import {
-  DEFAULT_CARDIO_DISTANCE_MODE,
-  isCardioDistanceMode,
-  normalizeCardioDistanceMode,
-  type CardioDistanceMode,
-} from '@/lib/cardioDistanceMode';
+  DEFAULT_CARDIO_DISTANCE_TRACKING,
+  DEFAULT_CARDIO_DURATION_TRACKING,
+  DEFAULT_CARDIO_OBJECTIVE,
+  hydrateCardioDraftFromStored,
+  normalizeCardioDistanceTracking,
+  normalizeCardioDurationTracking,
+  normalizeCardioObjective,
+  normalizeCardioPlanFields,
+  type CardioDistanceTracking,
+  type CardioDurationTracking,
+  type CardioObjective,
+} from '@/lib/cardioPlan';
 
 import {
 
@@ -61,7 +68,7 @@ import { DEFAULT_WEIGHT_UNIT, normalizeWeightUnit, type WeightUnit } from '@/lib
 
 import { newId } from '@/lib/ids';
 
-import type { WorkoutExercise } from '@/lib/types';
+import type { Workout, WorkoutExercise } from '@/lib/types';
 
 
 
@@ -91,7 +98,11 @@ export type ExerciseDraftRow = {
 
   distanceUnit: CardioDistanceUnit;
 
-  cardioDistanceMode: CardioDistanceMode;
+  cardioObjective: CardioObjective;
+
+  cardioDurationTracking: CardioDurationTracking;
+
+  cardioDistanceTracking: CardioDistanceTracking;
 
   score: string;
 
@@ -99,7 +110,60 @@ export type ExerciseDraftRow = {
 
 };
 
+/** Exercise fields preserved when copying a workout template to Create Workout. */
+export type CopyWorkoutExercisePayload = Pick<
+  WorkoutExercise,
+  | 'id'
+  | 'activityType'
+  | 'name'
+  | 'sets'
+  | 'reps'
+  | 'weight'
+  | 'weightUnit'
+  | 'duration'
+  | 'durationUnit'
+  | 'distance'
+  | 'distanceUnit'
+  | 'cardioObjective'
+  | 'cardioDurationTracking'
+  | 'cardioDistanceTracking'
+  | 'cardioDistanceMode'
+  | 'score'
+  | 'scoreUnit'
+  | 'stretchSets'
+>;
 
+export type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
+  exercises: CopyWorkoutExercisePayload[];
+};
+
+export function buildCopyWorkoutPayload(workout: Workout): CopyWorkoutPayload {
+  return {
+    title: workout.title,
+    daysOfWeek: workout.daysOfWeek,
+    iconId: workout.iconId,
+    exercises: workout.exercises.map((exercise) => ({
+      id: exercise.id,
+      activityType: exercise.activityType,
+      name: exercise.name,
+      sets: exercise.sets,
+      reps: exercise.reps,
+      weight: exercise.weight,
+      weightUnit: exercise.weightUnit,
+      duration: exercise.duration,
+      durationUnit: exercise.durationUnit,
+      distance: exercise.distance,
+      distanceUnit: exercise.distanceUnit,
+      cardioObjective: exercise.cardioObjective,
+      cardioDurationTracking: exercise.cardioDurationTracking,
+      cardioDistanceTracking: exercise.cardioDistanceTracking,
+      cardioDistanceMode: exercise.cardioDistanceMode,
+      score: exercise.score,
+      scoreUnit: exercise.scoreUnit,
+      stretchSets: exercise.stretchSets,
+    })),
+  };
+}
 
 export type ParseExerciseDraftResult =
 
@@ -135,7 +199,11 @@ export function emptyExerciseDraftRow(): ExerciseDraftRow {
 
     distanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
 
-    cardioDistanceMode: DEFAULT_CARDIO_DISTANCE_MODE,
+    cardioObjective: DEFAULT_CARDIO_OBJECTIVE,
+
+    cardioDurationTracking: DEFAULT_CARDIO_DURATION_TRACKING,
+
+    cardioDistanceTracking: DEFAULT_CARDIO_DISTANCE_TRACKING,
 
     score: '',
 
@@ -161,7 +229,15 @@ export function sanitizeExerciseDraftRow(ex: ExerciseDraftRow): ExerciseDraftRow
         score: '',
         scoreUnit: DEFAULT_SCORE_UNIT,
       };
-    case 'cardio':
+    case 'cardio': {
+      const plan = normalizeCardioPlanFields({
+        activityType: 'cardio',
+        duration: 0,
+        distance: 0,
+        cardioObjective: ex.cardioObjective,
+        cardioDurationTracking: ex.cardioDurationTracking,
+        cardioDistanceTracking: ex.cardioDistanceTracking,
+      });
       return {
         ...ex,
         sets: '',
@@ -170,9 +246,13 @@ export function sanitizeExerciseDraftRow(ex: ExerciseDraftRow): ExerciseDraftRow
         weightUnit: DEFAULT_WEIGHT_UNIT,
         score: '',
         scoreUnit: DEFAULT_SCORE_UNIT,
-        cardioDistanceMode: normalizeCardioDistanceMode(ex.cardioDistanceMode),
+        cardioObjective: plan.cardioObjective,
+        cardioDurationTracking: plan.cardioDurationTracking,
+        cardioDistanceTracking: plan.cardioDistanceTracking,
         durationUnit: normalizeCardioDurationUnit(ex.durationUnit),
+        distanceUnit: normalizeCardioDistanceUnit(ex.distanceUnit),
       };
+    }
     case 'sport':
       return {
         ...ex,
@@ -204,7 +284,62 @@ export function sanitizeExerciseDraftRow(ex: ExerciseDraftRow): ExerciseDraftRow
   }
 }
 
+export function applyActivityTypeChangeToDraftRow(ex: ExerciseDraftRow, activityType: ActivityType): ExerciseDraftRow {
+  const next = sanitizeExerciseDraftRow({ ...ex, activityType });
+  if (activityType === 'stretch') {
+    return { ...next, durationUnit: DEFAULT_STRETCH_DURATION_UNIT };
+  }
+  if (activityType === 'cardio') {
+    const durationUnit =
+      next.durationUnit === 'breaths' ? DEFAULT_DURATION_UNIT : normalizeCardioDurationUnit(next.durationUnit);
+    return {
+      ...next,
+      durationUnit,
+      cardioObjective: DEFAULT_CARDIO_OBJECTIVE,
+      cardioDurationTracking: DEFAULT_CARDIO_DURATION_TRACKING,
+      cardioDistanceTracking: DEFAULT_CARDIO_DISTANCE_TRACKING,
+      duration: '',
+      distance: '',
+    };
+  }
+  if (activityType === 'sport') {
+    return { ...next, durationUnit: normalizeSportDurationUnit(next.durationUnit) };
+  }
+  return next;
+}
 
+export function applyCardioObjectiveChangeToDraftRow(ex: ExerciseDraftRow, objective: CardioObjective): ExerciseDraftRow {
+  return {
+    ...ex,
+    cardioObjective: objective,
+    cardioDurationTracking: DEFAULT_CARDIO_DURATION_TRACKING,
+    cardioDistanceTracking: DEFAULT_CARDIO_DISTANCE_TRACKING,
+    duration: objective === 'distance' ? '' : ex.duration,
+    distance: objective === 'duration' ? '' : ex.distance,
+  };
+}
+
+export function applyCardioDurationTrackingChangeToDraftRow(
+  ex: ExerciseDraftRow,
+  tracking: CardioDurationTracking,
+): ExerciseDraftRow {
+  return {
+    ...ex,
+    cardioDurationTracking: tracking,
+    duration: tracking === 'none' ? '' : ex.duration,
+  };
+}
+
+export function applyCardioDistanceTrackingChangeToDraftRow(
+  ex: ExerciseDraftRow,
+  tracking: CardioDistanceTracking,
+): ExerciseDraftRow {
+  return {
+    ...ex,
+    cardioDistanceTracking: tracking,
+    distance: tracking === 'none' ? '' : ex.distance,
+  };
+}
 
 /** Clear stored exercise fields that do not apply to the selected activity type. */
 export function sanitizeWorkoutExercise(exercise: WorkoutExercise): WorkoutExercise {
@@ -220,7 +355,8 @@ export function sanitizeWorkoutExercise(exercise: WorkoutExercise): WorkoutExerc
         score: '',
         scoreUnit: DEFAULT_SCORE_UNIT,
       };
-    case 'cardio':
+    case 'cardio': {
+      const plan = normalizeCardioPlanFields(exercise);
       return {
         ...exercise,
         sets: 0,
@@ -229,8 +365,11 @@ export function sanitizeWorkoutExercise(exercise: WorkoutExercise): WorkoutExerc
         weightUnit: DEFAULT_WEIGHT_UNIT,
         score: '',
         scoreUnit: DEFAULT_SCORE_UNIT,
-        cardioDistanceMode: normalizeCardioDistanceMode(exercise.cardioDistanceMode),
+        cardioObjective: plan.cardioObjective,
+        cardioDurationTracking: plan.cardioDurationTracking,
+        cardioDistanceTracking: plan.cardioDistanceTracking,
       };
+    }
     case 'sport':
       return {
         ...exercise,
@@ -281,6 +420,15 @@ export function workoutExerciseToDraftRow(exercise: WorkoutExercise, options?: {
           : normalizeDurationUnit(migrated.durationUnit);
 
   const weightUnit = normalizeWeightUnit(exercise.weightUnit);
+  const cardioDraft =
+    migrated.activityType === 'cardio'
+      ? hydrateCardioDraftFromStored({
+          ...exercise,
+          duration: migrated.duration,
+          distance: migrated.distance,
+          distanceUnit: migrated.distanceUnit,
+        })
+      : null;
 
   return {
 
@@ -300,15 +448,19 @@ export function workoutExerciseToDraftRow(exercise: WorkoutExercise, options?: {
 
     weightUnit,
 
-    duration: migrated.duration > 0 ? formatDurationValue(migrated.duration, durationUnit) : '',
+    duration: cardioDraft?.duration ?? (migrated.duration > 0 ? formatDurationValue(migrated.duration, durationUnit) : ''),
 
     durationUnit,
 
-    distance: migrated.distance > 0 ? formatCardioDistanceValue(migrated.distance, distanceUnit) : '',
+    distance: cardioDraft?.distance ?? (migrated.distance > 0 ? formatCardioDistanceValue(migrated.distance, distanceUnit) : ''),
 
     distanceUnit,
 
-    cardioDistanceMode: normalizeCardioDistanceMode(exercise.cardioDistanceMode),
+    cardioObjective: cardioDraft?.cardioObjective ?? DEFAULT_CARDIO_OBJECTIVE,
+
+    cardioDurationTracking: cardioDraft?.cardioDurationTracking ?? DEFAULT_CARDIO_DURATION_TRACKING,
+
+    cardioDistanceTracking: cardioDraft?.cardioDistanceTracking ?? DEFAULT_CARDIO_DISTANCE_TRACKING,
 
     score: exercise.score,
 
@@ -472,138 +624,70 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
 
   if (activityType === 'cardio') {
 
-    const durationRaw = sanitized.duration.trim();
-
-    const hasDurationInput = durationRaw.length > 0;
-
-    const hasDistanceInput = sanitized.distance.trim().length > 0;
-
+    const objective = normalizeCardioObjective(sanitized.cardioObjective);
+    const durationTracking = normalizeCardioDurationTracking(sanitized.cardioDurationTracking);
+    const distanceTracking = normalizeCardioDistanceTracking(sanitized.cardioDistanceTracking);
     const durationUnit = normalizeCardioDurationUnit(sanitized.durationUnit);
-
     const distanceUnit = normalizeCardioDistanceUnit(sanitized.distanceUnit);
-
-    if (!isCardioDistanceMode(sanitized.cardioDistanceMode)) {
-
-      return {
-
-        ok: false,
-
-        title: 'Check your numbers',
-
-        message: 'Select Per or Total for distance mode.',
-
-      };
-
-    }
-
-    const cardioDistanceMode = sanitized.cardioDistanceMode;
-
     const duration = parseDurationInput(sanitized.duration, durationUnit);
-
     const distance = parseCardioDistanceInput(sanitized.distance, distanceUnit);
 
-
-
-    if (cardioDistanceMode === 'per') {
-
-      if (!hasDurationInput) {
-
-        return {
-
-          ok: false,
-
-          title: 'Check your numbers',
-
-          message: 'Enter a duration when distance mode is Per.',
-
-        };
-
+    if (objective === 'distance') {
+      if (!sanitized.distance.trim()) {
+        return { ok: false, title: 'Check your numbers', message: 'Enter a distance for this cardio exercise.' };
       }
-
-      if (!hasDistanceInput) {
-
-        return {
-
-          ok: false,
-
-          title: 'Check your numbers',
-
-          message: 'Enter a distance when distance mode is Per.',
-
-        };
-
+      if (!Number.isFinite(distance) || distance <= 0) {
+        return { ok: false, title: 'Check your numbers', message: 'Enter a positive distance.' };
       }
-
+      if (durationTracking !== 'none') {
+        if (!sanitized.duration.trim()) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a duration for this cardio exercise.' };
+        }
+        if (!Number.isFinite(duration) || duration <= 0) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a positive duration.' };
+        }
+      }
+    } else {
+      if (!sanitized.duration.trim()) {
+        return { ok: false, title: 'Check your numbers', message: 'Enter a duration for this cardio exercise.' };
+      }
+      if (!Number.isFinite(duration) || duration <= 0) {
+        return { ok: false, title: 'Check your numbers', message: 'Enter a positive duration.' };
+      }
+      if (distanceTracking !== 'none') {
+        if (!sanitized.distance.trim()) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a distance for this cardio exercise.' };
+        }
+        if (!Number.isFinite(distance) || distance <= 0) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a positive distance.' };
+        }
+      }
     }
 
-    if (cardioDistanceMode === 'total' && !hasDurationInput && !hasDistanceInput) {
-      return {
-        ok: false,
-        title: 'Check your numbers',
-        message: 'Enter a duration, a distance, or both when distance mode is Total.',
-      };
-    }
-
-    if (hasDurationInput && (!Number.isFinite(duration) || duration <= 0)) {
-
-      return {
-
-        ok: false,
-
-        title: 'Check your numbers',
-
-        message: 'Enter a positive duration.',
-
-      };
-
-    }
-
-    if (hasDistanceInput && (!Number.isFinite(distance) || distance <= 0)) {
-      return {
-        ok: false,
-        title: 'Check your numbers',
-        message: 'Enter a positive distance.',
-      };
-    }
+    const savedDuration = objective === 'distance' && durationTracking === 'none' ? 0 : duration;
+    const savedDistance = objective === 'duration' && distanceTracking === 'none' ? 0 : distance;
 
     return {
-
       ok: true,
-
       exercise: {
-
         id,
-
         activityType,
-
         name,
-
         sets: 0,
-
         reps: 0,
-
         weight: 0,
-
         weightUnit: DEFAULT_WEIGHT_UNIT,
-
-        duration,
-
+        duration: savedDuration,
         durationUnit,
-
-        distance,
-
+        distance: savedDistance,
         distanceUnit,
-
-        cardioDistanceMode,
-
+        cardioObjective: objective,
+        cardioDurationTracking: objective === 'distance' ? durationTracking : DEFAULT_CARDIO_DURATION_TRACKING,
+        cardioDistanceTracking: objective === 'duration' ? distanceTracking : DEFAULT_CARDIO_DISTANCE_TRACKING,
         score: '',
-
         scoreUnit: DEFAULT_SCORE_UNIT,
-
       },
-
     };
-
   }
 
 
@@ -765,7 +849,7 @@ export type ExerciseDraftSeed = Pick<
 
   ExerciseDraftRow,
 
-  'sourceExerciseId' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+  'sourceExerciseId' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'score' | 'scoreUnit'
 
 > & {
 
@@ -780,6 +864,10 @@ export type ExerciseDraftSeed = Pick<
   /** @deprecated Legacy import payloads used durationMinutes. */
 
   durationMinutes?: string;
+
+  /** @deprecated Migrated to cardioObjective + tracking fields. */
+
+  cardioDistanceMode?: 'per' | 'total';
 
 };
 
@@ -811,7 +899,11 @@ export function exerciseDraftSeedFromRow(ex: ExerciseDraftRow): ExerciseDraftSee
 
     distanceUnit: sanitized.distanceUnit,
 
-    cardioDistanceMode: sanitized.cardioDistanceMode,
+    cardioObjective: sanitized.cardioObjective,
+
+    cardioDurationTracking: sanitized.cardioDurationTracking,
+
+    cardioDistanceTracking: sanitized.cardioDistanceTracking,
 
     score: sanitized.score,
 
@@ -833,13 +925,41 @@ export function exerciseDraftRowFromSeed(seed: ExerciseDraftSeed): ExerciseDraft
     distanceUnit: seed.distanceUnit,
   });
 
+  const activityType = normalizeActivityType(seed.activityType);
+  const durationRaw = migratedDraft.duration;
+  const distanceRaw = migratedDraft.distance;
+  const parsedDuration =
+    activityType === 'cardio' && durationRaw.trim()
+      ? parseDurationInput(durationRaw, normalizeDurationUnit(migratedDraft.durationUnit))
+      : 0;
+  const parsedDistance =
+    activityType === 'cardio' && distanceRaw.trim()
+      ? parseCardioDistanceInput(distanceRaw, normalizeCardioDistanceUnit(migratedDraft.distanceUnit))
+      : 0;
+  const cardioPlan =
+    activityType === 'cardio'
+      ? normalizeCardioPlanFields({
+          activityType: 'cardio',
+          duration: parsedDuration,
+          distance: parsedDistance,
+          cardioObjective: normalizeCardioObjective((seed as { cardioObjective?: unknown }).cardioObjective),
+          cardioDurationTracking: normalizeCardioDurationTracking(
+            (seed as { cardioDurationTracking?: unknown }).cardioDurationTracking,
+          ),
+          cardioDistanceTracking: normalizeCardioDistanceTracking(
+            (seed as { cardioDistanceTracking?: unknown }).cardioDistanceTracking,
+          ),
+          cardioDistanceMode: seed.cardioDistanceMode,
+        })
+      : null;
+
   return sanitizeExerciseDraftRow({
 
     clientId: newId(),
 
     sourceExerciseId: seed.sourceExerciseId,
 
-    activityType: normalizeActivityType(seed.activityType),
+    activityType,
 
     name: seed.name,
 
@@ -859,7 +979,11 @@ export function exerciseDraftRowFromSeed(seed: ExerciseDraftSeed): ExerciseDraft
 
     distanceUnit: normalizeCardioDistanceUnit(migratedDraft.distanceUnit),
 
-    cardioDistanceMode: normalizeCardioDistanceMode(seed.cardioDistanceMode),
+    cardioObjective: cardioPlan?.cardioObjective ?? DEFAULT_CARDIO_OBJECTIVE,
+
+    cardioDurationTracking: cardioPlan?.cardioDurationTracking ?? DEFAULT_CARDIO_DURATION_TRACKING,
+
+    cardioDistanceTracking: cardioPlan?.cardioDistanceTracking ?? DEFAULT_CARDIO_DISTANCE_TRACKING,
 
     score: seed.score ?? '',
 

@@ -23,7 +23,8 @@ import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
-import { formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
+import { activityTypeLabel, formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
+import { buildCopyWorkoutPayload } from '@/lib/exerciseDraft';
 import { pickWorkoutIdForDeviceCalendarDay, sortWorkoutsForDropdown } from '@/lib/deviceDayOfWeek';
 import { getWorkoutIdsWithNewLogDrafts } from '@/lib/logWorkoutDraft';
 import {
@@ -39,14 +40,6 @@ import { DAYS_OF_WEEK, DAY_OF_WEEK_ABBREVIATIONS, type Workout } from '@/lib/typ
 const DROPDOWN_TITLE_FONT_SIZE = Platform.select({ ios: 17, android: 20, default: 18 });
 
 const ACTION_SHEET_SLIDE = 320;
-type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
-  exercises: Array<
-    Pick<
-      Workout['exercises'][number],
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'score' | 'scoreUnit'
-    >
-  >;
-};
 
 export function WorkoutsList() {
   const colorScheme = useColorScheme();
@@ -286,28 +279,10 @@ export function WorkoutsList() {
   };
 
   const onCopy = (workout: Workout) => {
-    const payload: CopyWorkoutPayload = {
-      title: workout.title,
-      daysOfWeek: workout.daysOfWeek,
-      iconId: workout.iconId,
-      exercises: workout.exercises.map((ex) => ({
-        id: ex.id,
-        activityType: ex.activityType,
-        name: ex.name,
-        sets: ex.sets,
-        reps: ex.reps,
-        weight: ex.weight,
-        weightUnit: ex.weightUnit,
-        duration: ex.duration,
-        durationUnit: ex.durationUnit,
-        distance: ex.distance,
-        distanceUnit: ex.distanceUnit,
-        score: ex.score,
-        scoreUnit: ex.scoreUnit,
-      })),
-    };
-
-    router.push({ pathname: '/workouts', params: { copyWorkout: JSON.stringify(payload) } });
+    router.push({
+      pathname: '/workouts',
+      params: { copyWorkout: JSON.stringify(buildCopyWorkoutPayload(workout)) },
+    });
   };
 
   if (loading) {
@@ -515,7 +490,7 @@ export function WorkoutsList() {
                           <View key={ex.id} style={styles.exerciseBlock}>
                             <Text style={[styles.exerciseName, { color: textColor }]}>{ex.name}</Text>
                             <Text style={[styles.setLine, { color: textColor }]}>
-                              {formatPlannedExerciseSummary(ex)}
+                              {activityTypeLabel(ex.activityType)} · {formatPlannedExerciseSummary(ex)}
                             </Text>
                           </View>
                         ))}
