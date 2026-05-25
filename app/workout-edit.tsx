@@ -43,6 +43,7 @@ import {
   type ExerciseDraftSeed,
 } from '@/lib/exerciseDraft';
 import { newId } from '@/lib/ids';
+import { validateExerciseNamesForWorkoutSave } from '@/lib/exerciseNameValidation';
 import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
 import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
@@ -278,7 +279,7 @@ export default function WorkoutEditScreen() {
       if (isExerciseDraftRowEmpty(ex)) {
         continue;
       }
-      const result = parseWorkoutExerciseFromDraft(ex, ex.sourceExerciseId ?? ex.clientId);
+      const result = parseWorkoutExerciseFromDraft(ex, ex.clientId);
       if (!result.ok) {
         if (result.title) {
           themedAlert(result.title, result.message);
@@ -306,6 +307,12 @@ export default function WorkoutEditScreen() {
     }
 
     void (async () => {
+      const allWorkouts = await loadWorkouts();
+      const nameCheck = validateExerciseNamesForWorkoutSave(allWorkouts, id, parsed.exercises);
+      if (!nameCheck.ok) {
+        themedAlert(nameCheck.title, nameCheck.message);
+        return;
+      }
       const updated = await updateWorkout(id, parsed);
       if (!updated) {
         themedAlert('Workout not found', 'Could not update this workout.');

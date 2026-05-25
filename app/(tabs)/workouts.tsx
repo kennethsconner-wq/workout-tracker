@@ -45,6 +45,7 @@ import {
   type ExerciseDraftSeed,
 } from '@/lib/exerciseDraft';
 import { newId } from '@/lib/ids';
+import { validateExerciseNamesForWorkoutSave } from '@/lib/exerciseNameValidation';
 import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
 import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
@@ -317,7 +318,7 @@ export default function LogWorkoutScreen() {
       if (isExerciseDraftRowEmpty(ex)) {
         continue;
       }
-      const result = parseWorkoutExerciseFromDraft(ex, ex.sourceExerciseId ?? newId());
+      const result = parseWorkoutExerciseFromDraft(ex, ex.clientId);
       if (!result.ok) {
         if (result.title) {
           themedAlert(result.title, result.message);
@@ -342,6 +343,12 @@ export default function LogWorkoutScreen() {
     }
 
     void (async () => {
+      const allWorkouts = await loadWorkouts();
+      const nameCheck = validateExerciseNamesForWorkoutSave(allWorkouts, null, parsed.exercises);
+      if (!nameCheck.ok) {
+        themedAlert(nameCheck.title, nameCheck.message);
+        return;
+      }
       await addWorkout({
         title: parsed.title,
         daysOfWeek: parsed.daysOfWeek,

@@ -1,3 +1,4 @@
+import { DISPLAY_DECIMAL_PLACES } from '@/lib/displayDecimals';
 import {
   DEFAULT_CARDIO_DISTANCE_UNIT,
   formatCardioDistanceValue,
@@ -125,11 +126,11 @@ export function cardioPerSegmentLabel(
     if (isCardioDurationPerDistance(exercise)) {
       const perUnit = formatCardioPerDistanceUnit(exercise.distanceUnit);
       const capitalized = perUnit.charAt(0).toUpperCase() + perUnit.slice(1);
-      return `${capitalized} ${formatCardioDistanceValue(objectiveTotal, exercise.distanceUnit, 2)}`;
+      return `${capitalized} ${formatCardioDistanceValue(objectiveTotal, exercise.distanceUnit, DISPLAY_DECIMAL_PLACES)}`;
     }
     const perUnit = durationUnitAbbreviation(exercise.durationUnit);
     const capitalized = perUnit.charAt(0).toUpperCase() + perUnit.slice(1);
-    return `${capitalized} ${formatDurationValue(objectiveTotal, exercise.durationUnit, 2)}`;
+    return `${capitalized} ${formatDurationValue(objectiveTotal, exercise.durationUnit, DISPLAY_DECIMAL_PLACES)}`;
   }
 
   return isCardioDurationPerDistance(exercise)

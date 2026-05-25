@@ -1,0 +1,661 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, Pressable, StyleSheet } from 'react-native';
+
+import { ScoreDateLineChart, type ScoreDateLineSeries } from '@/components/ScoreDateLineChart';
+import { Text, View } from '@/components/Themed';
+import Colors from '@/constants/Colors';
+import type { ActivityType } from '@/lib/activityTypes';
+import {
+  averageActivityExecutionScorePercent,
+  formatCardioPacePr,
+  formatCardioPrDistance,
+  formatDurationPr,
+  formatSportScorePr,
+  getActivityExecutionSnapshots,
+  getCardioDistanceSnapshots,
+  getCardioDurationSnapshots,
+  getCardioLifetimeDistance,
+  getCardioPersonalRecords,
+  getSportDurationSnapshots,
+  getSportPersonalRecords,
+  getSportScoreSnapshots,
+  getStretchLifetimeDuration,
+  getStretchPersonalRecords,
+  getStretchTotalDurationSnapshots,
+  latestLoggedExercise,
+  type SessionValueSnapshot,
+} from '@/lib/activityExerciseMetrics';
+import { DISPLAY_DECIMAL_PLACES, formatDisplayDecimal } from '@/lib/displayDecimals';
+import { formatCardioDistanceWithUnit } from '@/lib/cardioDistanceUnits';
+import { formatDurationWithUnit } from '@/lib/durationUnits';
+import { SCORE_UNIT_ABBREVIATIONS } from '@/lib/scoreUnits';
+import type { StoredExerciseMetricTarget } from '@/lib/exerciseSnapshot';
+import { themedAlert } from '@/lib/themedAlert';
+import type { LoggedWorkout } from '@/lib/types';
+
+type MetricChartConfig = {
+  key: string;
+  title: string;
+  lines: ScoreDateLineSeries[];
+  yAxisLabel: string;
+  formatYTick?: (value: number) => string;
+  emptyMessage?: string;
+  chartAccessibilityLabel: string;
+};
+
+type Props = {
+  activityType: Exclude<ActivityType, 'strength'>;
+  logged: LoggedWorkout[];
+  metricTarget: StoredExerciseMetricTarget;
+  exerciseLoggedCount: number;
+  lastLoggedIso: string | null;
+  activeScheme: 'light' | 'dark';
+  borderColor: string;
+  textColor: string;
+  chartCarouselSlideWidth: number;
+  chartPlotWidth: number;
+};
+
+function formatLastLoggedDisplay(iso: string | null): string {
+  if (iso === null) {
+    return '—';
+  }
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) {
+    return '—';
+  }
+  return d.toLocaleDateString(undefined, { dateStyle: 'medium' });
+}
+
+function formatPrInt(value: number | null): string {
+  return value === null ? '—' : String(value);
+}
+
+function buildValueChartLines(
+  snapshots: SessionValueSnapshot[],
+  activeScheme: 'light' | 'dark',
+  actualLabel: string,
+  plannedLabel: string,
+): ScoreDateLineSeries[] {
+  const plannedLineColor = '#D40078';
+  return [
+    {
+      id: 'actual',
+      label: actualLabel,
+      color: Colors[activeScheme].tint,
+      points: snapshots.map((snapshot) => ({
+        score: snapshot.actual,
+        dateMs: new Date(snapshot.createdAt).getTime(),
+      })),
+    },
+    {
+      id: 'planned',
+      label: plannedLabel,
+      color: plannedLineColor,
+      points: snapshots.map((snapshot) => ({
+        score: snapshot.planned,
+        dateMs: new Date(snapshot.createdAt).getTime(),
+      })),
+    },
+  ];
+}
+
+function buildExecutionChartLines(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+  activityType: ActivityType,
+  activeScheme: 'light' | 'dark',
+): ScoreDateLineSeries[] {
+  const snapshots = getActivityExecutionSnapshots(logged, target, activityType);
+  return [
+    {
+      id: 'execution',
+      label: 'Execution %',
+      color: Colors[activeScheme].tint,
+      points: snapshots.map((snapshot) => ({
+        score: snapshot.executionRatio * 100,
+        dateMs: new Date(snapshot.createdAt).getTime(),
+      })),
+    },
+  ];
+}
+
+function cardioMetricsConfig(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+  activeScheme: 'light' | 'dark',
+): { charts: MetricChartConfig[]; infoMessages: Record<string, string> } {
+  const latest = latestLoggedExercise(logged, target);
+  const distanceSnapshots = getCardioDistanceSnapshots(logged, target);
+  const durationSnapshots = getCardioDurationSnapshots(logged, target);
+  const distanceUnit = latest?.actualDistanceUnit ?? latest?.distanceUnit ?? 'miles';
+  const durationUnit = latest?.actualDurationUnit ?? latest?.durationUnit ?? 'minutes';
+
+  const formatDistanceTick = (value: number) => formatCardioDistanceWithUnit(value, distanceUnit) || '';
+  const formatDurationTick = (value: number) => formatDurationWithUnit(value, durationUnit) || '';
+
+  const charts: MetricChartConfig[] = [];
+  if (distanceSnapshots.length > 0) {
+    charts.push({
+      key: 'distance',
+      title: 'Distance By Session',
+      lines: buildValueChartLines(distanceSnapshots, activeScheme, 'Actual Distance', 'Planned Distance'),
+      yAxisLabel: 'Distance',
+      formatYTick: formatDistanceTick,
+      emptyMessage:
+        'Log this exercise on more days to plot distance. Each point compares actual vs planned distance for that session.',
+      chartAccessibilityLabel: 'Distance by session chart',
+    });
+  }
+  if (durationSnapshots.length > 0) {
+    charts.push({
+      key: 'duration',
+      title: 'Duration By Session',
+      lines: buildValueChartLines(durationSnapshots, activeScheme, 'Actual Duration', 'Planned Duration'),
+      yAxisLabel: 'Duration',
+      formatYTick: formatDurationTick,
+      emptyMessage:
+        'Log this exercise on more days to plot duration. Each point compares actual vs planned duration for that session.',
+      chartAccessibilityLabel: 'Duration by session chart',
+    });
+  }
+  charts.push({
+    key: 'execution',
+    title: 'Execution Score By Session',
+    lines: buildExecutionChartLines(logged, target, 'cardio', activeScheme),
+    yAxisLabel: 'Execution %',
+    formatYTick: (value) => `${Math.round(value)}%`,
+    chartAccessibilityLabel: 'Execution score by session chart',
+  });
+
+  return {
+    charts,
+    infoMessages: {
+      execution:
+        'For each logged appearance of this exercise (duplicate slots in one workout each count separately), execution compares what you logged against the plan:\n\n' +
+        '• Objective-only: actual ÷ planned for the tracked field (distance or duration)\n' +
+        '• Track total duration and distance: 50% (actual objective ÷ planned objective) + 50% (actual pace ÷ planned pace)\n' +
+        '• Track duration/distance per unit: 50% (actual objective ÷ planned objective) + 50% (average of actual pace ÷ planned pace for each logged segment)\n\n' +
+        'Pace is distance ÷ duration. The percentage shown is the average of those scores across all logged appearances (duplicate slots in one workout each count separately). Values above 100% mean you beat the plan.',
+      lifetimeDistance:
+        'Adds up every logged distance value for this exercise across all sessions (same unit as stored in your logs).',
+    },
+  };
+}
+
+function sportMetricsConfig(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+  activeScheme: 'light' | 'dark',
+): { charts: MetricChartConfig[]; infoMessages: Record<string, string> } {
+  const latest = latestLoggedExercise(logged, target);
+  const durationSnapshots = getSportDurationSnapshots(logged, target);
+  const scoreSnapshots = getSportScoreSnapshots(logged, target);
+  const durationUnit = latest?.actualDurationUnit ?? latest?.durationUnit ?? 'minutes';
+  const scoreUnit = latest?.actualScoreUnit ?? latest?.scoreUnit ?? 'points';
+
+  const charts: MetricChartConfig[] = [];
+  if (durationSnapshots.length > 0) {
+    charts.push({
+      key: 'duration',
+      title: 'Duration By Session',
+      lines: buildValueChartLines(durationSnapshots, activeScheme, 'Actual Duration', 'Planned Duration'),
+      yAxisLabel: 'Duration',
+      formatYTick: (value) => formatDurationWithUnit(value, durationUnit) || '',
+      emptyMessage: 'Log duration on more days to plot this chart.',
+      chartAccessibilityLabel: 'Duration by session chart',
+    });
+  }
+  if (scoreSnapshots.length > 0) {
+    charts.push({
+      key: 'score',
+      title: 'Score By Session',
+      lines: buildValueChartLines(scoreSnapshots, activeScheme, 'Actual Score', 'Planned Score'),
+      yAxisLabel: 'Score',
+      formatYTick: (value) => `${formatDisplayDecimal(value, DISPLAY_DECIMAL_PLACES)} ${SCORE_UNIT_ABBREVIATIONS[scoreUnit]}`,
+      emptyMessage: 'Log numeric scores on more days to plot this chart.',
+      chartAccessibilityLabel: 'Score by session chart',
+    });
+  }
+  charts.push({
+    key: 'execution',
+    title: 'Execution Score By Session',
+    lines: buildExecutionChartLines(logged, target, 'sport', activeScheme),
+    yAxisLabel: 'Execution %',
+    formatYTick: (value) => `${Math.round(value)}%`,
+    chartAccessibilityLabel: 'Execution score by session chart',
+  });
+
+  return {
+    charts,
+    infoMessages: {
+      execution:
+        'For each logged appearance (duplicate slots in one workout each count separately), execution averages the ratios you hit vs plan:\n\n' +
+        '• Duration ratio when both planned and actual duration exist\n' +
+        '• Score ratio when both planned and actual scores are numeric\n\n' +
+        'The percentage shown is the average across all logged appearances (duplicate slots in one workout each count separately).',
+    },
+  };
+}
+
+function stretchMetricsConfig(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+  activeScheme: 'light' | 'dark',
+): { charts: MetricChartConfig[]; infoMessages: Record<string, string> } {
+  const latest = latestLoggedExercise(logged, target);
+  const durationSnapshots = getStretchTotalDurationSnapshots(logged, target);
+  const durationUnit =
+    latest?.actualStretchSets[0]?.actualDurationUnit ?? latest?.durationUnit ?? 'seconds';
+
+  const charts: MetricChartConfig[] = [
+    {
+      key: 'duration',
+      title: 'Total Stretch Time By Session',
+      lines: buildValueChartLines(durationSnapshots, activeScheme, 'Actual Total', 'Planned Total'),
+      yAxisLabel: 'Duration',
+      formatYTick: (value) => formatDurationWithUnit(value, durationUnit) || '',
+      emptyMessage:
+        'Log stretch sets on more days to plot total stretch time. Each point sums all sets in that session.',
+      chartAccessibilityLabel: 'Total stretch time by session chart',
+    },
+    {
+      key: 'execution',
+      title: 'Execution Score By Session',
+      lines: buildExecutionChartLines(logged, target, 'stretch', activeScheme),
+      yAxisLabel: 'Execution %',
+      formatYTick: (value) => `${Math.round(value)}%`,
+      chartAccessibilityLabel: 'Execution score by session chart',
+    },
+  ];
+
+  return {
+    charts,
+    infoMessages: {
+      execution:
+        'For each logged stretch appearance (duplicate slots in one workout each count separately):\n\n' +
+        '• Actual total = sum of all logged set durations\n' +
+        '• Planned total = sum of planned set durations from that session\n' +
+        '• Execution = actual total ÷ planned total\n\n' +
+        'The percentage shown is the average across all logged appearances (duplicate slots in one workout each count separately).',
+      lifetimeDuration:
+        'Adds up every logged stretch set duration for this exercise across all sessions.',
+    },
+  };
+}
+
+export function ActivityExerciseMetricsView({
+  activityType,
+  logged,
+  metricTarget,
+  exerciseLoggedCount,
+  lastLoggedIso,
+  activeScheme,
+  borderColor,
+  textColor,
+  chartCarouselSlideWidth,
+  chartPlotWidth,
+}: Props) {
+  const executionScorePercent = useMemo(
+    () => averageActivityExecutionScorePercent(logged, metricTarget, activityType),
+    [activityType, logged, metricTarget],
+  );
+
+  const { charts, infoMessages } = useMemo(() => {
+    switch (activityType) {
+      case 'cardio':
+        return cardioMetricsConfig(logged, metricTarget, activeScheme);
+      case 'sport':
+        return sportMetricsConfig(logged, metricTarget, activeScheme);
+      case 'stretch':
+        return stretchMetricsConfig(logged, metricTarget, activeScheme);
+      default:
+        return { charts: [], infoMessages: {} };
+    }
+  }, [activityType, activeScheme, logged, metricTarget]);
+
+  const cardioPrs = useMemo(
+    () => (activityType === 'cardio' ? getCardioPersonalRecords(logged, metricTarget) : null),
+    [activityType, logged, metricTarget],
+  );
+  const sportPrs = useMemo(
+    () => (activityType === 'sport' ? getSportPersonalRecords(logged, metricTarget) : null),
+    [activityType, logged, metricTarget],
+  );
+  const stretchPrs = useMemo(
+    () => (activityType === 'stretch' ? getStretchPersonalRecords(logged, metricTarget) : null),
+    [activityType, logged, metricTarget],
+  );
+
+  const lifetimeCardioDistance = useMemo(
+    () => (activityType === 'cardio' ? getCardioLifetimeDistance(logged, metricTarget) : 0),
+    [activityType, logged, metricTarget],
+  );
+  const lifetimeStretchDuration = useMemo(
+    () => (activityType === 'stretch' ? getStretchLifetimeDuration(logged, metricTarget) : 0),
+    [activityType, logged, metricTarget],
+  );
+
+  const [visibleChartIndex, setVisibleChartIndex] = useState(0);
+  const chartCarouselRef = useRef<FlatList<MetricChartConfig>>(null);
+  const chartCarouselScrollable = charts.length > 1;
+
+  useEffect(() => {
+    setVisibleChartIndex(0);
+    chartCarouselRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [metricTarget, activityType]);
+
+  const onChartViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
+      const idx = viewableItems[0]?.index;
+      if (idx != null) {
+        setVisibleChartIndex(idx);
+      }
+    },
+    [],
+  );
+  const chartViewabilityConfig = useMemo(() => ({ itemVisiblePercentThreshold: 55 }), []);
+
+  const metricRows = useMemo(() => {
+    const rows: Array<{ key: string; label: string; value: string; infoMessage?: string }> = [
+      {
+        key: 'times-logged',
+        label: 'Times Logged',
+        value: String(exerciseLoggedCount),
+      },
+      {
+        key: 'execution',
+        label: 'Execution Score',
+        value: executionScorePercent !== null ? `${executionScorePercent.toFixed(0)}%` : '—',
+        infoMessage: infoMessages.execution,
+      },
+    ];
+
+    if (activityType === 'cardio' && cardioPrs) {
+      rows.push(
+        {
+          key: 'pr-distance',
+          label: 'Personal Record, Distance',
+          value: formatCardioPrDistance(cardioPrs.maxDistance, cardioPrs.maxDistanceUnit),
+        },
+        {
+          key: 'pr-duration',
+          label: 'Personal Record, Duration',
+          value: formatDurationPr(cardioPrs.maxDuration, cardioPrs.maxDurationUnit),
+        },
+        {
+          key: 'pr-pace',
+          label: 'Best Pace',
+          value: formatCardioPacePr(
+            cardioPrs.bestPaceDistancePerDuration,
+            cardioPrs.bestPaceDistanceUnit,
+            cardioPrs.bestPaceDurationUnit,
+          ),
+        },
+        {
+          key: 'lifetime-distance',
+          label: 'Total Distance Logged',
+          value:
+            lifetimeCardioDistance > 0 && cardioPrs.maxDistanceUnit
+              ? formatCardioDistanceWithUnit(lifetimeCardioDistance, cardioPrs.maxDistanceUnit)
+              : '—',
+          infoMessage: infoMessages.lifetimeDistance,
+        },
+      );
+    }
+
+    if (activityType === 'sport' && sportPrs) {
+      rows.push(
+        {
+          key: 'pr-duration',
+          label: 'Personal Record, Duration',
+          value: formatDurationPr(sportPrs.maxDuration, sportPrs.maxDurationUnit),
+        },
+        {
+          key: 'pr-score',
+          label: 'Personal Record, Score',
+          value: formatSportScorePr(sportPrs.maxNumericScore, sportPrs.maxScoreUnit, sportPrs.bestScoreLabel),
+        },
+      );
+    }
+
+    if (activityType === 'stretch' && stretchPrs) {
+      rows.push(
+        {
+          key: 'pr-set',
+          label: 'Personal Record, Longest Set',
+          value: formatDurationPr(stretchPrs.maxSingleSetDuration, stretchPrs.maxSingleSetUnit),
+        },
+        {
+          key: 'pr-sets',
+          label: 'Personal Record, Sets',
+          value: formatPrInt(stretchPrs.maxSetsInSession),
+        },
+        {
+          key: 'pr-session',
+          label: 'Personal Record, Session Total',
+          value: formatDurationPr(stretchPrs.maxTotalSessionDuration, stretchPrs.maxTotalSessionUnit),
+        },
+        {
+          key: 'lifetime-duration',
+          label: 'Total Stretch Time',
+          value:
+            lifetimeStretchDuration > 0 && stretchPrs.maxTotalSessionUnit
+              ? formatDurationWithUnit(lifetimeStretchDuration, stretchPrs.maxTotalSessionUnit)
+              : '—',
+          infoMessage: infoMessages.lifetimeDuration,
+        },
+      );
+    }
+
+    rows.push({
+      key: 'last-logged',
+      label: 'Last Logged',
+      value: formatLastLoggedDisplay(lastLoggedIso),
+    });
+
+    return rows;
+  }, [
+    activityType,
+    cardioPrs,
+    executionScorePercent,
+    exerciseLoggedCount,
+    infoMessages,
+    lastLoggedIso,
+    lifetimeCardioDistance,
+    lifetimeStretchDuration,
+    sportPrs,
+    stretchPrs,
+  ]);
+
+  return (
+    <>
+      <View style={[styles.metricsCard, { borderColor }]}>
+        {metricRows.map((row, index) => (
+          <View
+            key={row.key}
+            style={[styles.metricRow, index > 0 ? [styles.metricRowDivider, { borderTopColor: borderColor }] : null]}>
+            <View style={styles.metricLabelWithInfo}>
+              <Text style={styles.metricTitleText} numberOfLines={2}>
+                {row.label}
+              </Text>
+              {row.infoMessage ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`How ${row.label} is calculated`}
+                  hitSlop={10}
+                  onPress={() => themedAlert(row.label, row.infoMessage ?? '', [{ text: 'OK' }])}
+                  style={({ pressed }) => [styles.metricInfoIconPressable, { opacity: pressed ? 0.55 : 1 }]}>
+                  <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
+                </Pressable>
+              ) : null}
+            </View>
+            <Text style={styles.metricValue} numberOfLines={2}>
+              {row.value}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={[styles.chartCarouselOuter, { width: chartCarouselSlideWidth }]}>
+        {chartCarouselScrollable ? (
+          <View
+            style={styles.chartScrollHintRow}
+            accessible
+            accessibilityLabel="Swipe sideways to see more charts">
+            <Ionicons name="swap-horizontal" size={16} color={textColor} style={styles.chartScrollHintIcon} />
+          </View>
+        ) : null}
+        <FlatList
+          ref={chartCarouselRef}
+          data={charts}
+          keyExtractor={(item) => item.key}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator
+          nestedScrollEnabled
+          style={{ width: chartCarouselSlideWidth }}
+          snapToInterval={chartCarouselSlideWidth}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          viewabilityConfig={chartViewabilityConfig}
+          onViewableItemsChanged={onChartViewableItemsChanged}
+          getItemLayout={(_, index) => ({
+            length: chartCarouselSlideWidth,
+            offset: chartCarouselSlideWidth * index,
+            index,
+          })}
+          renderItem={({ item }) => (
+            <View style={{ width: chartCarouselSlideWidth }}>
+              <View style={[styles.chartCard, { borderColor, width: chartCarouselSlideWidth }]}>
+                <Text style={styles.chartCardTitle}>{item.title}</Text>
+                <ScoreDateLineChart
+                  width={chartPlotWidth}
+                  lines={item.lines}
+                  axisColor={borderColor}
+                  labelColor={activeScheme === 'dark' ? '#a3a3a3' : '#525252'}
+                  yAxisLabel={item.yAxisLabel}
+                  {...(item.formatYTick ? { formatYTick: item.formatYTick } : {})}
+                  {...(item.emptyMessage ? { emptyMessage: item.emptyMessage } : {})}
+                  chartAccessibilityLabel={item.chartAccessibilityLabel}
+                />
+              </View>
+            </View>
+          )}
+        />
+        {chartCarouselScrollable ? (
+          <View
+            style={styles.chartPageDots}
+            accessibilityLabel={`Chart ${visibleChartIndex + 1} of ${charts.length}`}>
+            {charts.map((chart, index) => (
+              <View
+                key={chart.key}
+                style={[
+                  styles.chartPageDot,
+                  {
+                    backgroundColor:
+                      index === visibleChartIndex
+                        ? Colors[activeScheme].tint
+                        : activeScheme === 'dark'
+                          ? 'rgba(255,255,255,0.22)'
+                          : 'rgba(0,0,0,0.18)',
+                  },
+                  index === visibleChartIndex ? styles.chartPageDotActive : null,
+                ]}
+              />
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  metricsCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    gap: 8,
+    marginTop: 4,
+  },
+  metricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  metricRowDivider: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  metricTitleText: {
+    fontSize: 16,
+    fontWeight: '600',
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  metricLabelWithInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 4,
+    minWidth: 0,
+    paddingRight: 8,
+  },
+  metricInfoIconPressable: {
+    flexShrink: 0,
+  },
+  metricValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    flexShrink: 1,
+    minWidth: 0,
+    textAlign: 'right',
+  },
+  chartCarouselOuter: {
+    marginTop: 4,
+  },
+  chartScrollHintRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  chartScrollHintIcon: {
+    opacity: 0.55,
+  },
+  chartPageDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 10,
+  },
+  chartPageDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  chartPageDotActive: {
+    width: 18,
+    borderRadius: 4,
+  },
+  chartCard: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  chartCardTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    alignSelf: 'stretch',
+    textAlign: 'center',
+  },
+});

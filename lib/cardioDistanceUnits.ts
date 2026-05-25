@@ -1,3 +1,5 @@
+import { DISPLAY_DECIMAL_PLACES } from '@/lib/displayDecimals';
+
 export const CARDIO_DISTANCE_UNITS = [
   'miles',
   'kilometers',
@@ -64,7 +66,7 @@ export function parseCardioDistanceInput(raw: string, unit: CardioDistanceUnit):
 export function formatCardioDistanceValue(
   value: number,
   unit: CardioDistanceUnit,
-  decimalPlaces = 1,
+  decimalPlaces = DISPLAY_DECIMAL_PLACES,
 ): string {
   if (!Number.isFinite(value) || value <= 0) {
     return '';

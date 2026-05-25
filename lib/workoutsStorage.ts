@@ -123,7 +123,20 @@ function normalizeWorkoutExercise(raw: unknown): WorkoutExercise {
 }
 
 function normalizeWorkoutExercises(raw: unknown): WorkoutExercise[] {
-  return Array.isArray(raw) ? raw.map((exercise) => normalizeWorkoutExercise(exercise)) : [];
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const seenIds = new Set<string>();
+  return raw.map((exercise) => {
+    const normalized = normalizeWorkoutExercise(exercise);
+    if (!seenIds.has(normalized.id)) {
+      seenIds.add(normalized.id);
+      return normalized;
+    }
+    const id = newId();
+    seenIds.add(id);
+    return { ...normalized, id };
+  });
 }
 
 function normalizeStoredWorkout(raw: Workout & { dayOfWeek?: string; iconId?: unknown; daysOfWeek?: unknown }): Workout {
@@ -510,7 +523,7 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
   await saveWorkouts(next);
 }
 
-function matchesExerciseDefinition(
+export function matchesExerciseDefinition(
   ex: Pick<
     WorkoutExercise,
     'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'

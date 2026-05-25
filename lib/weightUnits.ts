@@ -1,3 +1,5 @@
+import { DISPLAY_DECIMAL_PLACES, formatDisplayDecimal } from '@/lib/displayDecimals';
+
 export const WEIGHT_UNITS = ['pounds', 'kilograms'] as const;
 
 export type WeightUnit = (typeof WEIGHT_UNITS)[number];
@@ -26,8 +28,7 @@ export function formatWeightValue(value: number, unit: WeightUnit): string {
   if (!Number.isFinite(value) || value < 0) {
     return '';
   }
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  return formatDisplayDecimal(value, DISPLAY_DECIMAL_PLACES);
 }
 
 export function formatWeightWithUnit(value: number, unit: WeightUnit): string {

@@ -1,3 +1,5 @@
+import { DISPLAY_DECIMAL_PLACES } from '@/lib/displayDecimals';
+
 export const STANDARD_DURATION_UNITS = ['minutes', 'seconds', 'hours', 'breaths'] as const;
 
 export type StandardDurationUnit = (typeof STANDARD_DURATION_UNITS)[number];
@@ -111,7 +113,6 @@ export function normalizeCardioDurationUnit(value: unknown): CardioDurationUnit 
 
 export function usesIntegerDurationInput(unit: DurationUnit): boolean {
   return (
-    unit === 'minutes' ||
     unit === 'seconds' ||
     unit === 'breaths' ||
     unit === 'matches' ||
@@ -131,7 +132,7 @@ export function parseDurationInput(raw: string, unit: DurationUnit): number {
   return Number.parseFloat(trimmed);
 }
 
-export function formatDurationValue(value: number, unit: DurationUnit, decimalPlaces = 1): string {
+export function formatDurationValue(value: number, unit: DurationUnit, decimalPlaces = DISPLAY_DECIMAL_PLACES): string {
   if (!Number.isFinite(value) || value <= 0) {
     return '';
   }

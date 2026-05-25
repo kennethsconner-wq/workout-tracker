@@ -39,8 +39,10 @@ import {
   DEFAULT_CARDIO_OBJECTIVE,
 } from '@/lib/cardioPlan';
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
+import { validateExerciseNamesAfterLibraryEdit } from '@/lib/exerciseNameValidation';
 import {
   loadWorkouts,
+  matchesExerciseDefinition,
   removeExercisesMatchingSignatureFromAllWorkouts,
   updateExercisesMatchingSignatureAcrossWorkouts,
 } from '@/lib/workoutsStorage';
@@ -289,6 +291,16 @@ export default function ExerciseLibraryScreen() {
     }
     try {
       setLibraryMutationBusy(true);
+      const allWorkouts = await loadWorkouts();
+      const nameCheck = validateExerciseNamesAfterLibraryEdit(
+        allWorkouts,
+        (exercise) => matchesExerciseDefinition(exercise, editBaseline),
+        parsed.exercise,
+      );
+      if (!nameCheck.ok) {
+        themedAlert(nameCheck.title, nameCheck.message);
+        return;
+      }
       await updateExercisesMatchingSignatureAcrossWorkouts(
         {
           activityType: editBaseline.activityType,

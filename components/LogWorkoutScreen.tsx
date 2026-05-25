@@ -68,7 +68,7 @@ import {
   normalizeScoreUnit,
   type ScoreUnit,
 } from '@/lib/scoreUnits';
-import { DEFAULT_WEIGHT_UNIT, normalizeWeightUnit, type WeightUnit } from '@/lib/weightUnits';
+import { DEFAULT_WEIGHT_UNIT, formatWeightValue, normalizeWeightUnit, type WeightUnit } from '@/lib/weightUnits';
 import { formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
 import { hasLoggedExerciseInput, parseLoggedExerciseFromDraft } from '@/lib/logExerciseDraft';
 import { resolveExerciseSetCount } from '@/lib/exerciseDraft';
@@ -152,11 +152,14 @@ function legacyEditDraftStorageKey(loggedWorkoutId: string): string {
   return `workout-log-draft-edit@v1:${loggedWorkoutId}`;
 }
 
-function loggedActualToDraftSet(as: LoggedWorkoutExercise['actualSets'][number]): DraftActualSet {
+function loggedActualToDraftSet(
+  as: LoggedWorkoutExercise['actualSets'][number],
+  weightUnit: WeightUnit,
+): DraftActualSet {
   return {
     id: newId(),
     actualRepsInput: String(as.actualReps),
-    actualWeightInput: String(as.actualWeight),
+    actualWeightInput: formatWeightValue(as.actualWeight, weightUnit),
   };
 }
 
@@ -276,7 +279,9 @@ function loggedExerciseToDraftExercise(loggedExercise: LoggedWorkoutExercise): D
     scoreUnit: loggedExercise.scoreUnit,
     actualSets:
       loggedExercise.activityType === 'strength'
-        ? loggedExercise.actualSets.map((actualSet) => loggedActualToDraftSet(actualSet))
+        ? loggedExercise.actualSets.map((actualSet) =>
+            loggedActualToDraftSet(actualSet, loggedExercise.actualWeightUnit),
+          )
         : [],
     actualStretchSets:
       loggedExercise.activityType === 'stretch'
@@ -373,14 +378,74 @@ function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): 
   return base;
 }
 
+function buildSavedDraftQueues(savedList: DraftExercise[]): Map<string, DraftExercise[]> {
+  const queues = new Map<string, DraftExercise[]>();
+  for (const exercise of savedList) {
+    if (!exercise || typeof exercise.workoutExerciseId !== 'string') {
+      continue;
+    }
+    const queue = queues.get(exercise.workoutExerciseId) ?? [];
+    queue.push(exercise);
+    queues.set(exercise.workoutExerciseId, queue);
+  }
+  return queues;
+}
+
+function takeSavedDraftForTemplateExercise(
+  savedQueues: Map<string, DraftExercise[]>,
+  workoutExerciseId: string,
+): DraftExercise | undefined {
+  const queue = savedQueues.get(workoutExerciseId);
+  if (!queue || queue.length === 0) {
+    return undefined;
+  }
+  return queue.shift();
+}
+
+function ensureUniqueDraftExerciseIds(exercises: DraftExercise[]): DraftExercise[] {
+  const seen = new Set<string>();
+  return exercises.map((exercise) => {
+    if (!seen.has(exercise.id)) {
+      seen.add(exercise.id);
+      return exercise;
+    }
+    const id = newId();
+    seen.add(id);
+    return { ...exercise, id };
+  });
+}
+
+function buildLoggedExerciseQueues(
+  loggedExercises: LoggedWorkoutExercise[],
+): Map<string, LoggedWorkoutExercise[]> {
+  const queues = new Map<string, LoggedWorkoutExercise[]>();
+  for (const exercise of loggedExercises) {
+    const queue = queues.get(exercise.workoutExerciseId) ?? [];
+    queue.push(exercise);
+    queues.set(exercise.workoutExerciseId, queue);
+  }
+  return queues;
+}
+
+function takeLoggedExerciseForTemplate(
+  loggedQueues: Map<string, LoggedWorkoutExercise[]>,
+  workoutExerciseId: string,
+): LoggedWorkoutExercise | undefined {
+  const queue = loggedQueues.get(workoutExerciseId);
+  if (!queue || queue.length === 0) {
+    return undefined;
+  }
+  return queue.shift();
+}
+
 /** Hydrate the log form from a saved session plus the current template (new template exercises get empty actuals). */
 function buildDraftExercisesFromLogged(logged: LoggedWorkout, template: Workout): DraftExercise[] {
-  const loggedByWorkoutExerciseId = new Map(logged.exercises.map((e) => [e.workoutExerciseId, e]));
+  const loggedQueues = buildLoggedExerciseQueues(logged.exercises);
   const templateIds = new Set(template.exercises.map((e) => e.id));
   const out: DraftExercise[] = [];
 
   for (const te of template.exercises) {
-    const le = loggedByWorkoutExerciseId.get(te.id);
+    const le = takeLoggedExerciseForTemplate(loggedQueues, te.id);
     if (le) {
       out.push(loggedExerciseToDraftExercise(le));
     } else {
@@ -394,7 +459,7 @@ function buildDraftExercisesFromLogged(logged: LoggedWorkout, template: Workout)
     }
   }
 
-  return out;
+  return ensureUniqueDraftExerciseIds(out);
 }
 
 function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
@@ -612,15 +677,12 @@ function normalizeDraftExercises(
 ): DraftExercise[] {
   const omit = new Set(omittedWorkoutExerciseIds);
   const savedList = Array.isArray(savedExercises) ? (savedExercises as DraftExercise[]) : [];
-  const byWorkoutExerciseId = new Map(
-    savedList
-      .filter((exercise): exercise is DraftExercise => !!exercise && typeof exercise.workoutExerciseId === 'string')
-      .map((exercise) => [exercise.workoutExerciseId, exercise]),
-  );
-  return workout.exercises
+  const savedQueues = buildSavedDraftQueues(savedList);
+  return ensureUniqueDraftExerciseIds(
+    workout.exercises
     .filter((exercise) => !omit.has(exercise.id))
     .map((exercise) => {
-      const saved = byWorkoutExerciseId.get(exercise.id);
+      const saved = takeSavedDraftForTemplateExercise(savedQueues, exercise.id);
       const savedStrengthLen = saved?.actualSets?.length ?? 0;
       const strengthSetCount =
         exercise.activityType === 'strength' ? Math.max(exercise.sets, savedStrengthLen, 1) : 0;
@@ -725,11 +787,14 @@ function normalizeDraftExercises(
         actualScoreUnit: exercise.scoreUnit,
         actualWeightUnit: exercise.weightUnit,
       };
-    });
+    }),
+  );
 }
 
 function toDraftExercises(workout: Workout): DraftExercise[] {
-  return workout.exercises.map((exercise) => emptyDraftForTemplateExercise(exercise));
+  return ensureUniqueDraftExerciseIds(
+    workout.exercises.map((exercise) => emptyDraftForTemplateExercise(exercise)),
+  );
 }
 
 export default function LogWorkoutScreen() {
@@ -967,7 +1032,7 @@ export default function LogWorkoutScreen() {
           };
         }
         const plannedReps = String(ex.reps);
-        const plannedWeight = String(ex.weight);
+        const plannedWeight = formatWeightValue(ex.weight, ex.weightUnit);
         return {
           ...ex,
           actualWeightUnit: ex.weightUnit,
