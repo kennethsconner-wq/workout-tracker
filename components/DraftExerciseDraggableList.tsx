@@ -5,29 +5,31 @@ import {
   Keyboard,
   Pressable,
   StyleSheet,
-  TextInput,
   type StyleProp,
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
 
+import { ExerciseDraftFieldsEditor, type ExerciseDraftField } from '@/components/ExerciseDraftFieldsEditor';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
+import type { ActivityType } from '@/lib/activityTypes';
+import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
+import type { CardioDistanceTracking, CardioDurationTracking, CardioObjective } from '@/lib/cardioPlan';
+import type { DurationUnit } from '@/lib/durationUnits';
+import type { ScoreUnit } from '@/lib/scoreUnits';
+import type { WeightUnit } from '@/lib/weightUnits';
+import type { ExerciseDraftRow } from '@/lib/exerciseDraft';
 import { confirmEditLinkedExercise } from '@/lib/linkedExerciseEdit';
 import { themedAlert } from '@/lib/themedAlert';
 
-export type DraftExerciseRow = {
-  clientId: string;
-  sourceExerciseId?: string;
-  name: string;
-  sets: string;
-  reps: string;
-  weightKg: string;
-};
+export type { ExerciseDraftRow } from '@/lib/exerciseDraft';
+
+type DraftField = ExerciseDraftField;
 
 type Props = {
-  exercises: DraftExerciseRow[];
-  onReorder: (next: DraftExerciseRow[]) => void;
+  exercises: ExerciseDraftRow[];
+  onReorder: (next: ExerciseDraftRow[]) => void;
   listHeader: ReactElement;
   listFooter: ReactElement;
   contentContainerStyle: StyleProp<ViewStyle>;
@@ -39,7 +41,15 @@ type Props = {
   unlockedExerciseClientIds: Set<string>;
   onUnlockLinked: (clientId: string) => void;
   onUpdateExerciseName: (clientId: string, name: string) => void;
-  onUpdateExerciseField: (clientId: string, field: 'sets' | 'reps' | 'weightKg', value: string) => void;
+  onUpdateExerciseActivityType: (clientId: string, activityType: ActivityType) => void;
+  onUpdateExerciseField: (clientId: string, field: DraftField, value: string) => void;
+  onUpdateExerciseDistanceUnit: (clientId: string, unit: CardioDistanceUnit) => void;
+  onUpdateExerciseCardioObjective: (clientId: string, objective: CardioObjective) => void;
+  onUpdateExerciseCardioDurationTracking: (clientId: string, tracking: CardioDurationTracking) => void;
+  onUpdateExerciseCardioDistanceTracking: (clientId: string, tracking: CardioDistanceTracking) => void;
+  onUpdateExerciseDurationUnit: (clientId: string, unit: DurationUnit) => void;
+  onUpdateExerciseScoreUnit: (clientId: string, unit: ScoreUnit) => void;
+  onUpdateExerciseWeightUnit: (clientId: string, unit: WeightUnit) => void;
   onRemoveExercise: (clientId: string) => void;
   /** When true (e.g. Edit Workout), show a confirmation before removing an exercise. */
   confirmBeforeRemoveExercise?: boolean;
@@ -59,7 +69,15 @@ export function DraftExerciseDraggableList({
   unlockedExerciseClientIds,
   onUnlockLinked,
   onUpdateExerciseName,
+  onUpdateExerciseActivityType,
   onUpdateExerciseField,
+  onUpdateExerciseDistanceUnit,
+  onUpdateExerciseCardioObjective,
+  onUpdateExerciseCardioDurationTracking,
+  onUpdateExerciseCardioDistanceTracking,
+  onUpdateExerciseDurationUnit,
+  onUpdateExerciseScoreUnit,
+  onUpdateExerciseWeightUnit,
   onRemoveExercise,
   confirmBeforeRemoveExercise = false,
 }: Props) {
@@ -82,7 +100,8 @@ export function DraftExerciseDraggableList({
         const exIndex = getIndex() ?? 0;
         const fieldsLocked =
           exercise.sourceExerciseId !== undefined && !unlockedExerciseClientIds.has(exercise.clientId);
-        const lockedFieldStyle = fieldsLocked ? { opacity: 0.62 } : null;
+        const lockedFieldStyle = fieldsLocked ? styles.lockedField : null;
+
         return (
           <ScaleDecorator>
             <View style={[styles.card, { borderColor, opacity: isActive ? 0.95 : 1 }]}>
@@ -158,58 +177,31 @@ export function DraftExerciseDraggableList({
                   </Pressable>
                 </View>
               </View>
-              <TextInput
-                value={exercise.name}
-                onChangeText={(value) => onUpdateExerciseName(exercise.clientId, value)}
-                placeholder="Exercise name"
-                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                editable={!fieldsLocked}
-                style={[exerciseNameInputStyle, lockedFieldStyle]}
+
+              <ExerciseDraftFieldsEditor
+                draft={exercise}
+                disabled={fieldsLocked}
+                activeScheme={activeScheme}
+                borderColor={borderColor}
+                textColor={textColor}
+                exerciseNameInputStyle={exerciseNameInputStyle}
+                setRowInputStyle={setRowInputStyle}
+                lockedFieldStyle={lockedFieldStyle}
+                onActivityTypeChange={(activityType) => onUpdateExerciseActivityType(exercise.clientId, activityType)}
+                onNameChange={(name) => onUpdateExerciseName(exercise.clientId, name)}
+                onFieldChange={(field, value) => onUpdateExerciseField(exercise.clientId, field, value)}
+                onDistanceUnitChange={(unit) => onUpdateExerciseDistanceUnit(exercise.clientId, unit)}
+                onCardioObjectiveChange={(objective) => onUpdateExerciseCardioObjective(exercise.clientId, objective)}
+                onCardioDurationTrackingChange={(tracking) =>
+                  onUpdateExerciseCardioDurationTracking(exercise.clientId, tracking)
+                }
+                onCardioDistanceTrackingChange={(tracking) =>
+                  onUpdateExerciseCardioDistanceTracking(exercise.clientId, tracking)
+                }
+                onDurationUnitChange={(unit) => onUpdateExerciseDurationUnit(exercise.clientId, unit)}
+                onScoreUnitChange={(unit) => onUpdateExerciseScoreUnit(exercise.clientId, unit)}
+                onWeightUnitChange={(unit) => onUpdateExerciseWeightUnit(exercise.clientId, unit)}
               />
-              <View style={styles.setRow}>
-                <View style={styles.unitInputWrap}>
-                  <TextInput
-                    value={exercise.sets}
-                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'sets', value)}
-                    placeholder="0"
-                    keyboardType="number-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    editable={!fieldsLocked}
-                    style={[setRowInputStyle, lockedFieldStyle]}
-                  />
-                  <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                    sets
-                  </Text>
-                </View>
-                <View style={styles.unitInputWrap}>
-                  <TextInput
-                    value={exercise.reps}
-                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'reps', value)}
-                    placeholder="0"
-                    keyboardType="number-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    editable={!fieldsLocked}
-                    style={[setRowInputStyle, lockedFieldStyle]}
-                  />
-                  <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                    reps
-                  </Text>
-                </View>
-                <View style={styles.unitInputWrap}>
-                  <TextInput
-                    value={exercise.weightKg}
-                    onChangeText={(value) => onUpdateExerciseField(exercise.clientId, 'weightKg', value)}
-                    placeholder="Weight"
-                    keyboardType="decimal-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    editable={!fieldsLocked}
-                    style={[setRowInputStyle, lockedFieldStyle]}
-                  />
-                  <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                    lb
-                  </Text>
-                </View>
-              </View>
             </View>
           </ScaleDecorator>
         );
@@ -269,22 +261,7 @@ const styles = StyleSheet.create({
   dragHandlePressablePressed: {
     opacity: 0.65,
   },
-  setRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  unitInputWrap: {
-    flexGrow: 1,
-    minWidth: 80,
-    position: 'relative',
-  },
-  unitSuffix: {
-    position: 'absolute',
-    right: 12,
-    top: 10,
-    fontSize: 16,
-    fontWeight: '600',
+  lockedField: {
+    opacity: 0.62,
   },
 });

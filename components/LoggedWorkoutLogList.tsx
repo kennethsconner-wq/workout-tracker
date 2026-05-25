@@ -13,6 +13,7 @@ import { Text, View } from '@/components/Themed';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { activityTypeLabel, getLogExerciseLogDisplay } from '@/lib/exerciseDisplay';
 import { navigateToEditLoggedWorkout } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
 import { deleteLoggedWorkout, loadLoggedWorkouts } from '@/lib/workoutsStorage';
@@ -210,19 +211,27 @@ export function LoggedWorkoutLogList() {
       <Text style={styles.meta}>
         {item.exercises.length} exercise{item.exercises.length === 1 ? '' : 's'}
       </Text>
-      {item.exercises.map((ex) => (
-        <View key={ex.id} style={styles.exerciseBlock}>
-          <Text style={[styles.exerciseName, { color: textColor }]}>{ex.name}</Text>
-          <Text style={[styles.setLine, { color: textColor }]}>
-            Planned: {ex.sets} set{ex.sets === 1 ? '' : 's'} x {ex.reps} reps @ {ex.weightKg} lb
-          </Text>
-          {ex.actualSets.map((actualSet, setIndex) => (
-            <Text key={`${ex.id}-actual-set-${setIndex}`} style={[styles.setLine, { color: textColor }]}>
-              Actual set {setIndex + 1}: {actualSet.actualReps} reps @ {actualSet.actualWeightKg} lb
+      {item.exercises.map((ex) => {
+        const display = getLogExerciseLogDisplay(ex);
+        return (
+          <View key={ex.id} style={styles.exerciseBlock}>
+            <Text style={[styles.exerciseName, { color: textColor }]}>
+              {ex.name}
+              <Text style={styles.activityTypeMeta}> · {activityTypeLabel(ex.activityType)}</Text>
             </Text>
-          ))}
-        </View>
-      ))}
+            <Text style={[styles.setLine, { color: textColor }]}>Planned: {display.plannedSummary}</Text>
+            {display.rows.length > 0 ? (
+              display.rows.map((row) => (
+                <Text key={row.key} style={[styles.setLine, { color: textColor }]}>
+                  {row.label} — Actual: {row.actual}
+                </Text>
+              ))
+            ) : (
+              <Text style={[styles.setLine, { color: textColor }]}>Actual: {display.actualSummary}</Text>
+            )}
+          </View>
+        );
+      })}
     </RNView>
   );
 
@@ -512,6 +521,11 @@ const styles = StyleSheet.create({
   exerciseName: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  activityTypeMeta: {
+    fontSize: 14,
+    fontWeight: '500',
+    opacity: 0.65,
   },
   setLine: {
     fontSize: 14,

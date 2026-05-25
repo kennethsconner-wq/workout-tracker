@@ -1,14 +1,55 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { ActivityType } from '@/lib/activityTypes';
+import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
+import { DEFAULT_CARDIO_DISTANCE_UNIT } from '@/lib/cardioDistanceUnits';
+import type { DurationUnit } from '@/lib/durationUnits';
+import { DEFAULT_DURATION_UNIT } from '@/lib/durationUnits';
+import type { ScoreUnit } from '@/lib/scoreUnits';
+import { DEFAULT_SCORE_UNIT } from '@/lib/scoreUnits';
+import type { WeightUnit } from '@/lib/weightUnits';
+import { DEFAULT_WEIGHT_UNIT } from '@/lib/weightUnits';
+import type {
+  CardioDistanceTracking,
+  CardioDurationTracking,
+  CardioObjective,
+  LegacyCardioDistanceMode,
+} from '@/lib/cardioPlan';
+import { isCardioPerSegmentLogging, isCardioDurationPerDistance } from '@/lib/cardioPlan';
+import { cardioPerSegmentCount } from '@/lib/cardioPerLog';
+import { hasLoggedExerciseInput, type LogExerciseDraftFields } from '@/lib/logExerciseDraft';
+import { readStretchSetsFromExercise } from '@/lib/stretchSets';
 import type { Workout } from '@/lib/types';
 
 export const NEW_LOG_DRAFT_KEY_PREFIX = 'workout-log-draft@v1:';
 
-type DraftSetFields = { actualRepsInput: string; actualWeightKgInput: string };
+type DraftSetFields = { actualRepsInput: string; actualWeightInput: string };
+type DraftStretchSetFields = { actualDurationInput: string; actualDurationUnit: DurationUnit };
+type DraftCardioPerSetFields = {
+  actualDurationInput: string;
+  actualDurationUnit: DurationUnit;
+  actualDistanceInput: string;
+  actualDistanceUnit: CardioDistanceUnit;
+};
 
 type DraftExerciseFields = {
   workoutExerciseId: string;
+  activityType: ActivityType;
   actualSets: DraftSetFields[];
+  actualWeightUnit?: WeightUnit;
+  actualStretchSets?: DraftStretchSetFields[];
+  actualCardioPerSets?: DraftCardioPerSetFields[];
+  cardioObjective?: CardioObjective;
+  cardioDurationTracking?: CardioDurationTracking;
+  cardioDistanceTracking?: CardioDistanceTracking;
+  /** @deprecated Migrated to cardioObjective + tracking fields. */
+  cardioDistanceMode?: LegacyCardioDistanceMode;
+  actualDurationInput?: string;
+  actualDurationUnit?: DurationUnit;
+  actualDistanceInput?: string;
+  actualDistanceUnit?: CardioDistanceUnit;
+  actualScoreInput?: string;
+  actualScoreUnit?: ScoreUnit;
 };
 
 export function newLogDraftStorageKey(workoutId: string): string {
@@ -84,11 +125,46 @@ export function isNewLogFormPristine(
     if (!template) {
       return false;
     }
-    if (exercise.actualSets.length !== template.sets) {
+
+    const draftFields: LogExerciseDraftFields = {
+      activityType: exercise.activityType,
+      actualSets: exercise.actualSets,
+      actualWeightUnit: exercise.actualWeightUnit ?? DEFAULT_WEIGHT_UNIT,
+      actualStretchSets: exercise.actualStretchSets ?? [],
+      actualCardioPerSets: exercise.actualCardioPerSets ?? [],
+      cardioObjective: exercise.cardioObjective ?? template.cardioObjective,
+      cardioDurationTracking: exercise.cardioDurationTracking ?? template.cardioDurationTracking,
+      cardioDistanceTracking: exercise.cardioDistanceTracking ?? template.cardioDistanceTracking,
+      cardioDistanceMode: exercise.cardioDistanceMode ?? template.cardioDistanceMode,
+      plannedDuration: template.duration,
+      plannedDistance: template.distance,
+      actualDurationInput: exercise.actualDurationInput ?? '',
+      actualDurationUnit: exercise.actualDurationUnit ?? DEFAULT_DURATION_UNIT,
+      actualDistanceInput: exercise.actualDistanceInput ?? '',
+      actualDistanceUnit: exercise.actualDistanceUnit ?? DEFAULT_CARDIO_DISTANCE_UNIT,
+      actualScoreInput: exercise.actualScoreInput ?? '',
+      actualScoreUnit: exercise.actualScoreUnit ?? DEFAULT_SCORE_UNIT,
+    };
+
+    if (hasLoggedExerciseInput(draftFields)) {
       return false;
     }
-    for (const set of exercise.actualSets) {
-      if (set.actualRepsInput.trim().length > 0 || set.actualWeightKgInput.trim().length > 0) {
+
+    if (template.activityType === 'strength' && exercise.actualSets.length !== template.sets) {
+      return false;
+    }
+    if (template.activityType === 'stretch') {
+      const plannedCount = Math.max(readStretchSetsFromExercise(template).length, template.sets, 1);
+      if ((exercise.actualStretchSets ?? []).length !== plannedCount) {
+        return false;
+      }
+    }
+    if (template.activityType === 'cardio' && isCardioPerSegmentLogging(template)) {
+      const objectiveInput = isCardioDurationPerDistance(template)
+        ? exercise.actualDistanceInput ?? ''
+        : exercise.actualDurationInput ?? '';
+      const plannedCount = cardioPerSegmentCount(template, objectiveInput);
+      if ((exercise.actualCardioPerSets ?? []).length !== plannedCount) {
         return false;
       }
     }

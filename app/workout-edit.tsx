@@ -18,7 +18,32 @@ import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
+import type { ActivityType } from '@/lib/activityTypes';
+import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
+import type { DurationUnit } from '@/lib/durationUnits';
+import {
+  type CardioDistanceTracking,
+  type CardioDurationTracking,
+  type CardioObjective,
+} from '@/lib/cardioPlan';
+import type { ScoreUnit } from '@/lib/scoreUnits';
+import type { WeightUnit } from '@/lib/weightUnits';
+import {
+  emptyExerciseDraftRow,
+  exerciseDraftRowFromSeed,
+  exerciseDraftSeedFromRow,
+  isExerciseDraftRowEmpty,
+  parseWorkoutExerciseFromDraft,
+  applyActivityTypeChangeToDraftRow,
+  applyCardioObjectiveChangeToDraftRow,
+  applyCardioDurationTrackingChangeToDraftRow,
+  applyCardioDistanceTrackingChangeToDraftRow,
+  workoutExerciseToDraftRow,
+  type ExerciseDraftRow,
+  type ExerciseDraftSeed,
+} from '@/lib/exerciseDraft';
 import { newId } from '@/lib/ids';
+import { validateExerciseNamesForWorkoutSave } from '@/lib/exerciseNameValidation';
 import { WorkoutIconPicker } from '@/components/WorkoutIconPicker';
 import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
@@ -26,23 +51,10 @@ import { type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types'
 import { themedAlert } from '@/lib/themedAlert';
 import { loadWorkouts, propagateExerciseDefinitionsAcrossWorkouts, updateWorkout } from '@/lib/workoutsStorage';
 
-type DraftExercise = { clientId: string; sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
-type ExerciseDraftSeed = { sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
 type ImportExercisesPayload = { nonce: string; exercises: ExerciseDraftSeed[] };
 
-function emptyExercise(): DraftExercise {
-  return { clientId: newId(), name: '', sets: '', reps: '', weightKg: '' };
-}
-
-function toDraft(exercise: WorkoutExercise): DraftExercise {
-  return {
-    clientId: exercise.id,
-    sourceExerciseId: exercise.id,
-    name: exercise.name,
-    sets: String(exercise.sets),
-    reps: String(exercise.reps),
-    weightKg: String(exercise.weightKg),
-  };
+function toDraft(exercise: WorkoutExercise): ExerciseDraftRow {
+  return workoutExerciseToDraftRow(exercise, { clientId: exercise.id, sourceExerciseId: exercise.id });
 }
 
 export default function WorkoutEditScreen() {
@@ -58,7 +70,7 @@ export default function WorkoutEditScreen() {
   const [title, setTitle] = useState('');
   const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>(['Monday']);
   const [iconId, setIconId] = useState<WorkoutIconId>(DEFAULT_WORKOUT_ICON_ID);
-  const [exercises, setExercises] = useState<DraftExercise[]>([]);
+  const [exercises, setExercises] = useState<ExerciseDraftRow[]>([]);
   /** `clientId`s for linked exercises the user chose to edit after confirmation. */
   const [unlockedExerciseClientIds, setUnlockedExerciseClientIds] = useState(() => new Set<string>());
   const editScreenInitialLoadDoneRef = useRef(false);
@@ -113,16 +125,7 @@ export default function WorkoutEditScreen() {
         try {
           const parsed = JSON.parse(rawImport) as ImportExercisesPayload;
           if (Array.isArray(parsed.exercises)) {
-            setExercises(
-              parsed.exercises.map((exercise) => ({
-                clientId: exercise.sourceExerciseId ?? newId(),
-                sourceExerciseId: exercise.sourceExerciseId,
-                name: exercise.name,
-                sets: exercise.sets,
-                reps: exercise.reps,
-                weightKg: exercise.weightKg,
-              })),
-            );
+            setExercises(parsed.exercises.map((exercise) => exerciseDraftRowFromSeed(exercise)));
             if (!cancelled) {
               setLoading(false);
               editScreenInitialLoadDoneRef.current = true;
@@ -167,7 +170,7 @@ export default function WorkoutEditScreen() {
           if (!prev.some((e) => e.sourceExerciseId)) {
             return prev;
           }
-          const next: DraftExercise[] = [];
+          const next: ExerciseDraftRow[] = [];
           for (const ex of prev) {
             const templateId = ex.sourceExerciseId;
             if (!templateId) {
@@ -178,13 +181,7 @@ export default function WorkoutEditScreen() {
             if (!latest) {
               continue;
             }
-            next.push({
-              ...ex,
-              name: latest.name,
-              sets: String(latest.sets),
-              reps: String(latest.reps),
-              weightKg: String(latest.weightKg),
-            });
+            next.push(workoutExerciseToDraftRow(latest, { clientId: ex.clientId, sourceExerciseId: templateId }));
           }
           const allowed = new Set(next.map((e) => e.clientId));
           setUnlockedExerciseClientIds((ids) => new Set([...ids].filter((cid) => allowed.has(cid))));
@@ -198,7 +195,7 @@ export default function WorkoutEditScreen() {
   );
 
   const addExercise = () => {
-    setExercises((prev) => [...prev, emptyExercise()]);
+    setExercises((prev) => [...prev, emptyExerciseDraftRow()]);
   };
 
   const removeExercise = (exerciseId: string) => {
@@ -214,8 +211,56 @@ export default function WorkoutEditScreen() {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, name } : ex)));
   };
 
-  const updateExerciseField = (exerciseId: string, field: keyof Pick<DraftExercise, 'sets' | 'reps' | 'weightKg'>, value: string) => {
+  const updateExerciseActivityType = (exerciseId: string, activityType: ActivityType) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? applyActivityTypeChangeToDraftRow(ex, activityType) : ex)),
+    );
+  };
+
+  const updateExerciseField = (
+    exerciseId: string,
+    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'score',
+    value: string,
+  ) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, [field]: value } : ex)));
+  };
+
+  const updateExerciseDistanceUnit = (exerciseId: string, unit: CardioDistanceUnit) => {
+    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, distanceUnit: unit } : ex)));
+  };
+
+  const updateExerciseCardioObjective = (exerciseId: string, objective: CardioObjective) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? applyCardioObjectiveChangeToDraftRow(ex, objective) : ex)),
+    );
+  };
+
+  const updateExerciseCardioDurationTracking = (exerciseId: string, tracking: CardioDurationTracking) => {
+    setExercises((prev) =>
+      prev.map((ex) =>
+        ex.clientId === exerciseId ? applyCardioDurationTrackingChangeToDraftRow(ex, tracking) : ex,
+      ),
+    );
+  };
+
+  const updateExerciseCardioDistanceTracking = (exerciseId: string, tracking: CardioDistanceTracking) => {
+    setExercises((prev) =>
+      prev.map((ex) =>
+        ex.clientId === exerciseId ? applyCardioDistanceTrackingChangeToDraftRow(ex, tracking) : ex,
+      ),
+    );
+  };
+
+  const updateExerciseDurationUnit = (exerciseId: string, unit: DurationUnit) => {
+    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, durationUnit: unit } : ex)));
+  };
+
+  const updateExerciseScoreUnit = (exerciseId: string, unit: ScoreUnit) => {
+    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, scoreUnit: unit } : ex)));
+  };
+
+  const updateExerciseWeightUnit = (exerciseId: string, unit: WeightUnit) => {
+    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, weightUnit: unit } : ex)));
   };
 
   const parseWorkout = (): Omit<Workout, 'id' | 'createdAt'> | null => {
@@ -231,42 +276,17 @@ export default function WorkoutEditScreen() {
 
     const parsedExercises: WorkoutExercise[] = [];
     for (const ex of exercises) {
-      const name = ex.name.trim();
-      const setsRaw = ex.sets.trim();
-      const repsRaw = ex.reps.trim();
-      const weightRaw = ex.weightKg.trim().replace(',', '.');
-
-      if (!name && !setsRaw && !repsRaw && !weightRaw) {
+      if (isExerciseDraftRowEmpty(ex)) {
         continue;
       }
-
-      if (!name) {
-        themedAlert('Name your exercise', 'One entry is missing an exercise name.');
+      const result = parseWorkoutExerciseFromDraft(ex, ex.clientId);
+      if (!result.ok) {
+        if (result.title) {
+          themedAlert(result.title, result.message);
+        }
         return null;
       }
-
-      const setsCount = Number.parseInt(setsRaw, 10);
-      const reps = Number.parseInt(repsRaw, 10);
-      const weightKg = Number.parseFloat(weightRaw);
-      if (
-        !Number.isFinite(setsCount) ||
-        setsCount <= 0 ||
-        !Number.isFinite(reps) ||
-        reps <= 0 ||
-        !Number.isFinite(weightKg) ||
-        weightKg < 0
-      ) {
-        themedAlert('Check your numbers', 'Each exercise needs a positive set count, positive rep count, and a weight.');
-        return null;
-      }
-
-      parsedExercises.push({
-        id: ex.sourceExerciseId ?? ex.clientId,
-        name,
-        sets: setsCount,
-        reps,
-        weightKg,
-      });
+      parsedExercises.push(result.exercise);
     }
 
     if (parsedExercises.length === 0) {
@@ -287,6 +307,12 @@ export default function WorkoutEditScreen() {
     }
 
     void (async () => {
+      const allWorkouts = await loadWorkouts();
+      const nameCheck = validateExerciseNamesForWorkoutSave(allWorkouts, id, parsed.exercises);
+      if (!nameCheck.ok) {
+        themedAlert(nameCheck.title, nameCheck.message);
+        return;
+      }
       const updated = await updateWorkout(id, parsed);
       if (!updated) {
         themedAlert('Workout not found', 'Could not update this workout.');
@@ -309,15 +335,7 @@ export default function WorkoutEditScreen() {
         libraryEntry: 'menu',
         source: 'edit',
         workoutId: id,
-        existingExercises: JSON.stringify(
-          exercises.map((exercise) => ({
-            sourceExerciseId: exercise.sourceExerciseId,
-            name: exercise.name,
-            sets: exercise.sets,
-            reps: exercise.reps,
-            weightKg: exercise.weightKg,
-          })),
-        ),
+        existingExercises: JSON.stringify(exercises.map((exercise) => exerciseDraftSeedFromRow(exercise))),
       },
     });
   }, [id, exercises]);
@@ -347,7 +365,15 @@ export default function WorkoutEditScreen() {
           setUnlockedExerciseClientIds((prev) => new Set(prev).add(clientId))
         }
         onUpdateExerciseName={updateExerciseName}
+        onUpdateExerciseActivityType={updateExerciseActivityType}
         onUpdateExerciseField={updateExerciseField}
+        onUpdateExerciseDistanceUnit={updateExerciseDistanceUnit}
+        onUpdateExerciseCardioObjective={updateExerciseCardioObjective}
+        onUpdateExerciseCardioDurationTracking={updateExerciseCardioDurationTracking}
+        onUpdateExerciseCardioDistanceTracking={updateExerciseCardioDistanceTracking}
+        onUpdateExerciseDurationUnit={updateExerciseDurationUnit}
+        onUpdateExerciseScoreUnit={updateExerciseScoreUnit}
+        onUpdateExerciseWeightUnit={updateExerciseWeightUnit}
         onRemoveExercise={removeExercise}
         confirmBeforeRemoveExercise
         contentContainerStyle={styles.scroll}
@@ -383,15 +409,7 @@ export default function WorkoutEditScreen() {
                     params: {
                       source: 'edit',
                       workoutId: id,
-                      existingExercises: JSON.stringify(
-                        exercises.map((exercise) => ({
-                          sourceExerciseId: exercise.sourceExerciseId,
-                          name: exercise.name,
-                          sets: exercise.sets,
-                          reps: exercise.reps,
-                          weightKg: exercise.weightKg,
-                        })),
-                      ),
+                      existingExercises: JSON.stringify(exercises.map((exercise) => exerciseDraftSeedFromRow(exercise))),
                     },
                   })
                 }

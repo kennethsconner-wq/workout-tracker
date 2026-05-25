@@ -12,14 +12,16 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ActivityExerciseMetricsView } from '@/components/ActivityExerciseMetricsView';
 import { ScoreDateLineChart, type ScoreDateLineSeries } from '@/components/ScoreDateLineChart';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { activityTypeLabel } from '@/lib/exerciseDisplay';
 import {
   averageExerciseExecutionScorePercent,
   collectStoredExerciseOptions,
-  countExerciseLoggedSessions,
+  countExerciseLoggedAppearances,
   getExerciseLastLoggedAtIso,
   getExercisePersonalRecords,
   getLoggedExerciseExecutionSnapshots,
@@ -29,14 +31,14 @@ import {
 import { themedAlert } from '@/lib/themedAlert';
 import { loadLoggedWorkouts, loadWorkouts } from '@/lib/workoutsStorage';
 import type { LoggedWorkout, Workout } from '@/lib/types';
+import { DISPLAY_DECIMAL_PLACES, formatDisplayDecimal } from '@/lib/displayDecimals';
+import { formatWeightWithUnit } from '@/lib/weightUnits';
 
 function formatPrWeightLb(value: number | null): string {
   if (value === null) {
     return '—';
   }
-  const rounded = Math.round(value);
-  const text = Math.abs(value - rounded) < 1e-6 ? String(rounded) : value.toFixed(1);
-  return `${text} lb`;
+  return formatWeightWithUnit(value, 'pounds');
 }
 
 function formatPrInt(value: number | null): string {
@@ -60,7 +62,7 @@ function formatTotalWeightMoved(value: number): string {
   }
   const hasFraction = Math.abs(value % 1) > 1e-9;
   const num = value.toLocaleString(undefined, {
-    maximumFractionDigits: hasFraction ? 1 : 0,
+    maximumFractionDigits: hasFraction ? DISPLAY_DECIMAL_PLACES : 0,
     minimumFractionDigits: 0,
   });
   return `${num} lb`;
@@ -71,19 +73,15 @@ function formatWeightTick(v: number): string {
   if (!Number.isFinite(v)) {
     return '';
   }
-  const rounded = Math.round(v);
-  if (Math.abs(v - rounded) < 1e-6) {
-    return `${rounded} lb`;
-  }
-  return `${v.toFixed(1)} lb`;
+  return formatWeightWithUnit(v, 'pounds');
 }
 
 const EXECUTION_SCORE_INFO_MESSAGE =
-  'For each time this exercise appears in your log:\n\n' +
+  'For each time this exercise appears in your log (including duplicate slots in the same workout):\n\n' +
   '• Actual score = (average reps across sets) × (average weight across sets) × (number of sets logged)\n' +
   '• Planned score = planned sets × planned reps × planned weight from that session\n' +
   '• Execution for that entry = actual score ÷ planned score\n\n' +
-  'The percentage shown is the average of those execution values across all logged entries. It can go above 100% if you beat the plan.';
+  'The percentage shown is the average of those execution values across all logged appearances. It can go above 100% if you beat the plan.';
 
 const TOTAL_WEIGHT_MOVED_INFO_MESSAGE =
   'For every logged set of this exercise, we multiply reps × weight for that set, then add those amounts together for the whole session, then add across every workout where this exercise appears.';
@@ -109,30 +107,30 @@ export function LoggedWorkoutsList() {
 
   const exerciseOptions = collectStoredExerciseOptions(workouts, logged);
   const selectedExercise = exerciseOptions.find((o) => o.id === selectedExerciseId) ?? null;
-  const exerciseLoggedCount =
-    selectedExerciseId !== null ? countExerciseLoggedSessions(logged, selectedExerciseId) : 0;
+  const selectedActivityType = selectedExercise?.activityType ?? 'strength';
+  const metricTarget = selectedExercise;
+  const exerciseLoggedCount = metricTarget ? countExerciseLoggedAppearances(logged, metricTarget) : 0;
   const executionScorePercent = useMemo(
-    () =>
-      selectedExerciseId !== null ? averageExerciseExecutionScorePercent(logged, selectedExerciseId) : null,
-    [logged, selectedExerciseId],
+    () => (metricTarget ? averageExerciseExecutionScorePercent(logged, metricTarget) : null),
+    [logged, metricTarget],
   );
   const personalRecords = useMemo(
-    () => (selectedExerciseId !== null ? getExercisePersonalRecords(logged, selectedExerciseId) : null),
-    [logged, selectedExerciseId],
+    () => (metricTarget ? getExercisePersonalRecords(logged, metricTarget) : null),
+    [logged, metricTarget],
   );
   const lastLoggedIso = useMemo(
-    () => (selectedExerciseId !== null ? getExerciseLastLoggedAtIso(logged, selectedExerciseId) : null),
-    [logged, selectedExerciseId],
+    () => (metricTarget ? getExerciseLastLoggedAtIso(logged, metricTarget) : null),
+    [logged, metricTarget],
   );
   const totalWeightMoved = useMemo(
-    () => (selectedExerciseId !== null ? getTotalWeightMovedForExercise(logged, selectedExerciseId) : 0),
-    [logged, selectedExerciseId],
+    () => (metricTarget ? getTotalWeightMovedForExercise(logged, metricTarget) : 0),
+    [logged, metricTarget],
   );
   const scoreDateChartLines = useMemo((): ScoreDateLineSeries[] => {
-    if (selectedExerciseId === null) {
+    if (!metricTarget) {
       return [];
     }
-    const snaps = getLoggedExerciseExecutionSnapshots(logged, selectedExerciseId);
+    const snaps = getLoggedExerciseExecutionSnapshots(logged, metricTarget);
     /** Same as workout title on Workouts (`WorkoutsList` `dropdownTextMagenta`). */
     const plannedLineColor = '#D40078';
     return [
@@ -155,12 +153,12 @@ export function LoggedWorkoutsList() {
         })),
       },
     ];
-  }, [activeScheme, logged, selectedExerciseId]);
+  }, [activeScheme, logged, metricTarget]);
   const weightDateChartLines = useMemo((): ScoreDateLineSeries[] => {
-    if (selectedExerciseId === null) {
+    if (!metricTarget) {
       return [];
     }
-    const snaps = getLoggedExerciseWeightSnapshots(logged, selectedExerciseId);
+    const snaps = getLoggedExerciseWeightSnapshots(logged, metricTarget);
     const plannedLineColor = '#D40078';
     return [
       {
@@ -182,7 +180,7 @@ export function LoggedWorkoutsList() {
         })),
       },
     ];
-  }, [activeScheme, logged, selectedExerciseId]);
+  }, [activeScheme, logged, metricTarget]);
   const scrollInnerWidth = Math.max(0, windowWidth - 32);
   const chartCarouselSlideWidth = scrollInnerWidth;
   const chartPlotWidth = Math.max(160, chartCarouselSlideWidth - 28);
@@ -291,13 +289,23 @@ export function LoggedWorkoutsList() {
             styles.dropdown,
             { borderColor, opacity: pressed ? 0.85 : 1 },
           ]}>
-          <Text style={[styles.dropdownText, styles.dropdownTextMagenta]} numberOfLines={1}>
-            {selectedExercise?.name ?? 'Select'}
-          </Text>
+          <View style={styles.dropdownTextBlock} lightColor="transparent" darkColor="transparent">
+            <Text style={[styles.dropdownText, styles.dropdownTextMagenta]} numberOfLines={1}>
+              {selectedExercise?.name ?? 'Select'}
+            </Text>
+            {selectedExercise ? (
+              <Text
+                style={[styles.dropdownMeta, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
+                numberOfLines={1}>
+                {activityTypeLabel(selectedExercise.activityType)}
+              </Text>
+            ) : null}
+          </View>
           <Ionicons name="chevron-down" size={20} color="#D40078" />
         </Pressable>
 
         {selectedExerciseId !== null ? (
+          selectedActivityType === 'strength' ? (
           <>
           <View style={[styles.metricsCard, { borderColor }]}>
             <View style={styles.metricRow}>
@@ -459,6 +467,20 @@ export function LoggedWorkoutsList() {
             ) : null}
           </View>
           </>
+          ) : (
+            <ActivityExerciseMetricsView
+              activityType={selectedActivityType}
+              logged={logged}
+              metricTarget={metricTarget!}
+              exerciseLoggedCount={exerciseLoggedCount}
+              lastLoggedIso={lastLoggedIso}
+              activeScheme={activeScheme}
+              borderColor={borderColor}
+              textColor={textColor}
+              chartCarouselSlideWidth={chartCarouselSlideWidth}
+              chartPlotWidth={chartPlotWidth}
+            />
+          )
         ) : null}
       </ScrollView>
 
@@ -498,9 +520,14 @@ export function LoggedWorkoutsList() {
                     setSelectedExerciseId(item.id);
                     setPickerOpen(false);
                   }}>
-                  <Text style={[styles.optionText, styles.dropdownTextMagenta]} numberOfLines={2}>
-                    {item.name}
-                  </Text>
+                  <View style={styles.optionTextBlock} lightColor="transparent" darkColor="transparent">
+                    <Text style={[styles.optionText, styles.dropdownTextMagenta]} numberOfLines={2}>
+                      {item.name}
+                    </Text>
+                    <Text style={[styles.optionMeta, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
+                      {activityTypeLabel(item.activityType)}
+                    </Text>
+                  </View>
                   {item.id === selectedExerciseId ? (
                     <Ionicons name="checkmark" size={22} color={Colors[activeScheme].tint} />
                   ) : null}
@@ -548,8 +575,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  dropdownText: {
+  dropdownMeta: {
+    fontSize: 13,
+    fontWeight: '500',
+    flexShrink: 0,
+  },
+  dropdownTextBlock: {
     flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  dropdownText: {
     fontSize: 16,
   },
   dropdownTextMagenta: {
@@ -676,8 +712,16 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  optionText: {
+  optionTextBlock: {
     flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  optionText: {
     fontSize: 16,
+  },
+  optionMeta: {
+    fontSize: 13,
+    marginTop: 2,
   },
 });

@@ -1,43 +1,156 @@
-import type { LoggedWorkout, Workout } from '@/lib/types';
+import type { ActivityType } from '@/lib/activityTypes';
+import { normalizeActivityType } from '@/lib/activityTypes';
+import { hasLoggedExerciseActual } from '@/lib/exerciseDisplay';
+import type { LoggedWorkout, LoggedWorkoutExercise, Workout, WorkoutExercise } from '@/lib/types';
+
+export type ExerciseDefinitionFields = Pick<
+  WorkoutExercise,
+  | 'activityType'
+  | 'name'
+  | 'sets'
+  | 'reps'
+  | 'weight'
+  | 'weightUnit'
+  | 'duration'
+  | 'durationUnit'
+  | 'distance'
+  | 'distanceUnit'
+  | 'cardioObjective'
+  | 'cardioDurationTracking'
+  | 'cardioDistanceTracking'
+  | 'cardioDistanceMode'
+  | 'score'
+  | 'scoreUnit'
+>;
+
+/** Same grouping key as the Exercise Library list (one entry per unique exercise definition). */
+export function exerciseDefinitionSignatureKey(exercise: ExerciseDefinitionFields): string {
+  return `${exercise.activityType}|${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weight}|${exercise.weightUnit}|${exercise.duration}|${exercise.durationUnit}|${exercise.distance}|${exercise.distanceUnit}|${exercise.cardioObjective}|${exercise.cardioDurationTracking}|${exercise.cardioDistanceTracking}|${exercise.score}|${exercise.scoreUnit}`;
+}
 
 export type StoredExerciseOption = {
+  /** Signature key for this exercise definition (not a single workout slot id). */
   id: string;
   name: string;
+  activityType: ActivityType;
+  /** All template exercise ids across workouts that share this definition. */
+  workoutExerciseIds: string[];
 };
 
-/** All exercises from saved workouts, plus any ids seen only in logs (legacy / deleted templates). */
+/** Target for aggregating metrics across every logged appearance of one exercise definition. */
+export type StoredExerciseMetricTarget = Pick<StoredExerciseOption, 'id' | 'workoutExerciseIds'>;
+
+function toWorkoutExerciseIdSet(workoutExerciseIds: readonly string[]): Set<string> {
+  return new Set(workoutExerciseIds);
+}
+
+function matchesWorkoutExercise(workoutExerciseId: string, ids: Set<string>): boolean {
+  return ids.has(workoutExerciseId);
+}
+
+type ExerciseOptionGroup = {
+  name: string;
+  activityType: ActivityType;
+  workoutExerciseIds: Set<string>;
+};
+
+function addExerciseToOptionGroups(
+  groups: Map<string, ExerciseOptionGroup>,
+  exercise: ExerciseDefinitionFields,
+  workoutExerciseId: string,
+): void {
+  const key = exerciseDefinitionSignatureKey(exercise);
+  const existing = groups.get(key);
+  if (existing) {
+    existing.workoutExerciseIds.add(workoutExerciseId);
+    return;
+  }
+  groups.set(key, {
+    name: exercise.name,
+    activityType: normalizeActivityType(exercise.activityType),
+    workoutExerciseIds: new Set([workoutExerciseId]),
+  });
+}
+
+/** Unique exercise definitions from workouts and logs (matches Exercise Library grouping). */
 export function collectStoredExerciseOptions(workouts: Workout[], logged: LoggedWorkout[]): StoredExerciseOption[] {
-  const byId = new Map<string, string>();
+  const groups = new Map<string, ExerciseOptionGroup>();
+
   for (const workout of workouts) {
     for (const exercise of workout.exercises) {
-      if (!byId.has(exercise.id)) {
-        byId.set(exercise.id, exercise.name);
-      }
+      addExerciseToOptionGroups(groups, exercise, exercise.id);
     }
   }
   for (const log of logged) {
     for (const exercise of log.exercises) {
-      if (!byId.has(exercise.workoutExerciseId)) {
-        byId.set(exercise.workoutExerciseId, exercise.name);
-      }
+      addExerciseToOptionGroups(groups, exercise, exercise.workoutExerciseId);
     }
   }
-  return [...byId.entries()]
-    .map(([id, name]) => ({ id, name }))
+
+  return [...groups.entries()]
+    .map(([id, group]) => ({
+      id,
+      name: group.name,
+      activityType: group.activityType,
+      workoutExerciseIds: [...group.workoutExerciseIds],
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** How many completed logs include this template exercise id at least once. */
-export function countExerciseLoggedSessions(logged: LoggedWorkout[], workoutExerciseId: string): number {
-  return logged.filter((log) => log.exercises.some((ex) => ex.workoutExerciseId === workoutExerciseId)).length;
+function loggedExerciseMatchesOption(
+  exercise: LoggedWorkoutExercise,
+  option: StoredExerciseMetricTarget,
+): boolean {
+  const ids = toWorkoutExerciseIdSet(option.workoutExerciseIds);
+  return (
+    matchesWorkoutExercise(exercise.workoutExerciseId, ids) ||
+    exerciseDefinitionSignatureKey(exercise) === option.id
+  );
 }
 
-/** ISO `createdAt` of the newest log that includes this exercise (same sessions as Times Logged on Metrics). */
-export function getExerciseLastLoggedAtIso(logged: LoggedWorkout[], workoutExerciseId: string): string | null {
+/** Visit every logged exercise row that matches this definition (including duplicate slots in one session). */
+export function forEachLoggedExerciseForTarget(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+  visit: (exercise: LoggedWorkoutExercise, createdAt: string) => void,
+): void {
+  for (const log of logged) {
+    for (const exercise of log.exercises) {
+      if (loggedExerciseMatchesOption(exercise, target)) {
+        visit(exercise, log.createdAt);
+      }
+    }
+  }
+}
+
+/** Total logged appearances with actual data (duplicate slots in one session each count). */
+export function countExerciseLoggedAppearances(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+): number {
+  let count = 0;
+  for (const log of logged) {
+    for (const exercise of log.exercises) {
+      if (!loggedExerciseMatchesOption(exercise, target)) {
+        continue;
+      }
+      if (hasLoggedExerciseActual(exercise)) {
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+/** ISO `createdAt` of the newest log that includes this exercise. */
+export function getExerciseLastLoggedAtIso(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+): string | null {
   let bestTime = -Infinity;
   let bestIso: string | null = null;
   for (const log of logged) {
-    if (!log.exercises.some((ex) => ex.workoutExerciseId === workoutExerciseId)) {
+    if (!log.exercises.some((ex) => loggedExerciseMatchesOption(ex, target))) {
       continue;
     }
     const t = new Date(log.createdAt).getTime();
@@ -52,26 +165,24 @@ export function getExerciseLastLoggedAtIso(logged: LoggedWorkout[], workoutExerc
   return bestIso;
 }
 
-/** Sum of (actualReps × actualWeightKg) for every logged set of this exercise, across all sessions. */
-export function getTotalWeightMovedForExercise(logged: LoggedWorkout[], workoutExerciseId: string): number {
+/** Sum of (actualReps × actualWeight) for every logged set, across all appearances. */
+export function getTotalWeightMovedForExercise(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+): number {
   let total = 0;
-  for (const log of logged) {
-    for (const ex of log.exercises) {
-      if (ex.workoutExerciseId !== workoutExerciseId) {
-        continue;
-      }
-      for (const set of ex.actualSets) {
-        total += set.actualReps * set.actualWeightKg;
-      }
+  forEachLoggedExerciseForTarget(logged, target, (ex) => {
+    for (const set of ex.actualSets) {
+      total += set.actualReps * set.actualWeight;
     }
-  }
+  });
   return total;
 }
 
 export type LoggedExecutionSnapshot = {
   /** Log session timestamp (when the workout was saved). */
   createdAt: string;
-  /** LoggedExerciseActualScore = avg(actualReps) × avg(actualWeightKg) × setsCompleted. */
+  /** LoggedExerciseActualScore = avg(actualReps) × avg(actualWeight) × setsCompleted. */
   actualScore: number;
   plannedScore: number;
   /** actualScore / plannedScore (same ratio used for Execution Score per session on Metrics). */
@@ -81,50 +192,44 @@ export type LoggedExecutionSnapshot = {
 export type LoggedWeightSnapshot = {
   /** Log session timestamp (when the workout was saved). */
   createdAt: string;
-  /** Mean `actualWeightKg` across logged sets for this exercise in this session. */
+  /** Mean actual weight across logged sets for this exercise in this session. */
   avgActualWeightKg: number;
-  /** Planned weight (`ex.weightKg`) for this exercise in that session. */
+  /** Planned weight for this exercise in that session. */
   plannedWeightKg: number;
 };
 
 /**
  * One row per logged appearance of this exercise with at least one actual set.
- * `avgActualWeightKg` = mean weight across actual sets; `plannedWeightKg` = planned weight on the log.
  * Sorted by `createdAt` ascending.
  */
 export function getLoggedExerciseWeightSnapshots(
   logged: LoggedWorkout[],
-  workoutExerciseId: string,
+  target: StoredExerciseMetricTarget,
 ): LoggedWeightSnapshot[] {
   const out: LoggedWeightSnapshot[] = [];
-  for (const log of logged) {
-    for (const ex of log.exercises) {
-      if (ex.workoutExerciseId !== workoutExerciseId) {
-        continue;
-      }
-      const setsCompleted = ex.actualSets.length;
-      if (setsCompleted === 0) {
-        continue;
-      }
-      let sumW = 0;
-      for (const set of ex.actualSets) {
-        sumW += set.actualWeightKg;
-      }
-      const avgActual = sumW / setsCompleted;
-      if (!Number.isFinite(avgActual) || avgActual < 0) {
-        continue;
-      }
-      const planned = ex.weightKg;
-      if (!Number.isFinite(planned) || planned < 0) {
-        continue;
-      }
-      out.push({
-        createdAt: log.createdAt,
-        avgActualWeightKg: avgActual,
-        plannedWeightKg: planned,
-      });
+  forEachLoggedExerciseForTarget(logged, target, (ex, createdAt) => {
+    const setsCompleted = ex.actualSets.length;
+    if (setsCompleted === 0) {
+      return;
     }
-  }
+    let sumW = 0;
+    for (const set of ex.actualSets) {
+      sumW += set.actualWeight;
+    }
+    const avgActual = sumW / setsCompleted;
+    if (!Number.isFinite(avgActual) || avgActual < 0) {
+      return;
+    }
+    const planned = ex.weight;
+    if (!Number.isFinite(planned) || planned < 0) {
+      return;
+    }
+    out.push({
+      createdAt,
+      avgActualWeightKg: avgActual,
+      plannedWeightKg: planned,
+    });
+  });
   out.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   return out;
 }
@@ -135,59 +240,51 @@ export function getLoggedExerciseWeightSnapshots(
  */
 export function getLoggedExerciseExecutionSnapshots(
   logged: LoggedWorkout[],
-  workoutExerciseId: string,
+  target: StoredExerciseMetricTarget,
 ): LoggedExecutionSnapshot[] {
   const out: LoggedExecutionSnapshot[] = [];
-  for (const log of logged) {
-    for (const ex of log.exercises) {
-      if (ex.workoutExerciseId !== workoutExerciseId) {
-        continue;
-      }
-      const setsCompleted = ex.actualSets.length;
-      if (setsCompleted === 0) {
-        continue;
-      }
-      const plannedScore = ex.sets * ex.reps * ex.weightKg;
-      if (plannedScore <= 0) {
-        continue;
-      }
-      let sumReps = 0;
-      let sumWeight = 0;
-      for (const set of ex.actualSets) {
-        sumReps += set.actualReps;
-        sumWeight += set.actualWeightKg;
-      }
-      const avgReps = sumReps / setsCompleted;
-      const avgWeight = sumWeight / setsCompleted;
-      const actualScore = avgReps * avgWeight * setsCompleted;
-      const executionRatio = actualScore / plannedScore;
-      if (!Number.isFinite(executionRatio)) {
-        continue;
-      }
-      out.push({
-        createdAt: log.createdAt,
-        actualScore,
-        plannedScore,
-        executionRatio,
-      });
+  forEachLoggedExerciseForTarget(logged, target, (ex, createdAt) => {
+    const setsCompleted = ex.actualSets.length;
+    if (setsCompleted === 0) {
+      return;
     }
-  }
+    const plannedScore = ex.sets * ex.reps * ex.weight;
+    if (plannedScore <= 0) {
+      return;
+    }
+    let sumReps = 0;
+    let sumWeight = 0;
+    for (const set of ex.actualSets) {
+      sumReps += set.actualReps;
+      sumWeight += set.actualWeight;
+    }
+    const avgReps = sumReps / setsCompleted;
+    const avgWeight = sumWeight / setsCompleted;
+    const actualScore = avgReps * avgWeight * setsCompleted;
+    const executionRatio = actualScore / plannedScore;
+    if (!Number.isFinite(executionRatio)) {
+      return;
+    }
+    out.push({
+      createdAt,
+      actualScore,
+      plannedScore,
+      executionRatio,
+    });
+  });
   out.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   return out;
 }
 
 /**
- * Mean of per-log execution ratios for this exercise.
- * For each logged row: ActualScore = avg(actualReps) * avg(actualWeightKg) * setsCompleted,
- * PlannedScore = planned sets * planned reps * planned weight (fields on the log),
- * ratio = ActualScore / PlannedScore. Averages every such ratio (skips rows with no actual sets or zero planned score).
+ * Mean of per-appearance execution ratios (each duplicate slot in a session counts separately).
  * Returns a 0–100+ scale (values above 100 mean actual beat planned on this formula).
  */
 export function averageExerciseExecutionScorePercent(
   logged: LoggedWorkout[],
-  workoutExerciseId: string,
+  target: StoredExerciseMetricTarget,
 ): number | null {
-  const snapshots = getLoggedExerciseExecutionSnapshots(logged, workoutExerciseId);
+  const snapshots = getLoggedExerciseExecutionSnapshots(logged, target);
   if (snapshots.length === 0) {
     return null;
   }
@@ -196,37 +293,29 @@ export function averageExerciseExecutionScorePercent(
 }
 
 export type ExercisePersonalRecords = {
-  /** Max `actualWeightKg` seen in any single logged set (matches app weight labels as lb). */
   maxWeight: number | null;
-  /** Max `actualReps` in any single logged set. */
   maxReps: number | null;
-  /** Largest `actualSets.length` for this exercise in any one logged session. */
   maxSets: number | null;
 };
 
 export function getExercisePersonalRecords(
   logged: LoggedWorkout[],
-  workoutExerciseId: string,
+  target: StoredExerciseMetricTarget,
 ): ExercisePersonalRecords {
   let maxWeight: number | null = null;
   let maxReps: number | null = null;
   let maxSets: number | null = null;
 
-  for (const log of logged) {
-    for (const ex of log.exercises) {
-      if (ex.workoutExerciseId !== workoutExerciseId) {
-        continue;
-      }
-      const setCount = ex.actualSets.length;
-      if (setCount > 0) {
-        maxSets = maxSets === null ? setCount : Math.max(maxSets, setCount);
-      }
-      for (const set of ex.actualSets) {
-        maxWeight = maxWeight === null ? set.actualWeightKg : Math.max(maxWeight, set.actualWeightKg);
-        maxReps = maxReps === null ? set.actualReps : Math.max(maxReps, set.actualReps);
-      }
+  forEachLoggedExerciseForTarget(logged, target, (ex) => {
+    const setCount = ex.actualSets.length;
+    if (setCount > 0) {
+      maxSets = maxSets === null ? setCount : Math.max(maxSets, setCount);
     }
-  }
+    for (const set of ex.actualSets) {
+      maxWeight = maxWeight === null ? set.actualWeight : Math.max(maxWeight, set.actualWeight);
+      maxReps = maxReps === null ? set.actualReps : Math.max(maxReps, set.actualReps);
+    }
+  });
 
   return { maxWeight, maxReps, maxSets };
 }

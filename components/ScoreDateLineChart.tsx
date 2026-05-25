@@ -65,7 +65,7 @@ function formatScoreTick(v: number): string {
   if (Math.abs(v) >= 1000) {
     return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
-  return v.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 0 });
+  return v.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 }
 
 function formatDateTick(ms: number): string {
@@ -242,9 +242,9 @@ export function ScoreDateLineChart({
               {segs.map((s) => (
                 <LineSegment key={s.key} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} color={series.color} />
               ))}
-              {series.points.map((p) => (
+              {series.points.map((p, pointIndex) => (
                 <View
-                  key={`${series.id}-${p.dateMs}-${p.score}`}
+                  key={`${series.id}-${pointIndex}-${p.dateMs}`}
                   style={[
                     styles.dot,
                     {

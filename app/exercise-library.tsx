@@ -9,18 +9,40 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  TextInput,
   View as RNView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text, View } from '@/components/Themed';
+import { ExerciseDraftFieldsEditor, type ExerciseDraftField } from '@/components/ExerciseDraftFieldsEditor';
 import Colors from '@/constants/Colors';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
+import { activityTypeLabel, formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
+import {
+  formatCardioDistanceValue,
+} from '@/lib/cardioDistanceUnits';
+import { formatDurationValue } from '@/lib/durationUnits';
+import {
+  applyActivityTypeChangeToDraftRow,
+  applyCardioDistanceTrackingChangeToDraftRow,
+  applyCardioDurationTrackingChangeToDraftRow,
+  applyCardioObjectiveChangeToDraftRow,
+  parseWorkoutExerciseFromDraft,
+  workoutExerciseToDraftRow,
+  type ExerciseDraftRow,
+  type ExerciseDraftSeed,
+} from '@/lib/exerciseDraft';
+import {
+  DEFAULT_CARDIO_DISTANCE_TRACKING,
+  DEFAULT_CARDIO_DURATION_TRACKING,
+  DEFAULT_CARDIO_OBJECTIVE,
+} from '@/lib/cardioPlan';
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
+import { validateExerciseNamesAfterLibraryEdit } from '@/lib/exerciseNameValidation';
 import {
   loadWorkouts,
+  matchesExerciseDefinition,
   removeExercisesMatchingSignatureFromAllWorkouts,
   updateExercisesMatchingSignatureAcrossWorkouts,
 } from '@/lib/workoutsStorage';
@@ -28,8 +50,10 @@ import { themedAlert } from '@/lib/themedAlert';
 import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types';
 
 type RouteSource = 'create' | 'edit';
-type ExerciseListItem = Pick<WorkoutExercise, 'id' | 'name' | 'sets' | 'reps' | 'weightKg'> & { key: string };
-type ExerciseDraftSeed = { sourceExerciseId?: string; name: string; sets: string; reps: string; weightKg: string };
+type ExerciseListItem = Pick<
+  WorkoutExercise,
+  'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+> & { key: string };
 type CreateDraftPayload = { title: string; daysOfWeek: DayOfWeek[]; iconId: WorkoutIconId };
 type ImportExercisesPayload = {
   nonce: string;
@@ -93,10 +117,7 @@ export default function ExerciseLibraryScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   /** Browse-only: baseline row when the edit modal is open. */
   const [editBaseline, setEditBaseline] = useState<ExerciseListItem | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editSets, setEditSets] = useState('');
-  const [editReps, setEditReps] = useState('');
-  const [editWeight, setEditWeight] = useState('');
+  const [editDraft, setEditDraft] = useState<ExerciseDraftRow | null>(null);
   const [libraryMutationBusy, setLibraryMutationBusy] = useState(false);
 
   const reloadLibrary = useCallback(async () => {
@@ -105,15 +126,27 @@ export default function ExerciseLibraryScreen() {
     const unique = new Map<string, ExerciseListItem>();
     for (const workout of workouts) {
       for (const exercise of workout.exercises) {
-        const key = `${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weightKg}`;
+        const key = `${exercise.activityType}|${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weight}|${exercise.weightUnit}|${exercise.duration}|${exercise.durationUnit}|${exercise.distance}|${exercise.distanceUnit}|${exercise.cardioObjective}|${exercise.cardioDurationTracking}|${exercise.cardioDistanceTracking}|${exercise.score}|${exercise.scoreUnit}`;
         if (!unique.has(key)) {
           unique.set(key, {
             key,
             id: exercise.id,
+            activityType: exercise.activityType,
             name: exercise.name,
             sets: exercise.sets,
             reps: exercise.reps,
-            weightKg: exercise.weightKg,
+            weight: exercise.weight,
+            weightUnit: exercise.weightUnit,
+            duration: exercise.duration,
+            durationUnit: exercise.durationUnit,
+            distance: exercise.distance,
+            distanceUnit: exercise.distanceUnit,
+            cardioObjective: exercise.cardioObjective,
+            cardioDurationTracking: exercise.cardioDurationTracking,
+            cardioDistanceTracking: exercise.cardioDistanceTracking,
+            cardioDistanceMode: exercise.cardioDistanceMode,
+            score: exercise.score,
+            scoreUnit: exercise.scoreUnit,
           });
         }
       }
@@ -184,14 +217,16 @@ export default function ExerciseLibraryScreen() {
 
   const openEditFormForItem = useCallback((item: ExerciseListItem) => {
     setEditBaseline(item);
-    setEditName(item.name);
-    setEditSets(String(item.sets));
-    setEditReps(String(item.reps));
-    setEditWeight(String(item.weightKg));
+    setEditDraft(workoutExerciseToDraftRow(item, { clientId: item.id }));
   }, []);
 
   const closeEditForm = useCallback(() => {
     setEditBaseline(null);
+    setEditDraft(null);
+  }, []);
+
+  const updateEditDraftField = useCallback((field: ExerciseDraftField, value: string) => {
+    setEditDraft((prev) => (prev ? { ...prev, [field]: value } : prev));
   }, []);
 
   const requestEditExercise = useCallback(
@@ -216,10 +251,22 @@ export default function ExerciseLibraryScreen() {
               try {
                 setLibraryMutationBusy(true);
                 await removeExercisesMatchingSignatureFromAllWorkouts({
+                  activityType: item.activityType,
                   name: item.name,
                   sets: item.sets,
                   reps: item.reps,
-                  weightKg: item.weightKg,
+                  weight: item.weight,
+                  weightUnit: item.weightUnit,
+                  duration: item.duration,
+                  durationUnit: item.durationUnit,
+                  distance: item.distance,
+                  distanceUnit: item.distanceUnit,
+                  cardioObjective: item.cardioObjective,
+                  cardioDurationTracking: item.cardioDurationTracking,
+                  cardioDistanceTracking: item.cardioDistanceTracking,
+                  cardioDistanceMode: item.cardioDistanceMode,
+                  score: item.score,
+                  scoreUnit: item.scoreUnit,
                 });
                 await reloadLibrary();
               } finally {
@@ -234,46 +281,53 @@ export default function ExerciseLibraryScreen() {
   );
 
   const saveEditedExercise = useCallback(async () => {
-    if (!editBaseline) {
+    if (!editBaseline || !editDraft) {
       return;
     }
-    const name = editName.trim();
-    if (!name) {
-      themedAlert('Missing name', 'Please enter an exercise name.');
-      return;
-    }
-    const sets = Number.parseInt(editSets.trim(), 10);
-    const reps = Number.parseInt(editReps.trim(), 10);
-    const weightKg = Number.parseFloat(editWeight.trim());
-    if (!Number.isFinite(sets) || sets < 1) {
-      themedAlert('Invalid sets', 'Enter a whole number of sets (at least 1).');
-      return;
-    }
-    if (!Number.isFinite(reps) || reps < 1) {
-      themedAlert('Invalid reps', 'Enter a whole number of reps (at least 1).');
-      return;
-    }
-    if (!Number.isFinite(weightKg) || weightKg < 0) {
-      themedAlert('Invalid weight', 'Enter a valid weight (0 or more).');
+    const parsed = parseWorkoutExerciseFromDraft(editDraft, editBaseline.id);
+    if (!parsed.ok) {
+      themedAlert(parsed.title, parsed.message);
       return;
     }
     try {
       setLibraryMutationBusy(true);
+      const allWorkouts = await loadWorkouts();
+      const nameCheck = validateExerciseNamesAfterLibraryEdit(
+        allWorkouts,
+        (exercise) => matchesExerciseDefinition(exercise, editBaseline),
+        parsed.exercise,
+      );
+      if (!nameCheck.ok) {
+        themedAlert(nameCheck.title, nameCheck.message);
+        return;
+      }
       await updateExercisesMatchingSignatureAcrossWorkouts(
         {
+          activityType: editBaseline.activityType,
           name: editBaseline.name,
           sets: editBaseline.sets,
           reps: editBaseline.reps,
-          weightKg: editBaseline.weightKg,
+          weight: editBaseline.weight,
+          weightUnit: editBaseline.weightUnit,
+          duration: editBaseline.duration,
+          durationUnit: editBaseline.durationUnit,
+          distance: editBaseline.distance,
+          distanceUnit: editBaseline.distanceUnit,
+          cardioObjective: editBaseline.cardioObjective,
+          cardioDurationTracking: editBaseline.cardioDurationTracking,
+          cardioDistanceTracking: editBaseline.cardioDistanceTracking,
+          cardioDistanceMode: editBaseline.cardioDistanceMode,
+          score: editBaseline.score,
+          scoreUnit: editBaseline.scoreUnit,
         },
-        { name, sets, reps, weightKg },
+        parsed.exercise,
       );
       closeEditForm();
       await reloadLibrary();
     } finally {
       setLibraryMutationBusy(false);
     }
-  }, [editBaseline, editName, editSets, editReps, editWeight, reloadLibrary, closeEditForm]);
+  }, [editBaseline, editDraft, reloadLibrary, closeEditForm]);
 
   const addSelectedToWorkout = useCallback(() => {
     const byId = new Map(items.map((item) => [item.id, item]));
@@ -290,10 +344,21 @@ export default function ExerciseLibraryScreen() {
     const nonce = String(Date.now());
     const newSeeds: ExerciseDraftSeed[] = selected.map((exercise) => ({
       sourceExerciseId: exercise.id,
+      activityType: exercise.activityType,
       name: exercise.name,
       sets: String(exercise.sets),
       reps: String(exercise.reps),
-      weightKg: String(exercise.weightKg),
+      weight: String(exercise.weight),
+      weightUnit: exercise.weightUnit,
+      duration: exercise.duration > 0 ? formatDurationValue(exercise.duration, exercise.durationUnit) : '',
+      durationUnit: exercise.durationUnit,
+      distance: exercise.distance > 0 ? formatCardioDistanceValue(exercise.distance, exercise.distanceUnit) : '',
+      distanceUnit: exercise.distanceUnit,
+      cardioObjective: exercise.cardioObjective ?? DEFAULT_CARDIO_OBJECTIVE,
+      cardioDurationTracking: exercise.cardioDurationTracking ?? DEFAULT_CARDIO_DURATION_TRACKING,
+      cardioDistanceTracking: exercise.cardioDistanceTracking ?? DEFAULT_CARDIO_DISTANCE_TRACKING,
+      score: exercise.score,
+      scoreUnit: exercise.scoreUnit,
     }));
     const importPayload: ImportExercisesPayload = {
       nonce,
@@ -372,15 +437,13 @@ export default function ExerciseLibraryScreen() {
                       { borderColor, opacity: disabled ? 0.65 : 1 },
                     ]}
                     accessibilityRole="text"
-                    accessibilityLabel={`${item.name}, ${item.sets} set${item.sets === 1 ? '' : 's'}, ${item.reps} reps, ${item.weightKg} lb`}>
+                    accessibilityLabel={`${item.name}, ${activityTypeLabel(item.activityType)}, ${formatPlannedExerciseSummary(item)}`}>
                     <View
                       style={[styles.cardText, styles.cardTextBrowse]}
                       lightColor="transparent"
                       darkColor="transparent">
                       <Text style={styles.exerciseName}>{item.name}</Text>
-                      <Text style={styles.meta}>
-                        {item.sets} set{item.sets === 1 ? '' : 's'} x {item.reps} reps @ {item.weightKg} lb
-                      </Text>
+                      <Text style={styles.meta}>{activityTypeLabel(item.activityType)} · {formatPlannedExerciseSummary(item)}</Text>
                     </View>
                     <RNView style={styles.cardRowActions}>
                       <Pressable
@@ -424,9 +487,7 @@ export default function ExerciseLibraryScreen() {
                   accessibilityState={{ selected: isSelected }}>
                   <View style={styles.cardText} lightColor="transparent" darkColor="transparent">
                     <Text style={styles.exerciseName}>{item.name}</Text>
-                    <Text style={styles.meta}>
-                      {item.sets} set{item.sets === 1 ? '' : 's'} x {item.reps} reps @ {item.weightKg} lb
-                    </Text>
+                    <Text style={styles.meta}>{activityTypeLabel(item.activityType)} · {formatPlannedExerciseSummary(item)}</Text>
                   </View>
                 </Pressable>
               );
@@ -463,7 +524,7 @@ export default function ExerciseLibraryScreen() {
         </>
       )}
       <Modal
-        visible={editBaseline !== null}
+        visible={editDraft !== null}
         animationType="fade"
         transparent
         onRequestClose={closeEditForm}>
@@ -499,67 +560,35 @@ export default function ExerciseLibraryScreen() {
                   </Pressable>
                 </RNView>
               </RNView>
-              <TextInput
-                value={editName}
-                onChangeText={setEditName}
-                placeholder="Exercise name"
-                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                editable={!libraryMutationBusy}
-                style={exerciseNameInputStyle}
-              />
-              <RNView style={styles.draftSetRow}>
-                <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
-                  <TextInput
-                    value={editSets}
-                    onChangeText={setEditSets}
-                    placeholder="0"
-                    keyboardType="number-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    editable={!libraryMutationBusy}
-                    style={setRowInputStyle}
-                  />
-                  <Text
-                    style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
-                    lightColor="transparent"
-                    darkColor="transparent">
-                    sets
-                  </Text>
-                </View>
-                <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
-                  <TextInput
-                    value={editReps}
-                    onChangeText={setEditReps}
-                    placeholder="0"
-                    keyboardType="number-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    editable={!libraryMutationBusy}
-                    style={setRowInputStyle}
-                  />
-                  <Text
-                    style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
-                    lightColor="transparent"
-                    darkColor="transparent">
-                    reps
-                  </Text>
-                </View>
-                <View style={styles.draftUnitInputWrap} lightColor="transparent" darkColor="transparent">
-                  <TextInput
-                    value={editWeight}
-                    onChangeText={setEditWeight}
-                    placeholder="0"
-                    keyboardType="decimal-pad"
-                    placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                    editable={!libraryMutationBusy}
-                    style={setRowInputStyle}
-                  />
-                  <Text
-                    style={[styles.draftUnitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}
-                    lightColor="transparent"
-                    darkColor="transparent">
-                    lb
-                  </Text>
-                </View>
-              </RNView>
+              {editDraft ? (
+                <ExerciseDraftFieldsEditor
+                  draft={editDraft}
+                  disabled={libraryMutationBusy}
+                  activeScheme={activeScheme}
+                  borderColor={draftBorderColor}
+                  textColor={textColor}
+                  exerciseNameInputStyle={exerciseNameInputStyle}
+                  setRowInputStyle={setRowInputStyle}
+                  onActivityTypeChange={(activityType) =>
+                    setEditDraft((prev) => (prev ? applyActivityTypeChangeToDraftRow(prev, activityType) : prev))
+                  }
+                  onNameChange={(name) => setEditDraft((prev) => (prev ? { ...prev, name } : prev))}
+                  onFieldChange={updateEditDraftField}
+                  onDistanceUnitChange={(unit) => setEditDraft((prev) => (prev ? { ...prev, distanceUnit: unit } : prev))}
+                  onCardioObjectiveChange={(objective) =>
+                    setEditDraft((prev) => (prev ? applyCardioObjectiveChangeToDraftRow(prev, objective) : prev))
+                  }
+                  onCardioDurationTrackingChange={(tracking) =>
+                    setEditDraft((prev) => (prev ? applyCardioDurationTrackingChangeToDraftRow(prev, tracking) : prev))
+                  }
+                  onCardioDistanceTrackingChange={(tracking) =>
+                    setEditDraft((prev) => (prev ? applyCardioDistanceTrackingChangeToDraftRow(prev, tracking) : prev))
+                  }
+                  onDurationUnitChange={(unit) => setEditDraft((prev) => (prev ? { ...prev, durationUnit: unit } : prev))}
+                  onScoreUnitChange={(unit) => setEditDraft((prev) => (prev ? { ...prev, scoreUnit: unit } : prev))}
+                  onWeightUnitChange={(unit) => setEditDraft((prev) => (prev ? { ...prev, weightUnit: unit } : prev))}
+                />
+              ) : null}
               <Pressable
                 onPress={() => void saveEditedExercise()}
                 disabled={libraryMutationBusy}
@@ -734,24 +763,6 @@ const styles = StyleSheet.create({
   },
   draftUnitInput: {
     paddingRight: 34,
-  },
-  draftSetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  draftUnitInputWrap: {
-    flexGrow: 1,
-    minWidth: 80,
-    position: 'relative',
-  },
-  draftUnitSuffix: {
-    position: 'absolute',
-    right: 12,
-    top: 10,
-    fontSize: 16,
-    fontWeight: '600',
   },
   draftModalPrimaryButton: {
     paddingVertical: 14,
