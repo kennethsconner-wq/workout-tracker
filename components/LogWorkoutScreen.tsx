@@ -9,13 +9,13 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  TextInput,
   View as RNView,
 } from 'react-native';
 
 import { SessionDateTimeField } from '@/components/SessionDateTimeField';
 import { CardioDistanceUnitPicker } from '@/components/CardioDistanceUnitPicker';
 import { DurationUnitPicker } from '@/components/DurationUnitPicker';
+import { NumericTextInput } from '@/components/NumericTextInput';
 import { ScoreUnitPicker } from '@/components/ScoreUnitPicker';
 import { WeightUnitPicker } from '@/components/WeightUnitPicker';
 import { StickySaveFooter } from '@/components/StickySaveFooter';
@@ -43,10 +43,15 @@ import {
   getCardioLogLayout,
   isCardioDistancePerDuration,
   isCardioDurationPerDistance,
+  isCardioPaceTracking,
   normalizeCardioObjective,
   normalizeCardioDurationTracking,
   normalizeCardioDistanceTracking,
   normalizeCardioPlanFields,
+  formatPlannedCardioObjectiveOnlySummary,
+  formatPlannedCardioPaceLine,
+  plannedCardioPaceDurationUnit,
+  plannedCardioPaceDurationPerDistance,
   type LegacyCardioDistanceMode,
 } from '@/lib/cardioPlan';
 import { readStretchSetsFromExercise, stretchActualSetsFromLogged } from '@/lib/stretchSets';
@@ -55,15 +60,16 @@ import { normalizeActivityType } from '@/lib/activityTypes';
 import {
   formatCardioDistanceValue,
   normalizeCardioDistanceUnit,
-  usesIntegerDistanceInput,
   type CardioDistanceUnit,
 } from '@/lib/cardioDistanceUnits';
 import {
+  CARDIO_DURATION_UNITS,
   formatDurationValue,
+  normalizeCardioDurationUnit,
   normalizeDurationUnit,
-  usesIntegerDurationInput,
   type DurationUnit,
 } from '@/lib/durationUnits';
+import { INTEGER_DECIMAL_PLACES } from '@/lib/numericInput';
 import {
   normalizeScoreUnit,
   type ScoreUnit,
@@ -180,11 +186,8 @@ function hasCardioTotalActualValues(exercise: DraftExercise): boolean {
 }
 
 function hasCardioPerActualSetValues(exercise: DraftExercise, actualSet: DraftCardioPerActualSet): boolean {
-  if (isCardioDurationPerDistance(exercise)) {
+  if (isCardioPaceTracking(exercise)) {
     return actualSet.actualDurationInput.trim().length > 0;
-  }
-  if (isCardioDistancePerDuration(exercise)) {
-    return actualSet.actualDistanceInput.trim().length > 0;
   }
   return false;
 }
@@ -207,6 +210,41 @@ function hasSportActualValues(exercise: DraftExercise): boolean {
 
 function hasStretchActualSetValues(actualSet: DraftStretchActualSet): boolean {
   return actualSet.actualDurationInput.trim().length > 0;
+}
+
+function cardioPaceDurationUnitForLog(
+  exercise: Pick<
+    DraftExercise,
+    | 'activityType'
+    | 'duration'
+    | 'durationUnit'
+    | 'distance'
+    | 'distanceUnit'
+    | 'cardioObjective'
+    | 'cardioDurationTracking'
+    | 'cardioDistanceTracking'
+    | 'cardioDistanceMode'
+    | 'cardioPaceDuration'
+    | 'cardioPaceDurationUnit'
+    | 'cardioPaceDistance'
+    | 'cardioPaceDistanceUnit'
+  >,
+): DurationUnit {
+  return (
+    plannedCardioPaceDurationUnit({ ...exercise, activityType: 'cardio' }) ??
+    normalizeCardioDurationUnit(exercise.durationUnit)
+  );
+}
+
+function createCardioPerActualSetRow(
+  exercise: Parameters<typeof cardioPaceDurationUnitForLog>[0],
+  row: Omit<DraftCardioPerActualSet, 'id' | 'actualDurationUnit'>,
+): DraftCardioPerActualSet {
+  return {
+    id: newId(),
+    ...row,
+    actualDurationUnit: cardioPaceDurationUnitForLog(exercise),
+  };
 }
 
 function plannedStretchDurationUnitForSet(
@@ -253,10 +291,7 @@ function loggedExerciseToDraftExercise(loggedExercise: LoggedWorkoutExercise): D
           loggedExercise,
           loggedExercise.actualCardioPerSets ?? [],
           perSegmentObjectiveInput,
-        ).map((set) => ({
-          id: newId(),
-          ...set,
-        }))
+        ).map((set) => createCardioPerActualSetRow(loggedExercise, set))
       : [];
 
   return {
@@ -275,6 +310,10 @@ function loggedExerciseToDraftExercise(loggedExercise: LoggedWorkoutExercise): D
     cardioObjective: loggedExercise.cardioObjective,
     cardioDurationTracking: loggedExercise.cardioDurationTracking,
     cardioDistanceTracking: loggedExercise.cardioDistanceTracking,
+    cardioPaceDuration: loggedExercise.cardioPaceDuration,
+    cardioPaceDurationUnit: loggedExercise.cardioPaceDurationUnit,
+    cardioPaceDistance: loggedExercise.cardioPaceDistance,
+    cardioPaceDistanceUnit: loggedExercise.cardioPaceDistanceUnit,
     score: loggedExercise.score,
     scoreUnit: loggedExercise.scoreUnit,
     actualSets:
@@ -331,6 +370,10 @@ function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): 
     cardioObjective: exercise.cardioObjective,
     cardioDurationTracking: exercise.cardioDurationTracking,
     cardioDistanceTracking: exercise.cardioDistanceTracking,
+    cardioPaceDuration: exercise.cardioPaceDuration,
+    cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
+    cardioPaceDistance: exercise.cardioPaceDistance,
+    cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
     score: exercise.score,
     scoreUnit: exercise.scoreUnit,
     actualSets: [],
@@ -368,10 +411,9 @@ function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): 
   if (exercise.activityType === 'cardio' && getCardioLogLayout(exercise) === 'per_segment') {
     return {
       ...base,
-      actualCardioPerSets: buildDraftCardioPerActualSets(exercise, []).map((set) => ({
-        id: newId(),
-        ...set,
-      })),
+      actualCardioPerSets: buildDraftCardioPerActualSets(exercise, []).map((set) =>
+        createCardioPerActualSetRow(base, set),
+      ),
     };
   }
 
@@ -415,51 +457,54 @@ function ensureUniqueDraftExerciseIds(exercises: DraftExercise[]): DraftExercise
   });
 }
 
-function buildLoggedExerciseQueues(
-  loggedExercises: LoggedWorkoutExercise[],
-): Map<string, LoggedWorkoutExercise[]> {
-  const queues = new Map<string, LoggedWorkoutExercise[]>();
-  for (const exercise of loggedExercises) {
-    const queue = queues.get(exercise.workoutExerciseId) ?? [];
-    queue.push(exercise);
-    queues.set(exercise.workoutExerciseId, queue);
+/** Map a logged row back to its template slot when `workoutExerciseId` is missing or legacy-incorrect. */
+function resolveTemplateExerciseIdForLogged(
+  le: LoggedWorkoutExercise,
+  template: Workout,
+  index: number,
+  usedTemplateIds: Set<string>,
+): string {
+  const candidates = [le.workoutExerciseId, le.id].filter(
+    (id, candidateIndex, all): id is string =>
+      typeof id === 'string' &&
+      id.length > 0 &&
+      all.indexOf(id) === candidateIndex &&
+      !usedTemplateIds.has(id) &&
+      template.exercises.some((te) => te.id === id),
+  );
+  if (candidates.length > 0) {
+    return candidates[0]!;
   }
-  return queues;
+
+  const byDefinition = template.exercises.find(
+    (te) =>
+      !usedTemplateIds.has(te.id) && te.activityType === le.activityType && te.name === le.name,
+  );
+  if (byDefinition) {
+    return byDefinition.id;
+  }
+
+  const unused = template.exercises.filter((te) => !usedTemplateIds.has(te.id));
+  if (index < unused.length) {
+    return unused[index]!.id;
+  }
+
+  return le.workoutExerciseId || le.id;
 }
 
-function takeLoggedExerciseForTemplate(
-  loggedQueues: Map<string, LoggedWorkoutExercise[]>,
-  workoutExerciseId: string,
-): LoggedWorkoutExercise | undefined {
-  const queue = loggedQueues.get(workoutExerciseId);
-  if (!queue || queue.length === 0) {
-    return undefined;
-  }
-  return queue.shift();
-}
-
-/** Hydrate the log form from a saved session plus the current template (new template exercises get empty actuals). */
+/** Hydrate the edit form from what was logged in this session (not the full template). */
 function buildDraftExercisesFromLogged(logged: LoggedWorkout, template: Workout): DraftExercise[] {
-  const loggedQueues = buildLoggedExerciseQueues(logged.exercises);
-  const templateIds = new Set(template.exercises.map((e) => e.id));
-  const out: DraftExercise[] = [];
+  const usedTemplateIds = new Set<string>();
 
-  for (const te of template.exercises) {
-    const le = takeLoggedExerciseForTemplate(loggedQueues, te.id);
-    if (le) {
-      out.push(loggedExerciseToDraftExercise(le));
-    } else {
-      out.push(emptyDraftForTemplateExercise(te));
-    }
-  }
-
-  for (const le of logged.exercises) {
-    if (!templateIds.has(le.workoutExerciseId)) {
-      out.push(loggedExerciseToDraftExercise(le));
-    }
-  }
-
-  return ensureUniqueDraftExerciseIds(out);
+  return ensureUniqueDraftExerciseIds(
+    logged.exercises.map((le, index) => {
+      const templateExerciseId = resolveTemplateExerciseIdForLogged(le, template, index, usedTemplateIds);
+      usedTemplateIds.add(templateExerciseId);
+      const normalized =
+        templateExerciseId !== le.workoutExerciseId ? { ...le, workoutExerciseId: templateExerciseId } : le;
+      return loggedExerciseToDraftExercise(normalized);
+    }),
+  );
 }
 
 function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
@@ -619,6 +664,16 @@ function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
         normalizeActivityType(o.activityType) === 'cardio' && typeof o.cardioDistanceMode === 'string'
           ? (o.cardioDistanceMode as LegacyCardioDistanceMode)
           : undefined,
+      cardioPaceDuration: typeof o.cardioPaceDuration === 'number' ? o.cardioPaceDuration : undefined,
+      cardioPaceDurationUnit:
+        typeof o.cardioPaceDurationUnit === 'string'
+          ? normalizeCardioDurationUnit(o.cardioPaceDurationUnit)
+          : undefined,
+      cardioPaceDistance: typeof o.cardioPaceDistance === 'number' ? o.cardioPaceDistance : undefined,
+      cardioPaceDistanceUnit:
+        typeof o.cardioPaceDistanceUnit === 'string'
+          ? normalizeCardioDistanceUnit(o.cardioPaceDistanceUnit)
+          : undefined,
       score: typeof o.score === 'string' ? o.score : '',
       scoreUnit:
         typeof o.scoreUnit === 'string'
@@ -706,8 +761,12 @@ function normalizeDraftExercises(
         distance: exercise.distance,
         distanceUnit: exercise.distanceUnit,
         cardioObjective: exercise.cardioObjective,
-    cardioDurationTracking: exercise.cardioDurationTracking,
-    cardioDistanceTracking: exercise.cardioDistanceTracking,
+        cardioDurationTracking: exercise.cardioDurationTracking,
+        cardioDistanceTracking: exercise.cardioDistanceTracking,
+        cardioPaceDuration: exercise.cardioPaceDuration,
+        cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
+        cardioPaceDistance: exercise.cardioPaceDistance,
+        cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
         score: exercise.score,
         scoreUnit: exercise.scoreUnit,
         stretchSets: exercise.stretchSets,
@@ -751,20 +810,22 @@ function normalizeDraftExercises(
                     ? saved.actualDurationInput
                     : '';
                 const built = buildDraftCardioPerActualSets(exercise, [], objectiveInput);
+                const draftExercise = emptyDraftForTemplateExercise(exercise);
                 return built.map((builtSet, setIndex) => {
                   const savedSet = saved?.actualCardioPerSets?.[setIndex];
                   return {
+                    ...createCardioPerActualSetRow(draftExercise, {
+                      ...builtSet,
+                      actualDurationInput:
+                        typeof savedSet?.actualDurationInput === 'string'
+                          ? savedSet.actualDurationInput
+                          : builtSet.actualDurationInput,
+                      actualDistanceInput:
+                        typeof savedSet?.actualDistanceInput === 'string'
+                          ? savedSet.actualDistanceInput
+                          : builtSet.actualDistanceInput,
+                    }),
                     id: savedSet?.id && typeof savedSet.id === 'string' ? savedSet.id : newId(),
-                    actualDurationInput:
-                      typeof savedSet?.actualDurationInput === 'string'
-                        ? savedSet.actualDurationInput
-                        : builtSet.actualDurationInput,
-                    actualDurationUnit: builtSet.actualDurationUnit,
-                    actualDistanceInput:
-                      typeof savedSet?.actualDistanceInput === 'string'
-                        ? savedSet.actualDistanceInput
-                        : builtSet.actualDistanceInput,
-                    actualDistanceUnit: builtSet.actualDistanceUnit,
                   };
                 });
               })()
@@ -1126,10 +1187,9 @@ export default function LogWorkoutScreen() {
               : { ...ex, actualDurationInput: value };
           return {
             ...next,
-            actualCardioPerSets: resizeDraftCardioPerSets(next, next.actualCardioPerSets, value, (row) => ({
-              id: newId(),
-              ...row,
-            })),
+            actualCardioPerSets: resizeDraftCardioPerSets(next, next.actualCardioPerSets, value, (row) =>
+              createCardioPerActualSetRow(next, row),
+            ),
           };
         }
         return { ...ex, [field]: value };
@@ -1151,10 +1211,9 @@ export default function LogWorkoutScreen() {
               : { ...ex, actualDurationInput: '' };
           return {
             ...cleared,
-            actualCardioPerSets: resizeDraftCardioPerSets(cleared, cleared.actualCardioPerSets, '', (row) => ({
-              id: newId(),
-              ...row,
-            })),
+            actualCardioPerSets: resizeDraftCardioPerSets(cleared, cleared.actualCardioPerSets, '', (row) =>
+              createCardioPerActualSetRow(cleared, row),
+            ),
           };
         }
         const plannedValue = isCardioDurationPerDistance(ex)
@@ -1170,10 +1229,9 @@ export default function LogWorkoutScreen() {
             : { ...ex, actualDurationInput: plannedValue };
         return {
           ...filled,
-          actualCardioPerSets: resizeDraftCardioPerSets(filled, filled.actualCardioPerSets, plannedValue, (row) => ({
-            id: newId(),
-            ...row,
-          })),
+          actualCardioPerSets: resizeDraftCardioPerSets(filled, filled.actualCardioPerSets, plannedValue, (row) =>
+            createCardioPerActualSetRow(filled, row),
+          ),
         };
       }),
     );
@@ -1253,34 +1311,25 @@ export default function LogWorkoutScreen() {
             ),
           };
         }
-        if (isCardioDurationPerDistance(ex)) {
+        if (isCardioPaceTracking(ex)) {
+          const pace = plannedCardioPaceDurationPerDistance(ex);
+          const paceDurationUnit = cardioPaceDurationUnitForLog(ex);
+          const plannedDuration =
+            pace && pace.duration > 0 ? formatDurationValue(pace.duration, pace.durationUnit) : '';
           return {
             ...ex,
             actualCardioPerSets: ex.actualCardioPerSets.map((actualSet) =>
               actualSet.id === actualSetId
                 ? {
                     ...actualSet,
-                    actualDurationInput:
-                      ex.duration > 0 ? formatDurationValue(ex.duration, ex.durationUnit) : '',
-                    actualDurationUnit: ex.durationUnit,
+                    actualDurationInput: plannedDuration,
+                    actualDurationUnit: paceDurationUnit,
                   }
                 : actualSet,
             ),
           };
         }
-        return {
-          ...ex,
-          actualCardioPerSets: ex.actualCardioPerSets.map((actualSet) =>
-            actualSet.id === actualSetId
-              ? {
-                  ...actualSet,
-                  actualDistanceInput:
-                    ex.distance > 0 ? formatCardioDistanceValue(ex.distance, ex.distanceUnit) : '',
-                  actualDistanceUnit: ex.distanceUnit,
-                }
-              : actualSet,
-          ),
-        };
+        return ex;
       }),
     );
   };
@@ -1458,6 +1507,10 @@ export default function LogWorkoutScreen() {
           cardioDurationTracking: ex.cardioDurationTracking,
           cardioDistanceTracking: ex.cardioDistanceTracking,
           cardioDistanceMode: ex.cardioDistanceMode,
+          cardioPaceDuration: ex.cardioPaceDuration,
+          cardioPaceDurationUnit: ex.cardioPaceDurationUnit,
+          cardioPaceDistance: ex.cardioPaceDistance,
+          cardioPaceDistanceUnit: ex.cardioPaceDistanceUnit,
           plannedDuration: ex.duration,
           plannedDistance: ex.distance,
           actualDurationInput: ex.actualDurationInput,
@@ -1494,6 +1547,10 @@ export default function LogWorkoutScreen() {
         cardioDurationTracking: ex.cardioDurationTracking,
         cardioDistanceTracking: ex.cardioDistanceTracking,
         cardioDistanceMode: ex.cardioDistanceMode,
+        cardioPaceDuration: ex.cardioPaceDuration,
+        cardioPaceDurationUnit: ex.cardioPaceDurationUnit,
+        cardioPaceDistance: ex.cardioPaceDistance,
+        cardioPaceDistanceUnit: ex.cardioPaceDistanceUnit,
         score: ex.score,
         scoreUnit: ex.scoreUnit,
         stretchSets:
@@ -1668,7 +1725,20 @@ export default function LogWorkoutScreen() {
               </Pressable>
             </View>
             <Text style={[styles.exerciseName, { color: textColor }]}>{exercise.name}</Text>
-            <Text style={styles.plannedLine}>Planned: {formatPlannedExerciseSummary(exercise)}</Text>
+            <Text style={styles.plannedLine}>
+              Planned:{' '}
+              {exercise.activityType === 'cardio'
+                ? formatPlannedCardioObjectiveOnlySummary(exercise)
+                : formatPlannedExerciseSummary(exercise)}
+            </Text>
+            {exercise.activityType === 'cardio' ? (
+              (() => {
+                const plannedPace = formatPlannedCardioPaceLine({ ...exercise, activityType: 'cardio' });
+                return plannedPace ? (
+                  <Text style={styles.plannedLine}>Planned pace: {plannedPace}</Text>
+                ) : null;
+              })()
+            ) : null}
 
             {exercise.activityType === 'strength' ? (
               <>
@@ -1692,11 +1762,11 @@ export default function LogWorkoutScreen() {
                         </Pressable>
                         <View style={styles.setRow}>
                           <View style={styles.strengthRepsInputWrap}>
-                            <TextInput
+                            <NumericTextInput
                               value={actualSet.actualRepsInput}
                               onChangeText={(value) => updateActualSetField(exercise.id, actualSet.id, 'actualRepsInput', value)}
                               placeholder="0"
-                              keyboardType="number-pad"
+                              maxDecimalPlaces={INTEGER_DECIMAL_PLACES}
                               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                               style={[
                                 styles.input,
@@ -1708,13 +1778,12 @@ export default function LogWorkoutScreen() {
                             <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>reps</Text>
                           </View>
                           <View style={styles.strengthWeightWrap}>
-                            <TextInput
+                            <NumericTextInput
                               value={actualSet.actualWeightInput}
                               onChangeText={(value) =>
                                 updateActualSetField(exercise.id, actualSet.id, 'actualWeightInput', value)
                               }
                               placeholder="Weight"
-                              keyboardType="decimal-pad"
                               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                               style={[
                                 styles.input,
@@ -1774,13 +1843,10 @@ export default function LogWorkoutScreen() {
                     </Pressable>
                     {isCardioDurationPerDistance(exercise) ? (
                       <View style={[styles.cardioDistanceRow, styles.flexField]}>
-                        <TextInput
+                        <NumericTextInput
                           value={exercise.actualDistanceInput}
                           onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDistanceInput', value)}
                           placeholder="Distance"
-                          keyboardType={
-                            usesIntegerDistanceInput(exercise.distanceUnit) ? 'number-pad' : 'decimal-pad'
-                          }
                           placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                           style={[
                             styles.input,
@@ -1799,13 +1865,10 @@ export default function LogWorkoutScreen() {
                       </View>
                     ) : (
                       <View style={[styles.cardioDurationRow, styles.flexField]}>
-                        <TextInput
+                        <NumericTextInput
                           value={exercise.actualDurationInput}
                           onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
                           placeholder="Duration"
-                          keyboardType={
-                            usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'
-                          }
                           placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                           style={[
                             styles.input,
@@ -1836,7 +1899,7 @@ export default function LogWorkoutScreen() {
                     objectiveTotal,
                     exercise,
                   );
-                  const plannedFieldLabel = isCardioDurationPerDistance(exercise) ? 'duration' : 'distance';
+                  const plannedFieldLabel = 'duration';
                   return (
                     <View key={actualSet.id} style={styles.actualSetRow}>
                       <Text style={[styles.setLabel, { color: textColor }]}>{segmentLabel}</Text>
@@ -1854,61 +1917,30 @@ export default function LogWorkoutScreen() {
                             color={Colors[activeScheme].tint}
                           />
                         </Pressable>
-                        {isCardioDurationPerDistance(exercise) ? (
-                          <View style={styles.stretchDurationLogWrap}>
-                            <TextInput
-                              value={actualSet.actualDurationInput}
-                              onChangeText={(value) =>
-                                updateCardioPerActualSetField(exercise.id, actualSet.id, 'actualDurationInput', value)
-                              }
-                              placeholder="Duration"
-                              keyboardType={
-                                usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'
-                              }
-                              placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                              style={[
-                                styles.input,
-                                styles.setInput,
-                                styles.stretchDurationLogInput,
-                                { color: textColor, borderColor, backgroundColor: inputBackground },
-                              ]}
-                            />
-                            <DurationUnitPicker
-                              value={exercise.durationUnit}
-                              onChange={() => {}}
-                              disabled
-                              borderColor={borderColor}
-                              textColor={textColor}
-                            />
-                          </View>
-                        ) : (
-                          <View style={styles.stretchDurationLogWrap}>
-                            <TextInput
-                              value={actualSet.actualDistanceInput}
-                              onChangeText={(value) =>
-                                updateCardioPerActualSetField(exercise.id, actualSet.id, 'actualDistanceInput', value)
-                              }
-                              placeholder="Distance"
-                              keyboardType={
-                                usesIntegerDistanceInput(exercise.distanceUnit) ? 'number-pad' : 'decimal-pad'
-                              }
-                              placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                              style={[
-                                styles.input,
-                                styles.setInput,
-                                styles.stretchDurationLogInput,
-                                { color: textColor, borderColor, backgroundColor: inputBackground },
-                              ]}
-                            />
-                            <CardioDistanceUnitPicker
-                              value={exercise.distanceUnit}
-                              onChange={() => {}}
-                              disabled
-                              borderColor={borderColor}
-                              textColor={textColor}
-                            />
-                          </View>
-                        )}
+                        <View style={styles.stretchDurationLogWrap}>
+                          <NumericTextInput
+                            value={actualSet.actualDurationInput}
+                            onChangeText={(value) =>
+                              updateCardioPerActualSetField(exercise.id, actualSet.id, 'actualDurationInput', value)
+                            }
+                            placeholder="Duration"
+                            placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                            style={[
+                              styles.input,
+                              styles.setInput,
+                              styles.stretchDurationLogInput,
+                              { color: textColor, borderColor, backgroundColor: inputBackground },
+                            ]}
+                          />
+                          <DurationUnitPicker
+                            value={actualSet.actualDurationUnit}
+                            onChange={() => {}}
+                            units={CARDIO_DURATION_UNITS}
+                            disabled
+                            borderColor={borderColor}
+                            textColor={textColor}
+                          />
+                        </View>
                       </View>
                     </View>
                   );
@@ -1937,15 +1969,12 @@ export default function LogWorkoutScreen() {
                     'distance' ? (
                       <>
                         <View style={styles.cardioDistanceRow}>
-                          <TextInput
+                          <NumericTextInput
                             value={exercise.actualDistanceInput}
                             onChangeText={(value) =>
                               updateExerciseActualField(exercise.id, 'actualDistanceInput', value)
                             }
                             placeholder="Distance"
-                            keyboardType={
-                              usesIntegerDistanceInput(exercise.distanceUnit) ? 'number-pad' : 'decimal-pad'
-                            }
                             placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                             style={[
                               styles.input,
@@ -1963,15 +1992,12 @@ export default function LogWorkoutScreen() {
                           />
                         </View>
                         <View style={styles.cardioDurationRow}>
-                          <TextInput
+                          <NumericTextInput
                             value={exercise.actualDurationInput}
                             onChangeText={(value) =>
                               updateExerciseActualField(exercise.id, 'actualDurationInput', value)
                             }
                             placeholder="Duration"
-                            keyboardType={
-                              usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'
-                            }
                             placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                             style={[
                               styles.input,
@@ -1992,15 +2018,12 @@ export default function LogWorkoutScreen() {
                     ) : (
                       <>
                         <View style={styles.cardioDurationRow}>
-                          <TextInput
+                          <NumericTextInput
                             value={exercise.actualDurationInput}
                             onChangeText={(value) =>
                               updateExerciseActualField(exercise.id, 'actualDurationInput', value)
                             }
                             placeholder="Duration"
-                            keyboardType={
-                              usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'
-                            }
                             placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                             style={[
                               styles.input,
@@ -2018,15 +2041,12 @@ export default function LogWorkoutScreen() {
                           />
                         </View>
                         <View style={styles.cardioDistanceRow}>
-                          <TextInput
+                          <NumericTextInput
                             value={exercise.actualDistanceInput}
                             onChangeText={(value) =>
                               updateExerciseActualField(exercise.id, 'actualDistanceInput', value)
                             }
                             placeholder="Distance"
-                            keyboardType={
-                              usesIntegerDistanceInput(exercise.distanceUnit) ? 'number-pad' : 'decimal-pad'
-                            }
                             placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                             style={[
                               styles.input,
@@ -2069,13 +2089,10 @@ export default function LogWorkoutScreen() {
                   {normalizeCardioPlanFields({ ...exercise, activityType: 'cardio' }).cardioObjective ===
                   'distance' ? (
                     <View style={[styles.cardioDistanceRow, styles.flexField]}>
-                      <TextInput
+                      <NumericTextInput
                         value={exercise.actualDistanceInput}
                         onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDistanceInput', value)}
                         placeholder="Distance"
-                        keyboardType={
-                          usesIntegerDistanceInput(exercise.distanceUnit) ? 'number-pad' : 'decimal-pad'
-                        }
                         placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                         style={[
                           styles.input,
@@ -2094,11 +2111,10 @@ export default function LogWorkoutScreen() {
                     </View>
                   ) : (
                     <View style={[styles.cardioDurationRow, styles.flexField]}>
-                      <TextInput
+                      <NumericTextInput
                         value={exercise.actualDurationInput}
                         onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
                         placeholder="Duration"
-                        keyboardType={usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'}
                         placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                         style={[
                           styles.input,
@@ -2137,11 +2153,10 @@ export default function LogWorkoutScreen() {
                 </Pressable>
                 <View style={[styles.cardioFieldsColumn, styles.flexField]}>
                   <View style={styles.cardioDurationRow}>
-                    <TextInput
+                    <NumericTextInput
                       value={exercise.actualDurationInput}
                       onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
                       placeholder="Duration"
-                      keyboardType={usesIntegerDurationInput(exercise.durationUnit) ? 'number-pad' : 'decimal-pad'}
                       placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                       style={[
                         styles.input,
@@ -2159,7 +2174,7 @@ export default function LogWorkoutScreen() {
                     />
                   </View>
                   <View style={styles.sportScoreRow}>
-                    <TextInput
+                    <NumericTextInput
                       value={exercise.actualScoreInput}
                       onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualScoreInput', value)}
                       placeholder="Score"
@@ -2204,15 +2219,10 @@ export default function LogWorkoutScreen() {
                           />
                         </Pressable>
                         <View style={styles.stretchDurationLogWrap}>
-                          <TextInput
+                          <NumericTextInput
                             value={actualSet.actualDurationInput}
                             onChangeText={(value) => updateStretchActualSetField(exercise.id, actualSet.id, value)}
                             placeholder="Duration"
-                            keyboardType={
-                              usesIntegerDurationInput(plannedStretchDurationUnitForSet(exercise, setIndex))
-                                ? 'number-pad'
-                                : 'decimal-pad'
-                            }
                             placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                             style={[
                               styles.input,

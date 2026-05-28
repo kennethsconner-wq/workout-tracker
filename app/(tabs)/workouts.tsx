@@ -157,7 +157,7 @@ export default function LogWorkoutScreen() {
 
   const updateExerciseField = (
     exerciseId: string,
-    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'score',
+    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'paceDuration' | 'paceDistance' | 'score',
     value: string,
   ) => {
     setExercises((prev) =>
@@ -196,6 +196,18 @@ export default function LogWorkoutScreen() {
   const updateExerciseDurationUnit = (exerciseId: string, unit: DurationUnit) => {
     setExercises((prev) =>
       prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, durationUnit: unit } : ex)),
+    );
+  };
+
+  const updateExercisePaceDurationUnit = (exerciseId: string, unit: DurationUnit) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, paceDurationUnit: unit } : ex)),
+    );
+  };
+
+  const updateExercisePaceDistanceUnit = (exerciseId: string, unit: CardioDistanceUnit) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, paceDistanceUnit: unit } : ex)),
     );
   };
 
@@ -399,6 +411,8 @@ export default function LogWorkoutScreen() {
         onUpdateExerciseCardioDurationTracking={updateExerciseCardioDurationTracking}
         onUpdateExerciseCardioDistanceTracking={updateExerciseCardioDistanceTracking}
         onUpdateExerciseDurationUnit={updateExerciseDurationUnit}
+        onUpdateExercisePaceDurationUnit={updateExercisePaceDurationUnit}
+        onUpdateExercisePaceDistanceUnit={updateExercisePaceDistanceUnit}
         onUpdateExerciseScoreUnit={updateExerciseScoreUnit}
         onUpdateExerciseWeightUnit={updateExerciseWeightUnit}
         onRemoveExercise={removeExercise}

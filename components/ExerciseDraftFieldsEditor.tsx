@@ -9,18 +9,20 @@ import {
 import { ActivityTypePicker } from '@/components/ActivityTypePicker';
 import { CardioPlanEditor } from '@/components/CardioPlanEditor';
 import { DurationUnitPicker } from '@/components/DurationUnitPicker';
+import { NumericTextInput } from '@/components/NumericTextInput';
 import { ScoreUnitPicker } from '@/components/ScoreUnitPicker';
 import { WeightUnitPicker } from '@/components/WeightUnitPicker';
 import { Text, View } from '@/components/Themed';
 import type { ActivityType } from '@/lib/activityTypes';
 import type { CardioDistanceUnit } from '@/lib/cardioDistanceUnits';
 import type { CardioDistanceTracking, CardioDurationTracking, CardioObjective } from '@/lib/cardioPlan';
-import { SPORT_DURATION_UNITS, STRETCH_DURATION_UNITS, usesIntegerDurationInput, type DurationUnit } from '@/lib/durationUnits';
+import { SPORT_DURATION_UNITS, STRETCH_DURATION_UNITS, type DurationUnit } from '@/lib/durationUnits';
+import { INTEGER_DECIMAL_PLACES } from '@/lib/numericInput';
 import type { ScoreUnit } from '@/lib/scoreUnits';
 import type { WeightUnit } from '@/lib/weightUnits';
 import type { ExerciseDraftRow } from '@/lib/exerciseDraft';
 
-type NumericDraftField = 'sets' | 'reps' | 'weight' | 'duration' | 'distance';
+type NumericDraftField = 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'paceDuration' | 'paceDistance';
 type TextDraftField = 'score';
 export type ExerciseDraftField = NumericDraftField | TextDraftField;
 
@@ -41,6 +43,8 @@ type Props = {
   onCardioDurationTrackingChange: (tracking: CardioDurationTracking) => void;
   onCardioDistanceTrackingChange: (tracking: CardioDistanceTracking) => void;
   onDurationUnitChange: (unit: DurationUnit) => void;
+  onPaceDurationUnitChange: (unit: DurationUnit) => void;
+  onPaceDistanceUnitChange: (unit: CardioDistanceUnit) => void;
   onScoreUnitChange: (unit: ScoreUnit) => void;
   onWeightUnitChange: (unit: WeightUnit) => void;
 };
@@ -50,7 +54,7 @@ function UnitField({
   onChangeText,
   placeholder,
   suffix,
-  keyboardType,
+  maxDecimalPlaces,
   editable,
   setRowInputStyle,
   suffixColor,
@@ -60,7 +64,7 @@ function UnitField({
   onChangeText: (value: string) => void;
   placeholder: string;
   suffix: string;
-  keyboardType: 'number-pad' | 'decimal-pad' | 'default';
+  maxDecimalPlaces: number;
   editable: boolean;
   setRowInputStyle: StyleProp<TextStyle>;
   suffixColor: string;
@@ -68,11 +72,11 @@ function UnitField({
 }) {
   return (
     <View style={[styles.unitInputWrap, wrapStyle]}>
-      <TextInput
+      <NumericTextInput
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        keyboardType={keyboardType}
+        maxDecimalPlaces={maxDecimalPlaces}
         placeholderTextColor="#a3a3a3"
         editable={editable}
         style={setRowInputStyle}
@@ -99,6 +103,8 @@ export function ExerciseDraftFieldsEditor({
   onCardioDurationTrackingChange,
   onCardioDistanceTrackingChange,
   onDurationUnitChange,
+  onPaceDurationUnitChange,
+  onPaceDistanceUnitChange,
   onScoreUnitChange,
   onWeightUnitChange,
 }: Props) {
@@ -126,7 +132,7 @@ export function ExerciseDraftFieldsEditor({
               onChangeText={(value) => onFieldChange('sets', value)}
               placeholder="0"
               suffix="sets"
-              keyboardType="number-pad"
+              maxDecimalPlaces={INTEGER_DECIMAL_PLACES}
               editable={!disabled}
               setRowInputStyle={fieldStyle}
               suffixColor={suffixColor}
@@ -136,18 +142,17 @@ export function ExerciseDraftFieldsEditor({
               onChangeText={(value) => onFieldChange('reps', value)}
               placeholder="0"
               suffix="reps"
-              keyboardType="number-pad"
+              maxDecimalPlaces={INTEGER_DECIMAL_PLACES}
               editable={!disabled}
               setRowInputStyle={fieldStyle}
               suffixColor={suffixColor}
             />
           </View>
           <View style={styles.strengthWeightWrap}>
-            <TextInput
+            <NumericTextInput
               value={draft.weight}
               onChangeText={(value) => onFieldChange('weight', value)}
               placeholder="Weight"
-              keyboardType="decimal-pad"
               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
               editable={!disabled}
               style={[fieldStyle, styles.strengthWeightInput]}
@@ -172,6 +177,10 @@ export function ExerciseDraftFieldsEditor({
           durationUnit={draft.durationUnit}
           distance={draft.distance}
           distanceUnit={draft.distanceUnit}
+          paceDuration={draft.paceDuration}
+          paceDurationUnit={draft.paceDurationUnit}
+          paceDistance={draft.paceDistance}
+          paceDistanceUnit={draft.paceDistanceUnit}
           disabled={disabled}
           activeScheme={activeScheme}
           borderColor={borderColor}
@@ -185,17 +194,20 @@ export function ExerciseDraftFieldsEditor({
           onDurationUnitChange={onDurationUnitChange}
           onDistanceChange={(value) => onFieldChange('distance', value)}
           onDistanceUnitChange={onDistanceUnitChange}
+          onPaceDurationChange={(value) => onFieldChange('paceDuration', value)}
+          onPaceDurationUnitChange={onPaceDurationUnitChange}
+          onPaceDistanceChange={(value) => onFieldChange('paceDistance', value)}
+          onPaceDistanceUnitChange={onPaceDistanceUnitChange}
         />
       ) : null}
 
       {draft.activityType === 'sport' ? (
         <View style={styles.cardioFieldsColumn}>
           <View style={styles.cardioDurationWrap}>
-            <TextInput
+            <NumericTextInput
               value={draft.duration}
               onChangeText={(value) => onFieldChange('duration', value)}
               placeholder="Duration (Optional)"
-              keyboardType={usesIntegerDurationInput(draft.durationUnit) ? 'number-pad' : 'decimal-pad'}
               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
               editable={!disabled}
               style={[fieldStyle, styles.cardioDurationInput]}
@@ -210,7 +222,7 @@ export function ExerciseDraftFieldsEditor({
             />
           </View>
           <View style={styles.sportScoreRow}>
-            <TextInput
+            <NumericTextInput
               value={draft.score}
               onChangeText={(value) => onFieldChange('score', value)}
               placeholder="Score (Optional)"
@@ -236,18 +248,17 @@ export function ExerciseDraftFieldsEditor({
             onChangeText={(value) => onFieldChange('sets', value)}
             placeholder="0"
             suffix="sets"
-            keyboardType="number-pad"
+            maxDecimalPlaces={INTEGER_DECIMAL_PLACES}
             editable={!disabled}
             setRowInputStyle={fieldStyle}
             suffixColor={suffixColor}
             wrapStyle={styles.stretchSetsWrap}
           />
           <View style={styles.stretchDurationWrap}>
-            <TextInput
+            <NumericTextInput
               value={draft.duration}
               onChangeText={(value) => onFieldChange('duration', value)}
               placeholder="Duration"
-              keyboardType={usesIntegerDurationInput(draft.durationUnit) ? 'number-pad' : 'decimal-pad'}
               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
               editable={!disabled}
               style={[fieldStyle, styles.stretchDurationInput]}

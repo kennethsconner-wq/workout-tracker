@@ -104,6 +104,52 @@ export function formatCardioPerDistanceUnit(unit: CardioDistanceUnit): string {
   return CARDIO_DISTANCE_UNIT_PER_LABELS[normalizeCardioDistanceUnit(unit)];
 }
 
+const CARDIO_DISTANCE_TO_METERS: Partial<Record<CardioDistanceUnit, number>> = {
+  miles: 1609.344,
+  kilometers: 1000,
+  meters: 1,
+  yards: 0.9144,
+  feet: 0.3048,
+};
+
+export function cardioDistanceUsesConvertibleUnits(unit: CardioDistanceUnit): boolean {
+  return CARDIO_DISTANCE_TO_METERS[normalizeCardioDistanceUnit(unit)] !== undefined;
+}
+
+export function convertCardioDistance(
+  value: number,
+  fromUnit: CardioDistanceUnit,
+  toUnit: CardioDistanceUnit,
+): number | null {
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  const from = normalizeCardioDistanceUnit(fromUnit);
+  const to = normalizeCardioDistanceUnit(toUnit);
+  if (from === to) {
+    return value;
+  }
+  const fromFactor = CARDIO_DISTANCE_TO_METERS[from];
+  const toFactor = CARDIO_DISTANCE_TO_METERS[to];
+  if (fromFactor === undefined || toFactor === undefined) {
+    return null;
+  }
+  return (value * fromFactor) / toFactor;
+}
+
+/** True when pace distance chunks can be mapped to the objective distance (same unit or both standard length units). */
+export function cardioPaceDistanceUnitCompatibleWithObjective(
+  objectiveUnit: CardioDistanceUnit,
+  paceUnit: CardioDistanceUnit,
+): boolean {
+  const objective = normalizeCardioDistanceUnit(objectiveUnit);
+  const pace = normalizeCardioDistanceUnit(paceUnit);
+  if (objective === pace) {
+    return true;
+  }
+  return convertCardioDistance(1, objective, pace) !== null;
+}
+
 /** Legacy cardio stored `sets` on duration; move value to distance when loading. */
 export function migrateLegacyCardioSetsDurationToDistance<
   T extends {

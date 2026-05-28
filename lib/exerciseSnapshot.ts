@@ -1,5 +1,6 @@
 import type { ActivityType } from '@/lib/activityTypes';
 import { normalizeActivityType } from '@/lib/activityTypes';
+import { migrateLegacyCardioPaceFields } from '@/lib/cardioPlan';
 import { hasLoggedExerciseActual } from '@/lib/exerciseDisplay';
 import type { LoggedWorkout, LoggedWorkoutExercise, Workout, WorkoutExercise } from '@/lib/types';
 
@@ -18,14 +19,65 @@ export type ExerciseDefinitionFields = Pick<
   | 'cardioObjective'
   | 'cardioDurationTracking'
   | 'cardioDistanceTracking'
+  | 'cardioPaceDuration'
+  | 'cardioPaceDurationUnit'
+  | 'cardioPaceDistance'
+  | 'cardioPaceDistanceUnit'
   | 'cardioDistanceMode'
   | 'score'
   | 'scoreUnit'
 >;
 
+type ExerciseDefinitionSignatureInput = ExerciseDefinitionFields;
+
+/** Canonical plan fields for stable grouping (legacy pace-in-duration logs match migrated templates). */
+export function normalizeExerciseDefinitionForSignature(
+  exercise: ExerciseDefinitionSignatureInput,
+): ExerciseDefinitionFields {
+  const activityType = normalizeActivityType(exercise.activityType);
+  const migrated = migrateLegacyCardioPaceFields({
+    activityType,
+    duration: exercise.duration ?? 0,
+    durationUnit: exercise.durationUnit,
+    distance: exercise.distance ?? 0,
+    distanceUnit: exercise.distanceUnit,
+    cardioObjective: exercise.cardioObjective,
+    cardioDurationTracking: exercise.cardioDurationTracking,
+    cardioDistanceTracking: exercise.cardioDistanceTracking,
+    cardioDistanceMode: exercise.cardioDistanceMode,
+    cardioPaceDuration: exercise.cardioPaceDuration ?? 0,
+    cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
+    cardioPaceDistance: exercise.cardioPaceDistance ?? 0,
+    cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
+  });
+
+  return {
+    activityType,
+    name: exercise.name,
+    sets: exercise.sets ?? 0,
+    reps: exercise.reps ?? 0,
+    weight: exercise.weight ?? 0,
+    weightUnit: exercise.weightUnit,
+    duration: migrated.duration ?? 0,
+    durationUnit: migrated.durationUnit,
+    distance: migrated.distance ?? 0,
+    distanceUnit: migrated.distanceUnit,
+    cardioObjective: migrated.cardioObjective,
+    cardioDurationTracking: migrated.cardioDurationTracking,
+    cardioDistanceTracking: migrated.cardioDistanceTracking,
+    cardioPaceDuration: migrated.cardioPaceDuration ?? 0,
+    cardioPaceDurationUnit: migrated.cardioPaceDurationUnit,
+    cardioPaceDistance: migrated.cardioPaceDistance ?? 0,
+    cardioPaceDistanceUnit: migrated.cardioPaceDistanceUnit,
+    score: exercise.score ?? '',
+    scoreUnit: exercise.scoreUnit,
+  };
+}
+
 /** Same grouping key as the Exercise Library list (one entry per unique exercise definition). */
-export function exerciseDefinitionSignatureKey(exercise: ExerciseDefinitionFields): string {
-  return `${exercise.activityType}|${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weight}|${exercise.weightUnit}|${exercise.duration}|${exercise.durationUnit}|${exercise.distance}|${exercise.distanceUnit}|${exercise.cardioObjective}|${exercise.cardioDurationTracking}|${exercise.cardioDistanceTracking}|${exercise.score}|${exercise.scoreUnit}`;
+export function exerciseDefinitionSignatureKey(exercise: ExerciseDefinitionSignatureInput): string {
+  const normalized = normalizeExerciseDefinitionForSignature(exercise);
+  return `${normalized.activityType}|${normalized.name}|${normalized.sets}|${normalized.reps}|${normalized.weight}|${normalized.weightUnit}|${normalized.duration}|${normalized.durationUnit}|${normalized.distance}|${normalized.distanceUnit}|${normalized.cardioObjective}|${normalized.cardioDurationTracking}|${normalized.cardioDistanceTracking}|${normalized.cardioPaceDuration}|${normalized.cardioPaceDurationUnit ?? ''}|${normalized.cardioPaceDistance}|${normalized.cardioPaceDistanceUnit ?? ''}|${normalized.score}|${normalized.scoreUnit}`;
 }
 
 export type StoredExerciseOption = {
@@ -54,20 +106,34 @@ type ExerciseOptionGroup = {
   workoutExerciseIds: Set<string>;
 };
 
+function findGroupKeyByWorkoutExerciseId(
+  groups: Map<string, ExerciseOptionGroup>,
+  workoutExerciseId: string,
+): string | null {
+  for (const [key, group] of groups) {
+    if (group.workoutExerciseIds.has(workoutExerciseId)) {
+      return key;
+    }
+  }
+  return null;
+}
+
 function addExerciseToOptionGroups(
   groups: Map<string, ExerciseOptionGroup>,
-  exercise: ExerciseDefinitionFields,
+  exercise: ExerciseDefinitionSignatureInput,
   workoutExerciseId: string,
 ): void {
-  const key = exerciseDefinitionSignatureKey(exercise);
+  const normalized = normalizeExerciseDefinitionForSignature(exercise);
+  const keyBySlot = findGroupKeyByWorkoutExerciseId(groups, workoutExerciseId);
+  const key = keyBySlot ?? exerciseDefinitionSignatureKey(exercise);
   const existing = groups.get(key);
   if (existing) {
     existing.workoutExerciseIds.add(workoutExerciseId);
     return;
   }
   groups.set(key, {
-    name: exercise.name,
-    activityType: normalizeActivityType(exercise.activityType),
+    name: normalized.name,
+    activityType: normalized.activityType,
     workoutExerciseIds: new Set([workoutExerciseId]),
   });
 }
@@ -194,8 +260,6 @@ export type LoggedWeightSnapshot = {
   createdAt: string;
   /** Mean actual weight across logged sets for this exercise in this session. */
   avgActualWeightKg: number;
-  /** Planned weight for this exercise in that session. */
-  plannedWeightKg: number;
 };
 
 /**
@@ -220,14 +284,9 @@ export function getLoggedExerciseWeightSnapshots(
     if (!Number.isFinite(avgActual) || avgActual < 0) {
       return;
     }
-    const planned = ex.weight;
-    if (!Number.isFinite(planned) || planned < 0) {
-      return;
-    }
     out.push({
       createdAt,
       avgActualWeightKg: avgActual,
-      plannedWeightKg: planned,
     });
   });
   out.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());

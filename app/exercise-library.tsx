@@ -20,26 +20,19 @@ import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
 import { activityTypeLabel, formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
 import {
-  formatCardioDistanceValue,
-} from '@/lib/cardioDistanceUnits';
-import { formatDurationValue } from '@/lib/durationUnits';
-import {
   applyActivityTypeChangeToDraftRow,
   applyCardioDistanceTrackingChangeToDraftRow,
   applyCardioDurationTrackingChangeToDraftRow,
   applyCardioObjectiveChangeToDraftRow,
   parseWorkoutExerciseFromDraft,
   workoutExerciseToDraftRow,
+  exerciseDraftSeedFromRow,
   type ExerciseDraftRow,
   type ExerciseDraftSeed,
 } from '@/lib/exerciseDraft';
-import {
-  DEFAULT_CARDIO_DISTANCE_TRACKING,
-  DEFAULT_CARDIO_DURATION_TRACKING,
-  DEFAULT_CARDIO_OBJECTIVE,
-} from '@/lib/cardioPlan';
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { validateExerciseNamesAfterLibraryEdit } from '@/lib/exerciseNameValidation';
+import { exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
 import {
   loadWorkouts,
   matchesExerciseDefinition,
@@ -52,7 +45,7 @@ import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types'
 type RouteSource = 'create' | 'edit';
 type ExerciseListItem = Pick<
   WorkoutExercise,
-  'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+  'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
 > & { key: string };
 type CreateDraftPayload = { title: string; daysOfWeek: DayOfWeek[]; iconId: WorkoutIconId };
 type ImportExercisesPayload = {
@@ -126,7 +119,7 @@ export default function ExerciseLibraryScreen() {
     const unique = new Map<string, ExerciseListItem>();
     for (const workout of workouts) {
       for (const exercise of workout.exercises) {
-        const key = `${exercise.activityType}|${exercise.name}|${exercise.sets}|${exercise.reps}|${exercise.weight}|${exercise.weightUnit}|${exercise.duration}|${exercise.durationUnit}|${exercise.distance}|${exercise.distanceUnit}|${exercise.cardioObjective}|${exercise.cardioDurationTracking}|${exercise.cardioDistanceTracking}|${exercise.score}|${exercise.scoreUnit}`;
+        const key = exerciseDefinitionSignatureKey(exercise);
         if (!unique.has(key)) {
           unique.set(key, {
             key,
@@ -144,6 +137,10 @@ export default function ExerciseLibraryScreen() {
             cardioObjective: exercise.cardioObjective,
             cardioDurationTracking: exercise.cardioDurationTracking,
             cardioDistanceTracking: exercise.cardioDistanceTracking,
+            cardioPaceDuration: exercise.cardioPaceDuration,
+            cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
+            cardioPaceDistance: exercise.cardioPaceDistance,
+            cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
             cardioDistanceMode: exercise.cardioDistanceMode,
             score: exercise.score,
             scoreUnit: exercise.scoreUnit,
@@ -316,6 +313,10 @@ export default function ExerciseLibraryScreen() {
           cardioObjective: editBaseline.cardioObjective,
           cardioDurationTracking: editBaseline.cardioDurationTracking,
           cardioDistanceTracking: editBaseline.cardioDistanceTracking,
+          cardioPaceDuration: editBaseline.cardioPaceDuration,
+          cardioPaceDurationUnit: editBaseline.cardioPaceDurationUnit,
+          cardioPaceDistance: editBaseline.cardioPaceDistance,
+          cardioPaceDistanceUnit: editBaseline.cardioPaceDistanceUnit,
           cardioDistanceMode: editBaseline.cardioDistanceMode,
           score: editBaseline.score,
           scoreUnit: editBaseline.scoreUnit,
@@ -342,24 +343,9 @@ export default function ExerciseLibraryScreen() {
       return;
     }
     const nonce = String(Date.now());
-    const newSeeds: ExerciseDraftSeed[] = selected.map((exercise) => ({
-      sourceExerciseId: exercise.id,
-      activityType: exercise.activityType,
-      name: exercise.name,
-      sets: String(exercise.sets),
-      reps: String(exercise.reps),
-      weight: String(exercise.weight),
-      weightUnit: exercise.weightUnit,
-      duration: exercise.duration > 0 ? formatDurationValue(exercise.duration, exercise.durationUnit) : '',
-      durationUnit: exercise.durationUnit,
-      distance: exercise.distance > 0 ? formatCardioDistanceValue(exercise.distance, exercise.distanceUnit) : '',
-      distanceUnit: exercise.distanceUnit,
-      cardioObjective: exercise.cardioObjective ?? DEFAULT_CARDIO_OBJECTIVE,
-      cardioDurationTracking: exercise.cardioDurationTracking ?? DEFAULT_CARDIO_DURATION_TRACKING,
-      cardioDistanceTracking: exercise.cardioDistanceTracking ?? DEFAULT_CARDIO_DISTANCE_TRACKING,
-      score: exercise.score,
-      scoreUnit: exercise.scoreUnit,
-    }));
+    const newSeeds: ExerciseDraftSeed[] = selected.map((exercise) =>
+      exerciseDraftSeedFromRow(workoutExerciseToDraftRow(exercise, { clientId: exercise.id })),
+    );
     const importPayload: ImportExercisesPayload = {
       nonce,
       exercises: [...existingSeeds, ...newSeeds],
@@ -585,6 +571,12 @@ export default function ExerciseLibraryScreen() {
                     setEditDraft((prev) => (prev ? applyCardioDistanceTrackingChangeToDraftRow(prev, tracking) : prev))
                   }
                   onDurationUnitChange={(unit) => setEditDraft((prev) => (prev ? { ...prev, durationUnit: unit } : prev))}
+                  onPaceDurationUnitChange={(unit) =>
+                    setEditDraft((prev) => (prev ? { ...prev, paceDurationUnit: unit } : prev))
+                  }
+                  onPaceDistanceUnitChange={(unit) =>
+                    setEditDraft((prev) => (prev ? { ...prev, paceDistanceUnit: unit } : prev))
+                  }
                   onScoreUnitChange={(unit) => setEditDraft((prev) => (prev ? { ...prev, scoreUnit: unit } : prev))}
                   onWeightUnitChange={(unit) => setEditDraft((prev) => (prev ? { ...prev, weightUnit: unit } : prev))}
                 />
