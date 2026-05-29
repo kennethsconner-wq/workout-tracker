@@ -12,6 +12,8 @@ import {
   View as RNView,
 } from 'react-native';
 
+import { CardioDurationLogField } from '@/components/CardioDurationLogField';
+import { DurationTimerProvider } from '@/components/DurationTimerProvider';
 import { SessionDateTimeField } from '@/components/SessionDateTimeField';
 import { CardioDistanceUnitPicker } from '@/components/CardioDistanceUnitPicker';
 import { DurationUnitPicker } from '@/components/DurationUnitPicker';
@@ -63,7 +65,6 @@ import {
   type CardioDistanceUnit,
 } from '@/lib/cardioDistanceUnits';
 import {
-  CARDIO_DURATION_UNITS,
   formatDurationValue,
   normalizeCardioDurationUnit,
   normalizeDurationUnit,
@@ -151,6 +152,13 @@ function hasActualSetValues(actualSet: DraftActualSet): boolean {
 
 function draftStorageKey(workoutId: string): string {
   return `workout-log-draft@v1:${workoutId}`;
+}
+
+function cardioLogDurationTimerId(exerciseId: string, segmentId?: string): string {
+  if (segmentId) {
+    return `cardio:${exerciseId}:segment:${segmentId}`;
+  }
+  return `cardio:${exerciseId}:duration`;
 }
 
 /** Legacy key — cleared when opening a saved log for edit (edit sessions no longer use drafts). */
@@ -1673,6 +1681,7 @@ export default function LogWorkoutScreen() {
           ...stackHeaderHideIosBackLabel,
         }}
       />
+      <DurationTimerProvider>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.select({ ios: 'padding', android: undefined })}
@@ -1864,27 +1873,19 @@ export default function LogWorkoutScreen() {
                         />
                       </View>
                     ) : (
-                      <View style={[styles.cardioDurationRow, styles.flexField]}>
-                        <NumericTextInput
-                          value={exercise.actualDurationInput}
-                          onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
-                          placeholder="Duration"
-                          placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                          style={[
-                            styles.input,
-                            styles.setInput,
-                            styles.cardioDurationInput,
-                            { color: textColor, borderColor, backgroundColor: inputBackground },
-                          ]}
-                        />
-                        <DurationUnitPicker
-                          value={exercise.durationUnit}
-                          onChange={() => {}}
-                          disabled
-                          borderColor={borderColor}
-                          textColor={textColor}
-                        />
-                      </View>
+                      <CardioDurationLogField
+                        timerId={cardioLogDurationTimerId(exercise.id)}
+                        value={exercise.actualDurationInput}
+                        onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
+                        durationUnit={exercise.durationUnit}
+                        rowStyle={[styles.cardioDurationRow, styles.flexField]}
+                        inputStyle={[styles.input, styles.setInput, styles.cardioDurationInput]}
+                        activeScheme={activeScheme}
+                        borderColor={borderColor}
+                        textColor={textColor}
+                        inputBackground={inputBackground}
+                        timerAccessibilityLabel="Start timer for total duration"
+                      />
                     )}
                   </View>
                 </View>
@@ -1917,30 +1918,20 @@ export default function LogWorkoutScreen() {
                             color={Colors[activeScheme].tint}
                           />
                         </Pressable>
-                        <View style={styles.stretchDurationLogWrap}>
-                          <NumericTextInput
-                            value={actualSet.actualDurationInput}
-                            onChangeText={(value) =>
-                              updateCardioPerActualSetField(exercise.id, actualSet.id, 'actualDurationInput', value)
-                            }
-                            placeholder="Duration"
-                            placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                            style={[
-                              styles.input,
-                              styles.setInput,
-                              styles.stretchDurationLogInput,
-                              { color: textColor, borderColor, backgroundColor: inputBackground },
-                            ]}
-                          />
-                          <DurationUnitPicker
-                            value={actualSet.actualDurationUnit}
-                            onChange={() => {}}
-                            units={CARDIO_DURATION_UNITS}
-                            disabled
-                            borderColor={borderColor}
-                            textColor={textColor}
-                          />
-                        </View>
+                        <CardioDurationLogField
+                          timerId={cardioLogDurationTimerId(exercise.id, actualSet.id)}
+                          value={actualSet.actualDurationInput}
+                          onChangeText={(value) =>
+                            updateCardioPerActualSetField(exercise.id, actualSet.id, 'actualDurationInput', value)
+                          }
+                          durationUnit={actualSet.actualDurationUnit}
+                          inputStyle={[styles.input, styles.setInput, styles.stretchDurationLogInput]}
+                          activeScheme={activeScheme}
+                          borderColor={borderColor}
+                          textColor={textColor}
+                          inputBackground={inputBackground}
+                          timerAccessibilityLabel={`Start timer for ${segmentLabel}`}
+                        />
                       </View>
                     </View>
                   );
@@ -1991,55 +1982,39 @@ export default function LogWorkoutScreen() {
                             textColor={textColor}
                           />
                         </View>
-                        <View style={styles.cardioDurationRow}>
-                          <NumericTextInput
-                            value={exercise.actualDurationInput}
-                            onChangeText={(value) =>
-                              updateExerciseActualField(exercise.id, 'actualDurationInput', value)
-                            }
-                            placeholder="Duration"
-                            placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                            style={[
-                              styles.input,
-                              styles.setInput,
-                              styles.cardioDurationInput,
-                              { color: textColor, borderColor, backgroundColor: inputBackground },
-                            ]}
-                          />
-                          <DurationUnitPicker
-                            value={exercise.durationUnit}
-                            onChange={() => {}}
-                            disabled
-                            borderColor={borderColor}
-                            textColor={textColor}
-                          />
-                        </View>
+                        <CardioDurationLogField
+                          timerId={cardioLogDurationTimerId(exercise.id)}
+                          value={exercise.actualDurationInput}
+                          onChangeText={(value) =>
+                            updateExerciseActualField(exercise.id, 'actualDurationInput', value)
+                          }
+                          durationUnit={exercise.durationUnit}
+                          rowStyle={styles.cardioDurationRow}
+                          inputStyle={[styles.input, styles.setInput, styles.cardioDurationInput]}
+                          activeScheme={activeScheme}
+                          borderColor={borderColor}
+                          textColor={textColor}
+                          inputBackground={inputBackground}
+                          timerAccessibilityLabel="Start timer for duration"
+                        />
                       </>
                     ) : (
                       <>
-                        <View style={styles.cardioDurationRow}>
-                          <NumericTextInput
-                            value={exercise.actualDurationInput}
-                            onChangeText={(value) =>
-                              updateExerciseActualField(exercise.id, 'actualDurationInput', value)
-                            }
-                            placeholder="Duration"
-                            placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                            style={[
-                              styles.input,
-                              styles.setInput,
-                              styles.cardioDurationInput,
-                              { color: textColor, borderColor, backgroundColor: inputBackground },
-                            ]}
-                          />
-                          <DurationUnitPicker
-                            value={exercise.durationUnit}
-                            onChange={() => {}}
-                            disabled
-                            borderColor={borderColor}
-                            textColor={textColor}
-                          />
-                        </View>
+                        <CardioDurationLogField
+                          timerId={cardioLogDurationTimerId(exercise.id)}
+                          value={exercise.actualDurationInput}
+                          onChangeText={(value) =>
+                            updateExerciseActualField(exercise.id, 'actualDurationInput', value)
+                          }
+                          durationUnit={exercise.durationUnit}
+                          rowStyle={styles.cardioDurationRow}
+                          inputStyle={[styles.input, styles.setInput, styles.cardioDurationInput]}
+                          activeScheme={activeScheme}
+                          borderColor={borderColor}
+                          textColor={textColor}
+                          inputBackground={inputBackground}
+                          timerAccessibilityLabel="Start timer for duration"
+                        />
                         <View style={styles.cardioDistanceRow}>
                           <NumericTextInput
                             value={exercise.actualDistanceInput}
@@ -2110,27 +2085,19 @@ export default function LogWorkoutScreen() {
                       />
                     </View>
                   ) : (
-                    <View style={[styles.cardioDurationRow, styles.flexField]}>
-                      <NumericTextInput
-                        value={exercise.actualDurationInput}
-                        onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
-                        placeholder="Duration"
-                        placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                        style={[
-                          styles.input,
-                          styles.setInput,
-                          styles.cardioDurationInput,
-                          { color: textColor, borderColor, backgroundColor: inputBackground },
-                        ]}
-                      />
-                      <DurationUnitPicker
-                        value={exercise.durationUnit}
-                        onChange={() => {}}
-                        disabled
-                        borderColor={borderColor}
-                        textColor={textColor}
-                      />
-                    </View>
+                    <CardioDurationLogField
+                      timerId={cardioLogDurationTimerId(exercise.id)}
+                      value={exercise.actualDurationInput}
+                      onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
+                      durationUnit={exercise.durationUnit}
+                      rowStyle={[styles.cardioDurationRow, styles.flexField]}
+                      inputStyle={[styles.input, styles.setInput, styles.cardioDurationInput]}
+                      activeScheme={activeScheme}
+                      borderColor={borderColor}
+                      textColor={textColor}
+                      inputBackground={inputBackground}
+                      timerAccessibilityLabel="Start timer for duration"
+                    />
                   )}
                 </View>
               </View>
@@ -2263,6 +2230,7 @@ export default function LogWorkoutScreen() {
         </ScrollView>
         <StickySaveFooter onPress={onSave} activeScheme={activeScheme} />
       </KeyboardAvoidingView>
+      </DurationTimerProvider>
     </RNView>
   );
 }
