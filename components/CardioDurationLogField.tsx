@@ -5,12 +5,18 @@ import { DurationUnitPicker } from '@/components/DurationUnitPicker';
 import { NumericTextInput } from '@/components/NumericTextInput';
 import { View } from '@/components/Themed';
 import { CARDIO_DURATION_UNITS, type DurationUnit } from '@/lib/durationUnits';
+import type { DurationTimerMode } from '@/lib/durationTimer';
+import type { CountdownLogSession } from '@/lib/countdownNotifications';
 
 type Props = {
   timerId: string;
   value: string;
   onChangeText: (value: string) => void;
   durationUnit: DurationUnit;
+  timerMode?: DurationTimerMode;
+  countdownTargetSeconds?: number | null;
+  countdownExerciseLabel?: string;
+  countdownLogSession?: CountdownLogSession;
   placeholder?: string;
   inputStyle: StyleProp<TextStyle>;
   rowStyle?: StyleProp<ViewStyle>;
@@ -28,6 +34,10 @@ export function CardioDurationLogField({
   value,
   onChangeText,
   durationUnit,
+  timerMode = 'countup',
+  countdownTargetSeconds = null,
+  countdownExerciseLabel,
+  countdownLogSession,
   placeholder = 'Duration',
   inputStyle,
   rowStyle,
@@ -61,6 +71,10 @@ export function CardioDurationLogField({
       <DurationTimerButton
         timerId={timerId}
         durationUnit={durationUnit}
+        timerMode={timerMode}
+        countdownTargetSeconds={countdownTargetSeconds}
+        countdownExerciseLabel={countdownExerciseLabel}
+        countdownLogSession={countdownLogSession}
         onComplete={onChangeText}
         activeScheme={activeScheme}
         accessibilityLabel={timerAccessibilityLabel}

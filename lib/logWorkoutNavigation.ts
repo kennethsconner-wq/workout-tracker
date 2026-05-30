@@ -65,6 +65,29 @@ export function navigateToNewLogWorkout(workoutId: string): void {
   });
 }
 
+/** Focus an in-progress log session without pushing a duplicate screen (e.g. notification tap). */
+export function focusLogWorkoutSession(session: LogWorkoutSession): void {
+  beginLogWorkoutSession(session);
+  router.navigate({
+    pathname: '/log-workout',
+    params: logWorkoutRouteParams(session),
+  });
+}
+
+function logWorkoutRouteParams(session: LogWorkoutSession): Record<string, string> {
+  if (session.intent === 'edit' && session.loggedWorkoutId) {
+    return {
+      workoutId: session.workoutId,
+      loggedWorkoutId: session.loggedWorkoutId,
+      logIntent: 'edit',
+    };
+  }
+  return {
+    workoutId: session.workoutId,
+    logIntent: 'new',
+  };
+}
+
 /** Clears the saved draft, then opens a blank log for this workout template. */
 export async function navigateToNewLogWorkoutFresh(workoutId: string): Promise<void> {
   await clearNewLogDraft(workoutId);

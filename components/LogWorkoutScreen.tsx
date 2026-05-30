@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 
 import { CardioDurationLogField } from '@/components/CardioDurationLogField';
-import { DurationTimerProvider } from '@/components/DurationTimerProvider';
 import { SessionDateTimeField } from '@/components/SessionDateTimeField';
 import { CardioDistanceUnitPicker } from '@/components/CardioDistanceUnitPicker';
 import { DurationUnitPicker } from '@/components/DurationUnitPicker';
@@ -66,8 +65,11 @@ import {
 } from '@/lib/cardioDistanceUnits';
 import {
   formatDurationValue,
+  isCardioDurationUnit,
   normalizeCardioDurationUnit,
   normalizeDurationUnit,
+  STRETCH_DURATION_UNITS,
+  SPORT_DURATION_UNITS,
   type DurationUnit,
 } from '@/lib/durationUnits';
 import { INTEGER_DECIMAL_PLACES } from '@/lib/numericInput';
@@ -77,6 +79,8 @@ import {
 } from '@/lib/scoreUnits';
 import { DEFAULT_WEIGHT_UNIT, formatWeightValue, normalizeWeightUnit, type WeightUnit } from '@/lib/weightUnits';
 import { formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
+import { resolveCardioDurationLogTimerConfig, resolveSportDurationLogTimerConfig, resolveStretchDurationLogTimerConfig } from '@/lib/durationTimer';
+import type { CountdownLogSession } from '@/lib/countdownNotifications';
 import { hasLoggedExerciseInput, parseLoggedExerciseFromDraft } from '@/lib/logExerciseDraft';
 import { resolveExerciseSetCount } from '@/lib/exerciseDraft';
 import { clearNewLogDraft, isNewLogFormPristine, newLogDraftStorageKey } from '@/lib/logWorkoutDraft';
@@ -159,6 +163,31 @@ function cardioLogDurationTimerId(exerciseId: string, segmentId?: string): strin
     return `cardio:${exerciseId}:segment:${segmentId}`;
   }
   return `cardio:${exerciseId}:duration`;
+}
+
+function stretchLogDurationTimerId(exerciseId: string, setId: string): string {
+  return `stretch:${exerciseId}:set:${setId}`;
+}
+
+function sportLogDurationTimerId(exerciseId: string): string {
+  return `sport:${exerciseId}:duration`;
+}
+
+function countdownTimerNotificationProps(
+  exercise: Pick<DraftExercise, 'name'>,
+  logSession: LogWorkoutSession,
+): {
+  countdownExerciseLabel: string;
+  countdownLogSession: CountdownLogSession;
+} {
+  return {
+    countdownExerciseLabel: exercise.name,
+    countdownLogSession: {
+      workoutId: logSession.workoutId,
+      loggedWorkoutId: logSession.loggedWorkoutId,
+      intent: logSession.intent,
+    },
+  };
 }
 
 /** Legacy key — cleared when opening a saved log for edit (edit sessions no longer use drafts). */
@@ -262,6 +291,18 @@ function plannedStretchDurationUnitForSet(
   const planned = readStretchSetsFromExercise(exercise);
   const plannedSet = planned[setIndex] ?? planned[0];
   return plannedSet?.durationUnit ?? exercise.durationUnit;
+}
+
+function plannedStretchSetForSetIndex(
+  exercise: Pick<DraftExercise, 'sets' | 'duration' | 'durationUnit' | 'stretchSets'>,
+  setIndex: number,
+): Pick<StretchSet, 'duration' | 'durationUnit'> {
+  const planned = readStretchSetsFromExercise(exercise);
+  const plannedSet = planned[setIndex] ?? planned[0];
+  return {
+    duration: plannedSet?.duration ?? exercise.duration,
+    durationUnit: plannedSet?.durationUnit ?? exercise.durationUnit,
+  };
 }
 
 function buildDraftStretchActualSets(
@@ -1681,7 +1722,6 @@ export default function LogWorkoutScreen() {
           ...stackHeaderHideIosBackLabel,
         }}
       />
-      <DurationTimerProvider>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.select({ ios: 'padding', android: undefined })}
@@ -1875,6 +1915,8 @@ export default function LogWorkoutScreen() {
                     ) : (
                       <CardioDurationLogField
                         timerId={cardioLogDurationTimerId(exercise.id)}
+                        {...(session ? countdownTimerNotificationProps(exercise, session) : {})}
+                        {...resolveCardioDurationLogTimerConfig(exercise)}
                         value={exercise.actualDurationInput}
                         onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
                         durationUnit={exercise.durationUnit}
@@ -1920,6 +1962,7 @@ export default function LogWorkoutScreen() {
                         </Pressable>
                         <CardioDurationLogField
                           timerId={cardioLogDurationTimerId(exercise.id, actualSet.id)}
+                          {...(session ? countdownTimerNotificationProps(exercise, session) : {})}
                           value={actualSet.actualDurationInput}
                           onChangeText={(value) =>
                             updateCardioPerActualSetField(exercise.id, actualSet.id, 'actualDurationInput', value)
@@ -1984,6 +2027,7 @@ export default function LogWorkoutScreen() {
                         </View>
                         <CardioDurationLogField
                           timerId={cardioLogDurationTimerId(exercise.id)}
+                          {...(session ? countdownTimerNotificationProps(exercise, session) : {})}
                           value={exercise.actualDurationInput}
                           onChangeText={(value) =>
                             updateExerciseActualField(exercise.id, 'actualDurationInput', value)
@@ -2002,6 +2046,8 @@ export default function LogWorkoutScreen() {
                       <>
                         <CardioDurationLogField
                           timerId={cardioLogDurationTimerId(exercise.id)}
+                          {...(session ? countdownTimerNotificationProps(exercise, session) : {})}
+                          {...resolveCardioDurationLogTimerConfig(exercise)}
                           value={exercise.actualDurationInput}
                           onChangeText={(value) =>
                             updateExerciseActualField(exercise.id, 'actualDurationInput', value)
@@ -2087,6 +2133,8 @@ export default function LogWorkoutScreen() {
                   ) : (
                     <CardioDurationLogField
                       timerId={cardioLogDurationTimerId(exercise.id)}
+                      {...(session ? countdownTimerNotificationProps(exercise, session) : {})}
+                      {...resolveCardioDurationLogTimerConfig(exercise)}
                       value={exercise.actualDurationInput}
                       onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
                       durationUnit={exercise.durationUnit}
@@ -2120,25 +2168,50 @@ export default function LogWorkoutScreen() {
                 </Pressable>
                 <View style={[styles.cardioFieldsColumn, styles.flexField]}>
                   <View style={styles.cardioDurationRow}>
-                    <NumericTextInput
-                      value={exercise.actualDurationInput}
-                      onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
-                      placeholder="Duration"
-                      placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                      style={[
-                        styles.input,
-                        styles.setInput,
-                        styles.cardioDurationInput,
-                        { color: textColor, borderColor, backgroundColor: inputBackground },
-                      ]}
-                    />
-                    <DurationUnitPicker
-                      value={exercise.durationUnit}
-                      onChange={() => {}}
-                      disabled
-                      borderColor={borderColor}
-                      textColor={textColor}
-                    />
+                    {isCardioDurationUnit(exercise.durationUnit) ? (
+                      <CardioDurationLogField
+                        timerId={sportLogDurationTimerId(exercise.id)}
+                        {...(session ? countdownTimerNotificationProps(exercise, session) : {})}
+                        {...resolveSportDurationLogTimerConfig(exercise)}
+                        value={exercise.actualDurationInput}
+                        onChangeText={(value) =>
+                          updateExerciseActualField(exercise.id, 'actualDurationInput', value)
+                        }
+                        durationUnit={exercise.durationUnit}
+                        units={SPORT_DURATION_UNITS}
+                        rowStyle={styles.flexField}
+                        inputStyle={[styles.input, styles.setInput, styles.cardioDurationInput]}
+                        activeScheme={activeScheme}
+                        borderColor={borderColor}
+                        textColor={textColor}
+                        inputBackground={inputBackground}
+                        timerAccessibilityLabel="Start timer for duration"
+                      />
+                    ) : (
+                      <>
+                        <NumericTextInput
+                          value={exercise.actualDurationInput}
+                          onChangeText={(value) =>
+                            updateExerciseActualField(exercise.id, 'actualDurationInput', value)
+                          }
+                          placeholder="Duration"
+                          placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                          style={[
+                            styles.input,
+                            styles.setInput,
+                            styles.cardioDurationInput,
+                            { color: textColor, borderColor, backgroundColor: inputBackground },
+                          ]}
+                        />
+                        <DurationUnitPicker
+                          value={exercise.durationUnit}
+                          onChange={() => {}}
+                          disabled
+                          borderColor={borderColor}
+                          textColor={textColor}
+                        />
+                      </>
+                    )}
                   </View>
                   <View style={styles.sportScoreRow}>
                     <NumericTextInput
@@ -2186,25 +2259,51 @@ export default function LogWorkoutScreen() {
                           />
                         </Pressable>
                         <View style={styles.stretchDurationLogWrap}>
-                          <NumericTextInput
-                            value={actualSet.actualDurationInput}
-                            onChangeText={(value) => updateStretchActualSetField(exercise.id, actualSet.id, value)}
-                            placeholder="Duration"
-                            placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
-                            style={[
-                              styles.input,
-                              styles.setInput,
-                              styles.stretchDurationLogInput,
-                              { color: textColor, borderColor, backgroundColor: inputBackground },
-                            ]}
-                          />
-                          <DurationUnitPicker
-                            value={plannedStretchDurationUnitForSet(exercise, setIndex)}
-                            onChange={() => {}}
-                            disabled
-                            borderColor={borderColor}
-                            textColor={textColor}
-                          />
+                          {isCardioDurationUnit(actualSet.actualDurationUnit) ? (
+                            <CardioDurationLogField
+                              timerId={stretchLogDurationTimerId(exercise.id, actualSet.id)}
+                              {...(session ? countdownTimerNotificationProps(exercise, session) : {})}
+                              {...resolveStretchDurationLogTimerConfig(
+                                plannedStretchSetForSetIndex(exercise, setIndex),
+                              )}
+                              value={actualSet.actualDurationInput}
+                              onChangeText={(value) =>
+                                updateStretchActualSetField(exercise.id, actualSet.id, value)
+                              }
+                              durationUnit={actualSet.actualDurationUnit}
+                              units={STRETCH_DURATION_UNITS}
+                              inputStyle={[styles.input, styles.setInput, styles.stretchDurationLogInput]}
+                              activeScheme={activeScheme}
+                              borderColor={borderColor}
+                              textColor={textColor}
+                              inputBackground={inputBackground}
+                              timerAccessibilityLabel={`Start timer for set ${setIndex + 1}`}
+                            />
+                          ) : (
+                            <>
+                              <NumericTextInput
+                                value={actualSet.actualDurationInput}
+                                onChangeText={(value) =>
+                                  updateStretchActualSetField(exercise.id, actualSet.id, value)
+                                }
+                                placeholder="Duration"
+                                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                                style={[
+                                  styles.input,
+                                  styles.setInput,
+                                  styles.stretchDurationLogInput,
+                                  { color: textColor, borderColor, backgroundColor: inputBackground },
+                                ]}
+                              />
+                              <DurationUnitPicker
+                                value={plannedStretchDurationUnitForSet(exercise, setIndex)}
+                                onChange={() => {}}
+                                disabled
+                                borderColor={borderColor}
+                                textColor={textColor}
+                              />
+                            </>
+                          )}
                         </View>
                         <Pressable
                           onPress={() => deleteStretchActualSet(exercise.id, actualSet.id)}
@@ -2230,7 +2329,6 @@ export default function LogWorkoutScreen() {
         </ScrollView>
         <StickySaveFooter onPress={onSave} activeScheme={activeScheme} />
       </KeyboardAvoidingView>
-      </DurationTimerProvider>
     </RNView>
   );
 }
