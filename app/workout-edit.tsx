@@ -219,7 +219,7 @@ export default function WorkoutEditScreen() {
 
   const updateExerciseField = (
     exerciseId: string,
-    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'score',
+    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'paceDuration' | 'paceDistance' | 'score',
     value: string,
   ) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, [field]: value } : ex)));
@@ -253,6 +253,18 @@ export default function WorkoutEditScreen() {
 
   const updateExerciseDurationUnit = (exerciseId: string, unit: DurationUnit) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, durationUnit: unit } : ex)));
+  };
+
+  const updateExercisePaceDurationUnit = (exerciseId: string, unit: DurationUnit) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, paceDurationUnit: unit } : ex)),
+    );
+  };
+
+  const updateExercisePaceDistanceUnit = (exerciseId: string, unit: CardioDistanceUnit) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, paceDistanceUnit: unit } : ex)),
+    );
   };
 
   const updateExerciseScoreUnit = (exerciseId: string, unit: ScoreUnit) => {
@@ -372,6 +384,8 @@ export default function WorkoutEditScreen() {
         onUpdateExerciseCardioDurationTracking={updateExerciseCardioDurationTracking}
         onUpdateExerciseCardioDistanceTracking={updateExerciseCardioDistanceTracking}
         onUpdateExerciseDurationUnit={updateExerciseDurationUnit}
+        onUpdateExercisePaceDurationUnit={updateExercisePaceDurationUnit}
+        onUpdateExercisePaceDistanceUnit={updateExercisePaceDistanceUnit}
         onUpdateExerciseScoreUnit={updateExerciseScoreUnit}
         onUpdateExerciseWeightUnit={updateExerciseWeightUnit}
         onRemoveExercise={removeExercise}

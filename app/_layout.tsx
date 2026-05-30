@@ -4,6 +4,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ThemedAlertProvider } from '@/components/ThemedAlertProvider';
+import { DurationTimerProvider } from '@/components/DurationTimerProvider';
 import Colors from '@/constants/Colors';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useFonts } from 'expo-font';
@@ -64,6 +65,7 @@ function RootLayoutNav() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemedAlertProvider>
+        <DurationTimerProvider>
         <ThemeProvider value={NavigationAppTheme}>
         <Stack
           screenOptions={{
@@ -88,6 +90,7 @@ function RootLayoutNav() {
           />
         </Stack>
         </ThemeProvider>
+        </DurationTimerProvider>
         </ThemedAlertProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

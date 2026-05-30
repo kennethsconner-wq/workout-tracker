@@ -76,18 +76,6 @@ function formatDateTick(ms: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-/** Higher value draws above when lines overlap (planned under, actual on top). */
-function lineSeriesStackZIndex(series: ScoreDateLineSeries): number {
-  const key = `${series.id} ${series.label}`.toLowerCase();
-  if (key.includes('planned')) {
-    return 1;
-  }
-  if (key.includes('actual')) {
-    return 2;
-  }
-  return 0;
-}
-
 function LineSegment({
   x1,
   y1,
@@ -234,10 +222,7 @@ export function ScoreDateLineChart({
           return (
             <View
               key={series.id}
-              style={[
-                StyleSheet.absoluteFill,
-                { zIndex: lineSeriesStackZIndex(series) },
-              ]}
+              style={StyleSheet.absoluteFill}
               pointerEvents="none">
               {segs.map((s) => (
                 <LineSegment key={s.key} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} color={series.color} />

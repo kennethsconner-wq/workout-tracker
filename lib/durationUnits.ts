@@ -151,3 +151,36 @@ export function formatDurationWithUnit(value: number, unit: DurationUnit): strin
   }
   return `${formatted} ${DURATION_UNIT_ABBREVIATIONS[unit]}`;
 }
+
+/** Convert cardio-compatible duration units to seconds. */
+export function durationToSeconds(value: number, unit: DurationUnit): number | null {
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  switch (unit) {
+    case 'seconds':
+      return value;
+    case 'minutes':
+      return value * 60;
+    case 'hours':
+      return value * 3600;
+    default:
+      return null;
+  }
+}
+
+export function secondsToDurationValue(seconds: number, unit: DurationUnit): number | null {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+  switch (unit) {
+    case 'seconds':
+      return seconds;
+    case 'minutes':
+      return seconds / 60;
+    case 'hours':
+      return seconds / 3600;
+    default:
+      return null;
+  }
+}

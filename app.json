@@ -13,6 +13,10 @@
     },
     "android": {
       "package": "com.kconsoft.workouttracker",
+      "permissions": [
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -36,7 +40,14 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "color": "#23D5D5"
+        }
+      ],
+      "./plugins/withAndroidExactAlarmPermission.js"
     ],
     "experiments": {
       "typedRoutes": true

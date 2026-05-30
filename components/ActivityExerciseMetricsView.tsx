@@ -15,8 +15,10 @@ import {
   getActivityExecutionSnapshots,
   getCardioDistanceSnapshots,
   getCardioDurationSnapshots,
+  getCardioPaceSnapshots,
   getCardioLifetimeDistance,
   getCardioPersonalRecords,
+  cardioPlanReferenceExercise,
   getSportDurationSnapshots,
   getSportPersonalRecords,
   getSportScoreSnapshots,
@@ -24,15 +26,31 @@ import {
   getStretchPersonalRecords,
   getStretchTotalDurationSnapshots,
   latestLoggedExercise,
+  cardioMetricDisplayDistanceUnit,
   type SessionValueSnapshot,
 } from '@/lib/activityExerciseMetrics';
 import { DISPLAY_DECIMAL_PLACES, formatDisplayDecimal } from '@/lib/displayDecimals';
 import { formatCardioDistanceWithUnit } from '@/lib/cardioDistanceUnits';
+import {
+  cardioExerciseShowsDistanceChart,
+  cardioExerciseShowsDurationChart,
+  cardioExerciseShowsPaceChart,
+  formatCardioPaceSummary,
+  readCardioPacePlan,
+} from '@/lib/cardioPlan';
 import { formatDurationWithUnit } from '@/lib/durationUnits';
 import { SCORE_UNIT_ABBREVIATIONS } from '@/lib/scoreUnits';
 import type { StoredExerciseMetricTarget } from '@/lib/exerciseSnapshot';
+import {
+  averageExerciseExecutionScorePercent,
+  getExercisePersonalRecords,
+  getLoggedExerciseExecutionSnapshots,
+  getLoggedExerciseWeightSnapshots,
+  getTotalWeightMovedForExercise,
+} from '@/lib/exerciseSnapshot';
 import { themedAlert } from '@/lib/themedAlert';
-import type { LoggedWorkout } from '@/lib/types';
+import type { LoggedWorkout, LoggedWorkoutExercise, Workout } from '@/lib/types';
+import { formatWeightWithUnit } from '@/lib/weightUnits';
 
 type MetricChartConfig = {
   key: string;
@@ -45,8 +63,9 @@ type MetricChartConfig = {
 };
 
 type Props = {
-  activityType: Exclude<ActivityType, 'strength'>;
+  activityType: ActivityType;
   logged: LoggedWorkout[];
+  workouts: Workout[];
   metricTarget: StoredExerciseMetricTarget;
   exerciseLoggedCount: number;
   lastLoggedIso: string | null;
@@ -56,6 +75,22 @@ type Props = {
   chartCarouselSlideWidth: number;
   chartPlotWidth: number;
 };
+
+const EXECUTION_SCORE_INFO_MESSAGE =
+  'For each time this exercise appears in your log (including duplicate slots in the same workout):\n\n' +
+  '• Actual score = (average reps across sets) × (average weight across sets) × (number of sets logged)\n' +
+  '• Planned score = planned sets × planned reps × planned weight from that session\n' +
+  '• Execution for that entry = actual score ÷ planned score\n\n' +
+  'The percentage shown is the average of those execution values across all logged appearances. It can go above 100% if you beat the plan.';
+
+const TOTAL_WEIGHT_MOVED_INFO_MESSAGE =
+  'For every logged set of this exercise, we multiply reps × weight for that set, then add those amounts together for the whole session, then add across every workout where this exercise appears.';
+
+const CHART_EXECUTION_EMPTY_MESSAGE =
+  'Log this exercise on more days to plot execution score. Each point is actual ÷ planned for that session.';
+
+const CHART_WEIGHT_EMPTY_MESSAGE =
+  'Log this exercise on more days to plot weight. Each point is the average weight per set in that session.';
 
 function formatLastLoggedDisplay(iso: string | null): string {
   if (iso === null) {
@@ -75,30 +110,56 @@ function formatPrInt(value: number | null): string {
 function buildValueChartLines(
   snapshots: SessionValueSnapshot[],
   activeScheme: 'light' | 'dark',
-  actualLabel: string,
-  plannedLabel: string,
+  label: string,
 ): ScoreDateLineSeries[] {
-  const plannedLineColor = '#D40078';
   return [
     {
       id: 'actual',
-      label: actualLabel,
+      label,
       color: Colors[activeScheme].tint,
       points: snapshots.map((snapshot) => ({
         score: snapshot.actual,
         dateMs: new Date(snapshot.createdAt).getTime(),
       })),
     },
-    {
-      id: 'planned',
-      label: plannedLabel,
-      color: plannedLineColor,
-      points: snapshots.map((snapshot) => ({
-        score: snapshot.planned,
-        dateMs: new Date(snapshot.createdAt).getTime(),
-      })),
-    },
   ];
+}
+
+function formatPrWeightLb(value: number | null): string {
+  if (value === null) {
+    return '—';
+  }
+  return formatWeightWithUnit(value, 'pounds');
+}
+
+function formatTotalWeightMoved(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '—';
+  }
+  const hasFraction = Math.abs(value % 1) > 1e-9;
+  const num = value.toLocaleString(undefined, {
+    maximumFractionDigits: hasFraction ? DISPLAY_DECIMAL_PLACES : 0,
+    minimumFractionDigits: 0,
+  });
+  return `${num} lb`;
+}
+
+function formatWeightTick(v: number): string {
+  if (!Number.isFinite(v)) {
+    return '';
+  }
+  return formatWeightWithUnit(v, 'pounds');
+}
+
+function getExecutionSnapshotsForCharts(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+  activityType: ActivityType,
+): Array<{ createdAt: string; executionRatio: number }> {
+  if (activityType === 'strength') {
+    return getLoggedExerciseExecutionSnapshots(logged, target);
+  }
+  return getActivityExecutionSnapshots(logged, target, activityType);
 }
 
 function buildExecutionChartLines(
@@ -107,7 +168,7 @@ function buildExecutionChartLines(
   activityType: ActivityType,
   activeScheme: 'light' | 'dark',
 ): ScoreDateLineSeries[] {
-  const snapshots = getActivityExecutionSnapshots(logged, target, activityType);
+  const snapshots = getExecutionSnapshotsForCharts(logged, target, activityType);
   return [
     {
       id: 'execution',
@@ -121,53 +182,93 @@ function buildExecutionChartLines(
   ];
 }
 
+function executionChartConfig(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+  activityType: ActivityType,
+  activeScheme: 'light' | 'dark',
+): MetricChartConfig {
+  return {
+    key: 'execution',
+    title: 'Execution Score By Session',
+    lines: buildExecutionChartLines(logged, target, activityType, activeScheme),
+    yAxisLabel: 'Execution %',
+    formatYTick: (value) => `${Math.round(value)}%`,
+    emptyMessage: CHART_EXECUTION_EMPTY_MESSAGE,
+    chartAccessibilityLabel: 'Execution score by session chart',
+  };
+}
+
 function cardioMetricsConfig(
   logged: LoggedWorkout[],
+  workouts: Workout[],
   target: StoredExerciseMetricTarget,
   activeScheme: 'light' | 'dark',
 ): { charts: MetricChartConfig[]; infoMessages: Record<string, string> } {
+  const planReference = cardioPlanReferenceExercise(workouts, logged, target);
   const latest = latestLoggedExercise(logged, target);
+  const displayReference = (latest ?? planReference) as LoggedWorkoutExercise | null;
   const distanceSnapshots = getCardioDistanceSnapshots(logged, target);
   const durationSnapshots = getCardioDurationSnapshots(logged, target);
-  const distanceUnit = latest?.actualDistanceUnit ?? latest?.distanceUnit ?? 'miles';
-  const durationUnit = latest?.actualDurationUnit ?? latest?.durationUnit ?? 'minutes';
+  const paceSnapshots = getCardioPaceSnapshots(logged, target);
+  const distanceUnit = cardioMetricDisplayDistanceUnit(displayReference);
+  const durationUnit = displayReference?.actualDurationUnit ?? displayReference?.durationUnit ?? 'minutes';
+  const pacePlan = planReference ? readCardioPacePlan({ ...planReference, activityType: 'cardio' }) : null;
 
   const formatDistanceTick = (value: number) => formatCardioDistanceWithUnit(value, distanceUnit) || '';
   const formatDurationTick = (value: number) => formatDurationWithUnit(value, durationUnit) || '';
+  const formatPaceTick = (value: number) => {
+    if (pacePlan) {
+      return (
+        formatCardioPaceSummary({
+          duration: value,
+          durationUnit: pacePlan.durationUnit,
+          distance: pacePlan.distance,
+          distanceUnit: pacePlan.distanceUnit,
+        }) || ''
+      );
+    }
+    return formatDurationWithUnit(value, durationUnit) || '';
+  };
 
   const charts: MetricChartConfig[] = [];
-  if (distanceSnapshots.length > 0) {
+  if (cardioExerciseShowsDistanceChart(planReference)) {
     charts.push({
       key: 'distance',
       title: 'Distance By Session',
-      lines: buildValueChartLines(distanceSnapshots, activeScheme, 'Actual Distance', 'Planned Distance'),
+      lines: buildValueChartLines(distanceSnapshots, activeScheme, 'Distance'),
       yAxisLabel: 'Distance',
       formatYTick: formatDistanceTick,
       emptyMessage:
-        'Log this exercise on more days to plot distance. Each point compares actual vs planned distance for that session.',
+        'Log this exercise on more days to plot distance. Each point is logged distance for that session.',
       chartAccessibilityLabel: 'Distance by session chart',
     });
   }
-  if (durationSnapshots.length > 0) {
+  if (cardioExerciseShowsDurationChart(planReference)) {
     charts.push({
       key: 'duration',
       title: 'Duration By Session',
-      lines: buildValueChartLines(durationSnapshots, activeScheme, 'Actual Duration', 'Planned Duration'),
+      lines: buildValueChartLines(durationSnapshots, activeScheme, 'Duration'),
       yAxisLabel: 'Duration',
       formatYTick: formatDurationTick,
       emptyMessage:
-        'Log this exercise on more days to plot duration. Each point compares actual vs planned duration for that session.',
+        'Log this exercise on more days to plot duration. Each point is logged duration for that session.',
       chartAccessibilityLabel: 'Duration by session chart',
     });
   }
-  charts.push({
-    key: 'execution',
-    title: 'Execution Score By Session',
-    lines: buildExecutionChartLines(logged, target, 'cardio', activeScheme),
-    yAxisLabel: 'Execution %',
-    formatYTick: (value) => `${Math.round(value)}%`,
-    chartAccessibilityLabel: 'Execution score by session chart',
-  });
+  if (cardioExerciseShowsPaceChart(planReference)) {
+    charts.push({
+      key: 'pace',
+      title: 'Average Pace By Session',
+      lines: buildValueChartLines(paceSnapshots, activeScheme, 'Average Pace'),
+      yAxisLabel: 'Pace',
+      formatYTick: formatPaceTick,
+      emptyMessage:
+        'Log this exercise on more days to plot average pace. Each point is your average time per planned pace chunk for that session.',
+      chartAccessibilityLabel: 'Average pace by session chart',
+    });
+  }
+  charts.push(executionChartConfig(logged, target, 'cardio', activeScheme));
 
   return {
     charts,
@@ -178,8 +279,6 @@ function cardioMetricsConfig(
         '• Track total duration and distance: 50% (actual objective ÷ planned objective) + 50% (actual pace ÷ planned pace)\n' +
         '• Track duration/distance per unit: 50% (actual objective ÷ planned objective) + 50% (average of actual pace ÷ planned pace for each logged segment)\n\n' +
         'Pace is distance ÷ duration. The percentage shown is the average of those scores across all logged appearances (duplicate slots in one workout each count separately). Values above 100% mean you beat the plan.',
-      lifetimeDistance:
-        'Adds up every logged distance value for this exercise across all sessions (same unit as stored in your logs).',
     },
   };
 }
@@ -200,7 +299,7 @@ function sportMetricsConfig(
     charts.push({
       key: 'duration',
       title: 'Duration By Session',
-      lines: buildValueChartLines(durationSnapshots, activeScheme, 'Actual Duration', 'Planned Duration'),
+      lines: buildValueChartLines(durationSnapshots, activeScheme, 'Duration'),
       yAxisLabel: 'Duration',
       formatYTick: (value) => formatDurationWithUnit(value, durationUnit) || '',
       emptyMessage: 'Log duration on more days to plot this chart.',
@@ -211,21 +310,14 @@ function sportMetricsConfig(
     charts.push({
       key: 'score',
       title: 'Score By Session',
-      lines: buildValueChartLines(scoreSnapshots, activeScheme, 'Actual Score', 'Planned Score'),
+      lines: buildValueChartLines(scoreSnapshots, activeScheme, 'Score'),
       yAxisLabel: 'Score',
       formatYTick: (value) => `${formatDisplayDecimal(value, DISPLAY_DECIMAL_PLACES)} ${SCORE_UNIT_ABBREVIATIONS[scoreUnit]}`,
       emptyMessage: 'Log numeric scores on more days to plot this chart.',
       chartAccessibilityLabel: 'Score by session chart',
     });
   }
-  charts.push({
-    key: 'execution',
-    title: 'Execution Score By Session',
-    lines: buildExecutionChartLines(logged, target, 'sport', activeScheme),
-    yAxisLabel: 'Execution %',
-    formatYTick: (value) => `${Math.round(value)}%`,
-    chartAccessibilityLabel: 'Execution score by session chart',
-  });
+  charts.push(executionChartConfig(logged, target, 'sport', activeScheme));
 
   return {
     charts,
@@ -253,21 +345,14 @@ function stretchMetricsConfig(
     {
       key: 'duration',
       title: 'Total Stretch Time By Session',
-      lines: buildValueChartLines(durationSnapshots, activeScheme, 'Actual Total', 'Planned Total'),
+      lines: buildValueChartLines(durationSnapshots, activeScheme, 'Total Duration'),
       yAxisLabel: 'Duration',
       formatYTick: (value) => formatDurationWithUnit(value, durationUnit) || '',
       emptyMessage:
         'Log stretch sets on more days to plot total stretch time. Each point sums all sets in that session.',
       chartAccessibilityLabel: 'Total stretch time by session chart',
     },
-    {
-      key: 'execution',
-      title: 'Execution Score By Session',
-      lines: buildExecutionChartLines(logged, target, 'stretch', activeScheme),
-      yAxisLabel: 'Execution %',
-      formatYTick: (value) => `${Math.round(value)}%`,
-      chartAccessibilityLabel: 'Execution score by session chart',
-    },
+    executionChartConfig(logged, target, 'stretch', activeScheme),
   ];
 
   return {
@@ -285,9 +370,48 @@ function stretchMetricsConfig(
   };
 }
 
+function strengthMetricsConfig(
+  logged: LoggedWorkout[],
+  target: StoredExerciseMetricTarget,
+  activeScheme: 'light' | 'dark',
+): { charts: MetricChartConfig[]; infoMessages: Record<string, string> } {
+  const weightSnapshots = getLoggedExerciseWeightSnapshots(logged, target);
+  const weightLines: ScoreDateLineSeries[] = [
+    {
+      id: 'actual-weight',
+      label: 'Weight',
+      color: Colors[activeScheme].tint,
+      points: weightSnapshots.map((snapshot) => ({
+        score: snapshot.avgActualWeightKg,
+        dateMs: new Date(snapshot.createdAt).getTime(),
+      })),
+    },
+  ];
+
+  return {
+    charts: [
+      {
+        key: 'weight',
+        title: 'Weight By Session',
+        lines: weightLines,
+        yAxisLabel: 'Weight',
+        formatYTick: formatWeightTick,
+        emptyMessage: CHART_WEIGHT_EMPTY_MESSAGE,
+        chartAccessibilityLabel: 'Weight by session chart',
+      },
+      executionChartConfig(logged, target, 'strength', activeScheme),
+    ],
+    infoMessages: {
+      execution: EXECUTION_SCORE_INFO_MESSAGE,
+      totalWeightMoved: TOTAL_WEIGHT_MOVED_INFO_MESSAGE,
+    },
+  };
+}
+
 export function ActivityExerciseMetricsView({
   activityType,
   logged,
+  workouts,
   metricTarget,
   exerciseLoggedCount,
   lastLoggedIso,
@@ -297,23 +421,36 @@ export function ActivityExerciseMetricsView({
   chartCarouselSlideWidth,
   chartPlotWidth,
 }: Props) {
-  const executionScorePercent = useMemo(
-    () => averageActivityExecutionScorePercent(logged, metricTarget, activityType),
+  const executionScorePercent = useMemo(() => {
+    if (activityType === 'strength') {
+      return averageExerciseExecutionScorePercent(logged, metricTarget);
+    }
+    return averageActivityExecutionScorePercent(logged, metricTarget, activityType);
+  }, [activityType, logged, metricTarget]);
+
+  const strengthPrs = useMemo(
+    () => (activityType === 'strength' ? getExercisePersonalRecords(logged, metricTarget) : null),
+    [activityType, logged, metricTarget],
+  );
+  const totalWeightMoved = useMemo(
+    () => (activityType === 'strength' ? getTotalWeightMovedForExercise(logged, metricTarget) : 0),
     [activityType, logged, metricTarget],
   );
 
   const { charts, infoMessages } = useMemo(() => {
     switch (activityType) {
       case 'cardio':
-        return cardioMetricsConfig(logged, metricTarget, activeScheme);
+        return cardioMetricsConfig(logged, workouts, metricTarget, activeScheme);
       case 'sport':
         return sportMetricsConfig(logged, metricTarget, activeScheme);
       case 'stretch':
         return stretchMetricsConfig(logged, metricTarget, activeScheme);
+      case 'strength':
+        return strengthMetricsConfig(logged, metricTarget, activeScheme);
       default:
-        return { charts: [], infoMessages: {} };
+        return { charts: [executionChartConfig(logged, metricTarget, activityType, activeScheme)], infoMessages: {} };
     }
-  }, [activityType, activeScheme, logged, metricTarget]);
+  }, [activityType, activeScheme, logged, metricTarget, workouts]);
 
   const cardioPrs = useMemo(
     () => (activityType === 'cardio' ? getCardioPersonalRecords(logged, metricTarget) : null),
@@ -336,6 +473,15 @@ export function ActivityExerciseMetricsView({
     () => (activityType === 'stretch' ? getStretchLifetimeDuration(logged, metricTarget) : 0),
     [activityType, logged, metricTarget],
   );
+  const cardioDistanceDisplayUnit = useMemo(() => {
+    if (activityType !== 'cardio') {
+      return 'miles' as const;
+    }
+    return (
+      cardioPrs?.maxDistanceUnit ??
+      cardioMetricDisplayDistanceUnit(latestLoggedExercise(logged, metricTarget))
+    );
+  }, [activityType, cardioPrs, logged, metricTarget]);
 
   const [visibleChartIndex, setVisibleChartIndex] = useState(0);
   const chartCarouselRef = useRef<FlatList<MetricChartConfig>>(null);
@@ -372,6 +518,32 @@ export function ActivityExerciseMetricsView({
       },
     ];
 
+    if (activityType === 'strength' && strengthPrs) {
+      rows.push(
+        {
+          key: 'pr-weight',
+          label: 'Personal Record, Weight',
+          value: formatPrWeightLb(strengthPrs.maxWeight),
+        },
+        {
+          key: 'pr-reps',
+          label: 'Personal Record, Reps',
+          value: formatPrInt(strengthPrs.maxReps),
+        },
+        {
+          key: 'pr-sets',
+          label: 'Personal Record, Sets',
+          value: formatPrInt(strengthPrs.maxSets),
+        },
+        {
+          key: 'lifetime-weight',
+          label: 'Total Weight Moved',
+          value: formatTotalWeightMoved(totalWeightMoved),
+          infoMessage: infoMessages.totalWeightMoved,
+        },
+      );
+    }
+
     if (activityType === 'cardio' && cardioPrs) {
       rows.push(
         {
@@ -388,19 +560,19 @@ export function ActivityExerciseMetricsView({
           key: 'pr-pace',
           label: 'Best Pace',
           value: formatCardioPacePr(
-            cardioPrs.bestPaceDistancePerDuration,
-            cardioPrs.bestPaceDistanceUnit,
+            cardioPrs.bestPaceDuration,
             cardioPrs.bestPaceDurationUnit,
+            cardioPrs.bestPaceDistance,
+            cardioPrs.bestPaceDistanceUnit,
           ),
         },
         {
           key: 'lifetime-distance',
           label: 'Total Distance Logged',
           value:
-            lifetimeCardioDistance > 0 && cardioPrs.maxDistanceUnit
-              ? formatCardioDistanceWithUnit(lifetimeCardioDistance, cardioPrs.maxDistanceUnit)
+            lifetimeCardioDistance > 0
+              ? formatCardioDistanceWithUnit(lifetimeCardioDistance, cardioDistanceDisplayUnit)
               : '—',
-          infoMessage: infoMessages.lifetimeDistance,
         },
       );
     }
@@ -458,6 +630,7 @@ export function ActivityExerciseMetricsView({
     return rows;
   }, [
     activityType,
+    cardioDistanceDisplayUnit,
     cardioPrs,
     executionScorePercent,
     exerciseLoggedCount,
@@ -466,7 +639,9 @@ export function ActivityExerciseMetricsView({
     lifetimeCardioDistance,
     lifetimeStretchDuration,
     sportPrs,
+    strengthPrs,
     stretchPrs,
+    totalWeightMoved,
   ]);
 
   return (

@@ -47,6 +47,12 @@ export type LoggedWorkoutExercise = {
   cardioDurationTracking?: CardioDurationTracking;
   /** Cardio + duration objective: how distance is tracked. */
   cardioDistanceTracking?: CardioDistanceTracking;
+  /** Cardio pace: duration amount (e.g. 4.5 seconds). */
+  cardioPaceDuration?: number;
+  cardioPaceDurationUnit?: DurationUnit;
+  /** Cardio pace: distance amount (e.g. 100 yards). */
+  cardioPaceDistance?: number;
+  cardioPaceDistanceUnit?: CardioDistanceUnit;
   /** @deprecated Migrated to cardioObjective + tracking fields. */
   cardioDistanceMode?: LegacyCardioDistanceMode;
   score: string;
@@ -101,6 +107,12 @@ export type WorkoutExercise = {
   cardioDurationTracking?: CardioDurationTracking;
   /** Cardio + duration objective: how distance is tracked. */
   cardioDistanceTracking?: CardioDistanceTracking;
+  /** Cardio pace: duration amount (e.g. 4.5 seconds). */
+  cardioPaceDuration?: number;
+  cardioPaceDurationUnit?: DurationUnit;
+  /** Cardio pace: distance amount (e.g. 100 yards). */
+  cardioPaceDistance?: number;
+  cardioPaceDistanceUnit?: CardioDistanceUnit;
   /** @deprecated Migrated to cardioObjective + tracking fields. */
   cardioDistanceMode?: LegacyCardioDistanceMode;
   score: string;
