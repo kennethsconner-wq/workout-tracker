@@ -7,6 +7,7 @@ import {
   getCardioLogLayout,
   isCardioDistancePerDuration,
   isCardioDurationPerDistance,
+  isCardioPaceTracking,
 } from '@/lib/cardioPlan';
 import { formatDurationWithUnit } from '@/lib/durationUnits';
 import { formatScoreWithUnit } from '@/lib/scoreUnits';
@@ -134,9 +135,14 @@ export function formatLoggedExerciseSummary(exercise: LoggedExerciseFields): str
         })
         .join(' · ');
     case 'cardio': {
-      if (isCardioDurationPerDistance(exercise) && exercise.actualCardioPerSets.length > 0) {
-        const objectiveTotal =
-          exercise.actualDistance > 0 ? exercise.actualDistance : exercise.distance;
+      if (isCardioPaceTracking(exercise) && exercise.actualCardioPerSets.length > 0) {
+        const objectiveTotal = isCardioDurationPerDistance(exercise)
+          ? exercise.actualDistance > 0
+            ? exercise.actualDistance
+            : exercise.distance
+          : exercise.actualDuration > 0
+            ? exercise.actualDuration
+            : exercise.duration;
         const segments = exercise.actualCardioPerSets
           .map((set, index) => {
             const label = formatDurationWithUnit(set.actualDuration, set.actualDurationUnit);
@@ -149,25 +155,9 @@ export function formatLoggedExerciseSummary(exercise: LoggedExerciseFields): str
             return `${rowLabel}: ${label || 'Logged'}`;
           })
           .join(' · ');
-        const totalLabel = formatCardioDistanceWithUnit(exercise.actualDistance, exercise.actualDistanceUnit);
-        return totalLabel ? `${totalLabel} · ${segments}` : segments;
-      }
-      if (isCardioDistancePerDuration(exercise) && exercise.actualCardioPerSets.length > 0) {
-        const objectiveTotal =
-          exercise.actualDuration > 0 ? exercise.actualDuration : exercise.duration;
-        const segments = exercise.actualCardioPerSets
-          .map((set, index) => {
-            const label = formatCardioDistanceWithUnit(set.actualDistance, set.actualDistanceUnit);
-            const rowLabel = cardioPerSegmentLabel(
-              index,
-              exercise.actualCardioPerSets.length,
-              objectiveTotal,
-              exercise,
-            );
-            return `${rowLabel}: ${label || 'Logged'}`;
-          })
-          .join(' · ');
-        const totalLabel = formatDurationWithUnit(exercise.actualDuration, exercise.actualDurationUnit);
+        const totalLabel = isCardioDurationPerDistance(exercise)
+          ? formatCardioDistanceWithUnit(exercise.actualDistance, exercise.actualDistanceUnit)
+          : formatDurationWithUnit(exercise.actualDuration, exercise.actualDurationUnit);
         return totalLabel ? `${totalLabel} · ${segments}` : segments;
       }
 
@@ -276,7 +266,7 @@ function cardioPerSegmentFieldActual(
   set: LoggedWorkoutExercise['actualCardioPerSets'][number],
   exercise: LoggedWorkoutExercise,
 ): string {
-  if (isCardioDurationPerDistance(exercise)) {
+  if (isCardioPaceTracking(exercise)) {
     return formatDurationWithUnit(set.actualDuration, set.actualDurationUnit) || '—';
   }
   return formatCardioDistanceWithUnit(set.actualDistance, set.actualDistanceUnit) || '—';

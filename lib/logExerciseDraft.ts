@@ -9,7 +9,9 @@ import {
   getCardioLogLayout,
   isCardioDistancePerDuration,
   isCardioDurationPerDistance,
+  isCardioPaceTracking,
   normalizeCardioPlanFields,
+  plannedCardioPaceDurationUnit,
   type CardioDistanceTracking,
   type CardioDurationTracking,
   type CardioObjective,
@@ -17,6 +19,7 @@ import {
 } from '@/lib/cardioPlan';
 import {
   DEFAULT_DURATION_UNIT,
+  normalizeCardioDurationUnit,
   normalizeDurationUnit,
   parseDurationInput,
   type DurationUnit,
@@ -46,6 +49,10 @@ export type LogExerciseDraftFields = {
   cardioDistanceTracking?: CardioDistanceTracking;
   /** @deprecated Migrated to cardioObjective + tracking fields. */
   cardioDistanceMode?: LegacyCardioDistanceMode;
+  cardioPaceDuration?: number;
+  cardioPaceDurationUnit?: DurationUnit;
+  cardioPaceDistance?: number;
+  cardioPaceDistanceUnit?: CardioDistanceUnit;
   plannedDuration: number;
   plannedDistance: number;
   actualDurationInput: string;
@@ -223,6 +230,10 @@ export function parseLoggedExerciseFromDraft(
         duration: exercise.plannedDuration,
         durationUnit: exercise.actualDurationUnit,
         distanceUnit: exercise.actualDistanceUnit,
+        cardioPaceDuration: exercise.cardioPaceDuration,
+        cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
+        cardioPaceDistance: exercise.cardioPaceDistance,
+        cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
       };
       const objectiveField = perSegmentObjectiveInputValue(segmentExercise);
       const objectiveInput =
@@ -259,10 +270,34 @@ export function parseLoggedExerciseFromDraft(
         parsedObjectiveDuration = 0;
       }
 
-      if (isCardioDurationPerDistance(exercise)) {
+      if (isCardioPaceTracking(exercise)) {
+        const expectedPaceDurationUnit =
+          plannedCardioPaceDurationUnit({
+            activityType: 'cardio',
+            cardioObjective: exercise.cardioObjective,
+            cardioDurationTracking: exercise.cardioDurationTracking,
+            cardioDistanceTracking: exercise.cardioDistanceTracking,
+            cardioDistanceMode: exercise.cardioDistanceMode,
+            duration: exercise.plannedDuration,
+            distance: exercise.plannedDistance,
+            durationUnit: exercise.actualDurationUnit,
+            distanceUnit: exercise.actualDistanceUnit,
+            cardioPaceDuration: exercise.cardioPaceDuration,
+            cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
+            cardioPaceDistance: exercise.cardioPaceDistance,
+            cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
+          }) ?? normalizeCardioDurationUnit(exercise.actualDurationUnit);
+
         for (let setIndex = 0; setIndex < exercise.actualCardioPerSets.length; setIndex++) {
           const actualSet = exercise.actualCardioPerSets[setIndex];
-          const actualDurationUnit = normalizeDurationUnit(actualSet.actualDurationUnit);
+          const actualDurationUnit = normalizeCardioDurationUnit(actualSet.actualDurationUnit);
+          if (actualDurationUnit !== expectedPaceDurationUnit) {
+            return {
+              ok: false,
+              title: 'Check your units',
+              message: `Segment ${setIndex + 1} of "${exerciseName}" must use the planned pace duration unit.`,
+            };
+          }
           const actualDuration = parseDurationInput(actualSet.actualDurationInput, actualDurationUnit);
 
           if (!Number.isFinite(actualDuration) || actualDuration <= 0) {
@@ -278,27 +313,6 @@ export function parseLoggedExerciseFromDraft(
             actualDurationUnit,
             actualDistance: 0,
             actualDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
-          });
-        }
-      } else {
-        for (let setIndex = 0; setIndex < exercise.actualCardioPerSets.length; setIndex++) {
-          const actualSet = exercise.actualCardioPerSets[setIndex];
-          const actualDistanceUnit = normalizeCardioDistanceUnit(actualSet.actualDistanceUnit);
-          const actualDistance = parseCardioDistanceInput(actualSet.actualDistanceInput, actualDistanceUnit);
-
-          if (!Number.isFinite(actualDistance) || actualDistance <= 0) {
-            return {
-              ok: false,
-              title: 'Check your numbers',
-              message: `Enter a positive distance for segment ${setIndex + 1} of "${exerciseName}".`,
-            };
-          }
-
-          parsedActualCardioPerSets.push({
-            actualDuration: 0,
-            actualDurationUnit: DEFAULT_DURATION_UNIT,
-            actualDistance,
-            actualDistanceUnit,
           });
         }
       }

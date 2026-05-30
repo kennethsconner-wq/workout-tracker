@@ -4,6 +4,10 @@ import {
 
   DEFAULT_CARDIO_DISTANCE_UNIT,
 
+  CARDIO_DISTANCE_UNIT_LABELS,
+
+  cardioPaceDistanceUnitCompatibleWithObjective,
+
   formatCardioDistanceValue,
 
   migrateLegacyCardioSetsDurationDraft,
@@ -23,6 +27,8 @@ import {
   DEFAULT_CARDIO_DURATION_TRACKING,
   DEFAULT_CARDIO_OBJECTIVE,
   hydrateCardioDraftFromStored,
+  isCardioPaceTracking,
+  migrateLegacyCardioPaceFields,
   normalizeCardioDistanceTracking,
   normalizeCardioDurationTracking,
   normalizeCardioObjective,
@@ -104,6 +110,14 @@ export type ExerciseDraftRow = {
 
   cardioDistanceTracking: CardioDistanceTracking;
 
+  paceDuration: string;
+
+  paceDurationUnit: DurationUnit;
+
+  paceDistance: string;
+
+  paceDistanceUnit: CardioDistanceUnit;
+
   score: string;
 
   scoreUnit: ScoreUnit;
@@ -127,6 +141,10 @@ export type CopyWorkoutExercisePayload = Pick<
   | 'cardioObjective'
   | 'cardioDurationTracking'
   | 'cardioDistanceTracking'
+  | 'cardioPaceDuration'
+  | 'cardioPaceDurationUnit'
+  | 'cardioPaceDistance'
+  | 'cardioPaceDistanceUnit'
   | 'cardioDistanceMode'
   | 'score'
   | 'scoreUnit'
@@ -157,6 +175,10 @@ export function buildCopyWorkoutPayload(workout: Workout): CopyWorkoutPayload {
       cardioObjective: exercise.cardioObjective,
       cardioDurationTracking: exercise.cardioDurationTracking,
       cardioDistanceTracking: exercise.cardioDistanceTracking,
+      cardioPaceDuration: exercise.cardioPaceDuration,
+      cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
+      cardioPaceDistance: exercise.cardioPaceDistance,
+      cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
       cardioDistanceMode: exercise.cardioDistanceMode,
       score: exercise.score,
       scoreUnit: exercise.scoreUnit,
@@ -205,6 +227,14 @@ export function emptyExerciseDraftRow(): ExerciseDraftRow {
 
     cardioDistanceTracking: DEFAULT_CARDIO_DISTANCE_TRACKING,
 
+    paceDuration: '',
+
+    paceDurationUnit: DEFAULT_DURATION_UNIT,
+
+    paceDistance: '',
+
+    paceDistanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
+
     score: '',
 
     scoreUnit: DEFAULT_SCORE_UNIT,
@@ -251,6 +281,18 @@ export function sanitizeExerciseDraftRow(ex: ExerciseDraftRow): ExerciseDraftRow
         cardioDistanceTracking: plan.cardioDistanceTracking,
         durationUnit: normalizeCardioDurationUnit(ex.durationUnit),
         distanceUnit: normalizeCardioDistanceUnit(ex.distanceUnit),
+        paceDuration:
+          plan.cardioObjective === 'distance' && plan.cardioDurationTracking !== 'per_distance_unit'
+            ? ''
+            : plan.cardioObjective === 'duration' && plan.cardioDistanceTracking !== 'per_duration_unit'
+              ? ''
+              : ex.paceDuration,
+        paceDistance:
+          plan.cardioObjective === 'distance' && plan.cardioDurationTracking !== 'per_distance_unit'
+            ? ''
+            : plan.cardioObjective === 'duration' && plan.cardioDistanceTracking !== 'per_duration_unit'
+              ? ''
+              : ex.paceDistance,
       };
     }
     case 'sport':
@@ -300,6 +342,8 @@ export function applyActivityTypeChangeToDraftRow(ex: ExerciseDraftRow, activity
       cardioDistanceTracking: DEFAULT_CARDIO_DISTANCE_TRACKING,
       duration: '',
       distance: '',
+      paceDuration: '',
+      paceDistance: '',
     };
   }
   if (activityType === 'sport') {
@@ -316,6 +360,20 @@ export function applyCardioObjectiveChangeToDraftRow(ex: ExerciseDraftRow, objec
     cardioDistanceTracking: DEFAULT_CARDIO_DISTANCE_TRACKING,
     duration: objective === 'distance' ? '' : ex.duration,
     distance: objective === 'duration' ? '' : ex.distance,
+    paceDuration: '',
+    paceDistance: '',
+  };
+}
+
+function defaultPaceDraftFields(ex: ExerciseDraftRow): Pick<
+  ExerciseDraftRow,
+  'paceDuration' | 'paceDurationUnit' | 'paceDistance' | 'paceDistanceUnit'
+> {
+  return {
+    paceDuration: ex.paceDuration.trim().length > 0 ? ex.paceDuration : '',
+    paceDurationUnit: normalizeCardioDurationUnit(ex.paceDurationUnit),
+    paceDistance: ex.paceDistance.trim().length > 0 ? ex.paceDistance : '1',
+    paceDistanceUnit: normalizeCardioDistanceUnit(ex.paceDistanceUnit),
   };
 }
 
@@ -323,10 +381,20 @@ export function applyCardioDurationTrackingChangeToDraftRow(
   ex: ExerciseDraftRow,
   tracking: CardioDurationTracking,
 ): ExerciseDraftRow {
+  if (tracking === 'per_distance_unit') {
+    return {
+      ...ex,
+      cardioDurationTracking: tracking,
+      duration: '',
+      ...defaultPaceDraftFields(ex),
+    };
+  }
   return {
     ...ex,
     cardioDurationTracking: tracking,
     duration: tracking === 'none' ? '' : ex.duration,
+    paceDuration: '',
+    paceDistance: '',
   };
 }
 
@@ -334,10 +402,20 @@ export function applyCardioDistanceTrackingChangeToDraftRow(
   ex: ExerciseDraftRow,
   tracking: CardioDistanceTracking,
 ): ExerciseDraftRow {
+  if (tracking === 'per_duration_unit') {
+    return {
+      ...ex,
+      cardioDistanceTracking: tracking,
+      distance: '',
+      ...defaultPaceDraftFields(ex),
+    };
+  }
   return {
     ...ex,
     cardioDistanceTracking: tracking,
     distance: tracking === 'none' ? '' : ex.distance,
+    paceDuration: '',
+    paceDistance: '',
   };
 }
 
@@ -357,6 +435,7 @@ export function sanitizeWorkoutExercise(exercise: WorkoutExercise): WorkoutExerc
       };
     case 'cardio': {
       const plan = normalizeCardioPlanFields(exercise);
+      const inPace = isCardioPaceTracking({ ...exercise, activityType: 'cardio' });
       return {
         ...exercise,
         sets: 0,
@@ -368,6 +447,18 @@ export function sanitizeWorkoutExercise(exercise: WorkoutExercise): WorkoutExerc
         cardioObjective: plan.cardioObjective,
         cardioDurationTracking: plan.cardioDurationTracking,
         cardioDistanceTracking: plan.cardioDistanceTracking,
+        duration:
+          plan.cardioObjective === 'distance' && plan.cardioDurationTracking !== 'total' ? 0 : exercise.duration,
+        distance:
+          plan.cardioObjective === 'duration' && plan.cardioDistanceTracking !== 'total' ? 0 : exercise.distance,
+        cardioPaceDuration: inPace ? exercise.cardioPaceDuration ?? 0 : 0,
+        cardioPaceDurationUnit: inPace
+          ? normalizeCardioDurationUnit(exercise.cardioPaceDurationUnit ?? exercise.durationUnit)
+          : undefined,
+        cardioPaceDistance: inPace ? exercise.cardioPaceDistance ?? 0 : 0,
+        cardioPaceDistanceUnit: inPace
+          ? normalizeCardioDistanceUnit(exercise.cardioPaceDistanceUnit ?? exercise.distanceUnit)
+          : undefined,
       };
     }
     case 'sport':
@@ -462,6 +553,14 @@ export function workoutExerciseToDraftRow(exercise: WorkoutExercise, options?: {
 
     cardioDistanceTracking: cardioDraft?.cardioDistanceTracking ?? DEFAULT_CARDIO_DISTANCE_TRACKING,
 
+    paceDuration: cardioDraft?.paceDuration ?? '',
+
+    paceDurationUnit: cardioDraft?.paceDurationUnit ?? normalizeCardioDurationUnit(durationUnit),
+
+    paceDistance: cardioDraft?.paceDistance ?? '',
+
+    paceDistanceUnit: cardioDraft?.paceDistanceUnit ?? distanceUnit,
+
     score: exercise.score,
 
     scoreUnit: normalizeScoreUnit(exercise.scoreUnit),
@@ -490,7 +589,7 @@ export function isExerciseDraftRowEmpty(ex: ExerciseDraftRow): boolean {
 
     case 'cardio':
 
-      return !ex.duration.trim() && !ex.distance.trim();
+      return !ex.duration.trim() && !ex.distance.trim() && !ex.paceDuration.trim() && !ex.paceDistance.trim();
 
     case 'sport':
 
@@ -629,8 +728,15 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
     const distanceTracking = normalizeCardioDistanceTracking(sanitized.cardioDistanceTracking);
     const durationUnit = normalizeCardioDurationUnit(sanitized.durationUnit);
     const distanceUnit = normalizeCardioDistanceUnit(sanitized.distanceUnit);
+    const paceDurationUnit = normalizeCardioDurationUnit(sanitized.paceDurationUnit);
+    const paceDistanceUnit = normalizeCardioDistanceUnit(sanitized.paceDistanceUnit);
     const duration = parseDurationInput(sanitized.duration, durationUnit);
     const distance = parseCardioDistanceInput(sanitized.distance, distanceUnit);
+    const paceDuration = parseDurationInput(sanitized.paceDuration, paceDurationUnit);
+    const paceDistance = parseCardioDistanceInput(sanitized.paceDistance, paceDistanceUnit);
+    const isPace =
+      (objective === 'distance' && durationTracking === 'per_distance_unit') ||
+      (objective === 'duration' && distanceTracking === 'per_duration_unit');
 
     if (objective === 'distance') {
       if (!sanitized.distance.trim()) {
@@ -639,12 +745,35 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
       if (!Number.isFinite(distance) || distance <= 0) {
         return { ok: false, title: 'Check your numbers', message: 'Enter a positive distance.' };
       }
-      if (durationTracking !== 'none') {
+      if (durationTracking === 'total') {
         if (!sanitized.duration.trim()) {
           return { ok: false, title: 'Check your numbers', message: 'Enter a duration for this cardio exercise.' };
         }
         if (!Number.isFinite(duration) || duration <= 0) {
           return { ok: false, title: 'Check your numbers', message: 'Enter a positive duration.' };
+        }
+      }
+      if (durationTracking === 'per_distance_unit') {
+        if (!sanitized.paceDuration.trim()) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a pace duration for this cardio exercise.' };
+        }
+        if (!Number.isFinite(paceDuration) || paceDuration <= 0) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a positive pace duration.' };
+        }
+        if (!sanitized.paceDistance.trim()) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a pace distance for this cardio exercise.' };
+        }
+        if (!Number.isFinite(paceDistance) || paceDistance <= 0) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a positive pace distance.' };
+        }
+        if (!cardioPaceDistanceUnitCompatibleWithObjective(distanceUnit, paceDistanceUnit)) {
+          const objectiveLabel = CARDIO_DISTANCE_UNIT_LABELS[distanceUnit];
+          const paceLabel = CARDIO_DISTANCE_UNIT_LABELS[paceDistanceUnit];
+          return {
+            ok: false,
+            title: 'Incompatible distance units',
+            message: `Pace distance (${paceLabel}) must match the objective unit (${objectiveLabel}) or use a convertible length unit such as miles, kilometers, meters, yards, or feet.`,
+          };
         }
       }
     } else {
@@ -654,7 +783,7 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
       if (!Number.isFinite(duration) || duration <= 0) {
         return { ok: false, title: 'Check your numbers', message: 'Enter a positive duration.' };
       }
-      if (distanceTracking !== 'none') {
+      if (distanceTracking === 'total') {
         if (!sanitized.distance.trim()) {
           return { ok: false, title: 'Check your numbers', message: 'Enter a distance for this cardio exercise.' };
         }
@@ -662,10 +791,26 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
           return { ok: false, title: 'Check your numbers', message: 'Enter a positive distance.' };
         }
       }
+      if (distanceTracking === 'per_duration_unit') {
+        if (!sanitized.paceDuration.trim()) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a pace duration for this cardio exercise.' };
+        }
+        if (!Number.isFinite(paceDuration) || paceDuration <= 0) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a positive pace duration.' };
+        }
+        if (!sanitized.paceDistance.trim()) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a pace distance for this cardio exercise.' };
+        }
+        if (!Number.isFinite(paceDistance) || paceDistance <= 0) {
+          return { ok: false, title: 'Check your numbers', message: 'Enter a positive pace distance.' };
+        }
+      }
     }
 
-    const savedDuration = objective === 'distance' && durationTracking === 'none' ? 0 : duration;
-    const savedDistance = objective === 'duration' && distanceTracking === 'none' ? 0 : distance;
+    const savedDuration =
+      objective === 'distance' ? (durationTracking === 'total' ? duration : 0) : duration;
+    const savedDistance =
+      objective === 'duration' ? (distanceTracking === 'total' ? distance : 0) : distance;
 
     return {
       ok: true,
@@ -684,6 +829,10 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
         cardioObjective: objective,
         cardioDurationTracking: objective === 'distance' ? durationTracking : DEFAULT_CARDIO_DURATION_TRACKING,
         cardioDistanceTracking: objective === 'duration' ? distanceTracking : DEFAULT_CARDIO_DISTANCE_TRACKING,
+        cardioPaceDuration: isPace ? paceDuration : 0,
+        cardioPaceDurationUnit: isPace ? paceDurationUnit : undefined,
+        cardioPaceDistance: isPace ? paceDistance : 0,
+        cardioPaceDistanceUnit: isPace ? paceDistanceUnit : undefined,
         score: '',
         scoreUnit: DEFAULT_SCORE_UNIT,
       },
@@ -849,7 +998,7 @@ export type ExerciseDraftSeed = Pick<
 
   ExerciseDraftRow,
 
-  'sourceExerciseId' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'score' | 'scoreUnit'
+  'sourceExerciseId' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'paceDuration' | 'paceDurationUnit' | 'paceDistance' | 'paceDistanceUnit' | 'score' | 'scoreUnit'
 
 > & {
 
@@ -904,6 +1053,14 @@ export function exerciseDraftSeedFromRow(ex: ExerciseDraftRow): ExerciseDraftSee
     cardioDurationTracking: sanitized.cardioDurationTracking,
 
     cardioDistanceTracking: sanitized.cardioDistanceTracking,
+
+    paceDuration: sanitized.paceDuration,
+
+    paceDurationUnit: sanitized.paceDurationUnit,
+
+    paceDistance: sanitized.paceDistance,
+
+    paceDistanceUnit: sanitized.paceDistanceUnit,
 
     score: sanitized.score,
 
@@ -984,6 +1141,14 @@ export function exerciseDraftRowFromSeed(seed: ExerciseDraftSeed): ExerciseDraft
     cardioDurationTracking: cardioPlan?.cardioDurationTracking ?? DEFAULT_CARDIO_DURATION_TRACKING,
 
     cardioDistanceTracking: cardioPlan?.cardioDistanceTracking ?? DEFAULT_CARDIO_DISTANCE_TRACKING,
+
+    paceDuration: seed.paceDuration ?? '',
+
+    paceDurationUnit: normalizeCardioDurationUnit(seed.paceDurationUnit),
+
+    paceDistance: seed.paceDistance ?? '',
+
+    paceDistanceUnit: normalizeCardioDistanceUnit(seed.paceDistanceUnit),
 
     score: seed.score ?? '',
 

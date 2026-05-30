@@ -48,6 +48,8 @@ type Props = {
   onUpdateExerciseCardioDurationTracking: (clientId: string, tracking: CardioDurationTracking) => void;
   onUpdateExerciseCardioDistanceTracking: (clientId: string, tracking: CardioDistanceTracking) => void;
   onUpdateExerciseDurationUnit: (clientId: string, unit: DurationUnit) => void;
+  onUpdateExercisePaceDurationUnit: (clientId: string, unit: DurationUnit) => void;
+  onUpdateExercisePaceDistanceUnit: (clientId: string, unit: CardioDistanceUnit) => void;
   onUpdateExerciseScoreUnit: (clientId: string, unit: ScoreUnit) => void;
   onUpdateExerciseWeightUnit: (clientId: string, unit: WeightUnit) => void;
   onRemoveExercise: (clientId: string) => void;
@@ -76,6 +78,8 @@ export function DraftExerciseDraggableList({
   onUpdateExerciseCardioDurationTracking,
   onUpdateExerciseCardioDistanceTracking,
   onUpdateExerciseDurationUnit,
+  onUpdateExercisePaceDurationUnit,
+  onUpdateExercisePaceDistanceUnit,
   onUpdateExerciseScoreUnit,
   onUpdateExerciseWeightUnit,
   onRemoveExercise,
@@ -199,6 +203,8 @@ export function DraftExerciseDraggableList({
                   onUpdateExerciseCardioDistanceTracking(exercise.clientId, tracking)
                 }
                 onDurationUnitChange={(unit) => onUpdateExerciseDurationUnit(exercise.clientId, unit)}
+                onPaceDurationUnitChange={(unit) => onUpdateExercisePaceDurationUnit(exercise.clientId, unit)}
+                onPaceDistanceUnitChange={(unit) => onUpdateExercisePaceDistanceUnit(exercise.clientId, unit)}
                 onScoreUnitChange={(unit) => onUpdateExerciseScoreUnit(exercise.clientId, unit)}
                 onWeightUnitChange={(unit) => onUpdateExerciseWeightUnit(exercise.clientId, unit)}
               />
