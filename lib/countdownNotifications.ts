@@ -15,6 +15,7 @@ const EXACT_ALARM_PROMPT_KEY = 'countdown-exact-alarm-prompted@v2';
 
 let initialized = false;
 let notificationsModulePromise: Promise<typeof import('expo-notifications') | null> | null = null;
+let countdownExpiryHandledListener: ((timerId: string) => void) | null = null;
 
 export type CountdownLogSession = Pick<LogWorkoutSession, 'workoutId' | 'loggedWorkoutId' | 'intent'>;
 
@@ -61,7 +62,23 @@ export function preloadCountdownNotificationsModule(): void {
   void loadNotificationsModule();
 }
 
+function notifyCountdownExpiryHandled(data: Record<string, unknown> | undefined): void {
+  if (data?.type !== COUNTDOWN_EXPIRY_NOTIFICATION_TYPE) {
+    return;
+  }
+  const timerId = typeof data.timerId === 'string' ? data.timerId : undefined;
+  if (timerId) {
+    countdownExpiryHandledListener?.(timerId);
+  }
+}
+
+/** Called by DurationTimerProvider so duplicate expiry alerts are suppressed after a scheduled notification fires. */
+export function setCountdownExpiryHandledListener(listener: ((timerId: string) => void) | null): void {
+  countdownExpiryHandledListener = listener;
+}
+
 function handleCountdownNotificationResponse(data: Record<string, unknown> | undefined): void {
+  notifyCountdownExpiryHandled(data);
   if (data?.type !== COUNTDOWN_EXPIRY_NOTIFICATION_TYPE) {
     return;
   }
@@ -113,6 +130,10 @@ export function initializeCountdownNotifications(): void {
 
     Notifications.addNotificationResponseReceivedListener((response) => {
       handleCountdownNotificationResponse(response.notification.request.content.data);
+    });
+
+    Notifications.addNotificationReceivedListener((notification) => {
+      notifyCountdownExpiryHandled(notification.request.content.data);
     });
 
     const initialResponse = await Notifications.getLastNotificationResponseAsync();
