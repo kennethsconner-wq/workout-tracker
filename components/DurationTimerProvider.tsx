@@ -26,7 +26,7 @@ import type { DurationTimerMode } from '@/lib/durationTimer';
 
 import { countdownRemainingSeconds, isCountdownExpired } from '@/lib/durationTimer';
 
-import { cancelCountdownExpiryNotification, countdownNotificationsSupported, initializeCountdownNotifications, presentCountdownExpiryNotificationNow, type CountdownLogSession } from '@/lib/countdownNotifications';
+import { cancelCountdownExpiryNotification, countdownNotificationsSupported, initializeCountdownNotifications, presentCountdownExpiryNotificationNow, setCountdownExpiryHandledListener, type CountdownLogSession } from '@/lib/countdownNotifications';
 
 import { themedAlert } from '@/lib/themedAlert';
 
@@ -206,6 +206,48 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
 
 
+  useEffect(() => {
+
+    const markCountdownExpiryHandled = (timerId: string) => {
+
+      setTimers((previous) => {
+
+        const current = previous[timerId];
+
+        if (!current || current.returnAlertShown) {
+
+          return previous;
+
+        }
+
+        return {
+
+          ...previous,
+
+          [timerId]: { ...current, returnAlertShown: true },
+
+        };
+
+      });
+
+      const timer = timersRef.current[timerId];
+
+      if (timer && !timer.returnAlertShown) {
+
+        timersRef.current[timerId] = { ...timer, returnAlertShown: true };
+
+      }
+
+    };
+
+    setCountdownExpiryHandledListener(markCountdownExpiryHandled);
+
+    return () => setCountdownExpiryHandledListener(null);
+
+  }, []);
+
+
+
   const hasRunning = Object.keys(timers).length > 0;
 
 
@@ -290,23 +332,37 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
 
 
-      if (AppState.currentState !== 'active') {
+      const appState = AppState.currentState;
 
-        void cancelCountdownExpiryNotification(timerId);
+      if (appState === 'background') {
 
-        void presentCountdownExpiryNotificationNow({
+        if (timer.notificationScheduled && countdownNotificationsSupported()) {
 
-          timerId,
+          void cancelCountdownExpiryNotification(timerId);
 
-          exerciseName: timer.exerciseLabel ?? 'exercise',
+        } else {
 
-          logSession: timer.countdownLogSession,
+          void cancelCountdownExpiryNotification(timerId);
 
-        });
+          void presentCountdownExpiryNotificationNow({
 
-      } else if (!timer.notificationScheduled || !countdownNotificationsSupported()) {
+            timerId,
 
-        notifyCountdownReturnAlert(timer.exerciseLabel);
+            exerciseName: timer.exerciseLabel ?? 'exercise',
+
+            logSession: timer.countdownLogSession,
+
+          });
+
+        }
+
+      } else if (appState === 'active') {
+
+        if (!timer.notificationScheduled || !countdownNotificationsSupported()) {
+
+          notifyCountdownReturnAlert(timer.exerciseLabel);
+
+        }
 
       }
 
