@@ -21,11 +21,14 @@ export default function TabLayout() {
           title: 'Workouts',
           tabBarIcon: ({ color, size }) => <Ionicons name="barbell-outline" color={color} size={size} />,
           headerRight: () => (
-            <Link href="/about" asChild>
-              <Pressable style={{ marginRight: 15 }}>
+            <Link href="/settings" asChild>
+              <Pressable
+                style={{ marginRight: 15 }}
+                accessibilityRole="button"
+                accessibilityLabel="Settings">
                 {({ pressed }) => (
                   <Ionicons
-                    name="information-circle-outline"
+                    name="settings-outline"
                     size={25}
                     color={Colors[colorScheme].text}
                     style={{ opacity: pressed ? 0.5 : 1 }}

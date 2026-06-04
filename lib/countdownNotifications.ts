@@ -19,6 +19,14 @@ let countdownExpiryHandledListener: ((timerId: string) => void) | null = null;
 
 export type CountdownLogSession = Pick<LogWorkoutSession, 'workoutId' | 'loggedWorkoutId' | 'intent'>;
 
+export function isSameCountdownLogSession(a: CountdownLogSession, b: CountdownLogSession): boolean {
+  return (
+    a.workoutId === b.workoutId &&
+    a.intent === b.intent &&
+    (a.loggedWorkoutId ?? '') === (b.loggedWorkoutId ?? '')
+  );
+}
+
 type CountdownNotificationContentInput = {
   timerId: string;
   exerciseName: string;

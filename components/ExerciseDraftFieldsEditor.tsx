@@ -20,9 +20,19 @@ import { SPORT_DURATION_UNITS, STRETCH_DURATION_UNITS, type DurationUnit } from 
 import { INTEGER_DECIMAL_PLACES } from '@/lib/numericInput';
 import type { ScoreUnit } from '@/lib/scoreUnits';
 import type { WeightUnit } from '@/lib/weightUnits';
+import { RestBetweenSetsFieldsEditor } from '@/components/RestBetweenSetsFieldsEditor';
 import type { ExerciseDraftRow } from '@/lib/exerciseDraft';
+import type { RestDurationUnit } from '@/lib/restBetweenSets';
 
-type NumericDraftField = 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'paceDuration' | 'paceDistance';
+type NumericDraftField =
+  | 'sets'
+  | 'reps'
+  | 'weight'
+  | 'duration'
+  | 'distance'
+  | 'paceDuration'
+  | 'paceDistance'
+  | 'restDuration';
 type TextDraftField = 'score';
 export type ExerciseDraftField = NumericDraftField | TextDraftField;
 
@@ -47,6 +57,8 @@ type Props = {
   onPaceDistanceUnitChange: (unit: CardioDistanceUnit) => void;
   onScoreUnitChange: (unit: ScoreUnit) => void;
   onWeightUnitChange: (unit: WeightUnit) => void;
+  onRestBetweenSetsEnabledChange: (enabled: boolean) => void;
+  onRestDurationUnitChange: (unit: RestDurationUnit) => void;
 };
 
 function UnitField({
@@ -107,6 +119,8 @@ export function ExerciseDraftFieldsEditor({
   onPaceDistanceUnitChange,
   onScoreUnitChange,
   onWeightUnitChange,
+  onRestBetweenSetsEnabledChange,
+  onRestDurationUnitChange,
 }: Props) {
   const suffixColor = activeScheme === 'dark' ? '#a3a3a3' : '#737373';
   const fieldStyle = lockedFieldStyle ? [setRowInputStyle, lockedFieldStyle] : setRowInputStyle;
@@ -165,6 +179,20 @@ export function ExerciseDraftFieldsEditor({
               textColor={textColor}
             />
           </View>
+          <RestBetweenSetsFieldsEditor
+            enabled={draft.restBetweenSetsEnabled}
+            restDuration={draft.restDuration}
+            restDurationUnit={draft.restDurationUnit}
+            disabled={disabled}
+            activeScheme={activeScheme}
+            borderColor={borderColor}
+            textColor={textColor}
+            setRowInputStyle={fieldStyle}
+            lockedFieldStyle={lockedFieldStyle}
+            onEnabledChange={onRestBetweenSetsEnabledChange}
+            onRestDurationChange={(value) => onFieldChange('restDuration', value)}
+            onRestDurationUnitChange={onRestDurationUnitChange}
+          />
         </View>
       ) : null}
 
@@ -272,6 +300,20 @@ export function ExerciseDraftFieldsEditor({
               textColor={textColor}
             />
           </View>
+          <RestBetweenSetsFieldsEditor
+            enabled={draft.restBetweenSetsEnabled}
+            restDuration={draft.restDuration}
+            restDurationUnit={draft.restDurationUnit}
+            disabled={disabled}
+            activeScheme={activeScheme}
+            borderColor={borderColor}
+            textColor={textColor}
+            setRowInputStyle={fieldStyle}
+            lockedFieldStyle={lockedFieldStyle}
+            onEnabledChange={onRestBetweenSetsEnabledChange}
+            onRestDurationChange={(value) => onFieldChange('restDuration', value)}
+            onRestDurationUnitChange={onRestDurationUnitChange}
+          />
         </View>
       ) : null}
     </>

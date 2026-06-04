@@ -11,7 +11,7 @@ export default function AboutScreen() {
       <Stack.Screen
         options={{
           title: 'About',
-          presentation: 'modal',
+          presentation: 'card',
           ...stackHeaderHideIosBackLabel,
         }}
       />

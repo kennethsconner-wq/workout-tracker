@@ -28,6 +28,7 @@ import {
 } from '@/lib/cardioPlan';
 import type { ScoreUnit } from '@/lib/scoreUnits';
 import type { WeightUnit } from '@/lib/weightUnits';
+import type { RestDurationUnit } from '@/lib/restBetweenSets';
 import {
   emptyExerciseDraftRow,
   exerciseDraftRowFromSeed,
@@ -219,7 +220,7 @@ export default function WorkoutEditScreen() {
 
   const updateExerciseField = (
     exerciseId: string,
-    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'paceDuration' | 'paceDistance' | 'score',
+    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'paceDuration' | 'paceDistance' | 'score' | 'restDuration',
     value: string,
   ) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, [field]: value } : ex)));
@@ -273,6 +274,20 @@ export default function WorkoutEditScreen() {
 
   const updateExerciseWeightUnit = (exerciseId: string, unit: WeightUnit) => {
     setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, weightUnit: unit } : ex)));
+  };
+
+  const updateExerciseRestBetweenSetsEnabled = (exerciseId: string, enabled: boolean) => {
+    setExercises((prev) =>
+      prev.map((ex) =>
+        ex.clientId === exerciseId
+          ? { ...ex, restBetweenSetsEnabled: enabled, restDuration: enabled ? ex.restDuration : '' }
+          : ex,
+      ),
+    );
+  };
+
+  const updateExerciseRestDurationUnit = (exerciseId: string, unit: RestDurationUnit) => {
+    setExercises((prev) => prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, restDurationUnit: unit } : ex)));
   };
 
   const parseWorkout = (): Omit<Workout, 'id' | 'createdAt'> | null => {
@@ -388,6 +403,8 @@ export default function WorkoutEditScreen() {
         onUpdateExercisePaceDistanceUnit={updateExercisePaceDistanceUnit}
         onUpdateExerciseScoreUnit={updateExerciseScoreUnit}
         onUpdateExerciseWeightUnit={updateExerciseWeightUnit}
+        onUpdateExerciseRestBetweenSetsEnabled={updateExerciseRestBetweenSetsEnabled}
+        onUpdateExerciseRestDurationUnit={updateExerciseRestDurationUnit}
         onRemoveExercise={removeExercise}
         confirmBeforeRemoveExercise
         contentContainerStyle={styles.scroll}

@@ -803,11 +803,12 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   exerciseName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '700',
   },
   setLine: {
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '600',
     opacity: 0.9,
   },
   centered: {

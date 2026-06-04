@@ -172,3 +172,19 @@ export function isNewLogFormPristine(
 
   return true;
 }
+
+/** Whether an in-progress new-log session should be kept on device (includes active timers with no field input). */
+export function shouldPersistNewLogDraft(
+  workout: Workout,
+  exercises: DraftExerciseFields[],
+  omittedWorkoutExerciseIds: readonly string[],
+  sessionDate: Date,
+  initialSessionDate: Date,
+  hasActiveLogTimers: boolean,
+): boolean {
+  if (hasActiveLogTimers) {
+    return true;
+  }
+  const sessionDateChanged = sessionDate.getTime() !== initialSessionDate.getTime();
+  return !isNewLogFormPristine(workout, exercises, omittedWorkoutExerciseIds) || sessionDateChanged;
+}
