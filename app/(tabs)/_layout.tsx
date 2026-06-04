@@ -14,6 +14,7 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme].tint,
         headerShown: useClientOnlyValue(false, true),
+        sceneStyle: { backgroundColor: Colors[colorScheme].background },
       }}>
       <Tabs.Screen
         name="index"

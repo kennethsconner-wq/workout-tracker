@@ -6,12 +6,14 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "workouttracker",
-    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#241734",
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.kconsoft.axiosworkouttracker"
     },
     "android": {
+      "userInterfaceStyle": "dark",
       "package": "com.kconsoft.workouttracker",
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM",
@@ -37,7 +39,7 @@
         {
           "image": "./assets/images/splash-icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#241734"
         }
       ],
       "expo-web-browser",

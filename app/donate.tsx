@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { Platform, Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import { Text, View } from '@/components/Themed';
@@ -41,7 +41,7 @@ export default function DonateScreen() {
             <Text style={styles.buttonLabel}>Donate with PayPal</Text>
           </Pressable>
         </View>
-        <StatusBar style={Platform.OS === 'ios' ? 'light' : 'auto'} />
+        <StatusBar style="light" />
       </View>
     </>
   );

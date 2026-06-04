@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useCallback } from 'react';
-import { FlatList, Platform, Pressable, StyleSheet } from 'react-native';
+import { FlatList, Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import { Text, View } from '@/components/Themed';
@@ -99,7 +99,7 @@ export default function SettingsScreen() {
           renderItem={renderItem}
           contentContainerStyle={styles.list}
         />
-        <StatusBar style={Platform.OS === 'ios' ? 'light' : 'auto'} />
+        <StatusBar style="light" />
       </View>
     </>
   );

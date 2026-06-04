@@ -1,5 +1,6 @@
 import 'react-native-gesture-handler';
 import { DarkTheme, ThemeProvider } from '@react-navigation/native';
+import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -25,16 +26,26 @@ export const unstable_settings = {
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
+const appBackground = Colors.dark.background;
+
 /** Navigation chrome: same for OS light and dark while app appearance is unified on dark palette. */
 const NavigationAppTheme = {
   ...DarkTheme,
   colors: {
     ...DarkTheme.colors,
     primary: Colors.dark.tint,
-    background: Colors.dark.background,
-    card: Colors.dark.background,
+    background: appBackground,
+    card: appBackground,
     text: Colors.dark.text,
   },
+};
+
+/** Keeps stack pop transitions from revealing Android's default white window/scene background. */
+const stackScreenOptions = {
+  ...stackHeaderHideIosBackLabel,
+  contentStyle: { backgroundColor: appBackground },
+  headerStyle: { backgroundColor: appBackground },
+  headerTintColor: Colors.dark.text,
 };
 
 export default function RootLayout() {
@@ -61,16 +72,17 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
+  useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(appBackground);
+  }, []);
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: appBackground }}>
+      <SafeAreaProvider style={{ flex: 1, backgroundColor: appBackground }}>
         <ThemedAlertProvider>
         <DurationTimerProvider>
         <ThemeProvider value={NavigationAppTheme}>
-        <Stack
-          screenOptions={{
-            ...stackHeaderHideIosBackLabel,
-          }}>
+        <Stack screenOptions={stackScreenOptions}>
           <Stack.Screen
             name="(tabs)"
             options={{
