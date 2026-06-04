@@ -1,5 +1,5 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { useNavigation, useFocusEffect, type NavigationProp, type ParamListBase } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,7 +13,7 @@ import {
 
 import { DraftExerciseDraggableList } from '@/components/DraftExerciseDraggableList';
 import { StickySaveFooter } from '@/components/StickySaveFooter';
-import { WorkoutFormExerciseLibraryMenu } from '@/components/WorkoutFormExerciseLibraryMenu';
+import { SettingsHeaderButton } from '@/components/SettingsHeaderButton';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
@@ -60,7 +60,6 @@ function toDraft(exercise: WorkoutExercise): ExerciseDraftRow {
 
 export default function WorkoutEditScreen() {
   const { id, importExercises } = useLocalSearchParams<{ id?: string; importExercises?: string | string[] }>();
-  const navigation = useNavigation();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
   const textColor = Colors[activeScheme].text;
@@ -352,24 +351,15 @@ export default function WorkoutEditScreen() {
     })();
   };
 
-  const openExerciseLibraryFromMenu = useCallback(() => {
-    if (!id) {
-      return;
-    }
-    router.push({
-      pathname: '/exercise-library',
-      params: {
-        libraryEntry: 'menu',
-        source: 'edit',
-        workoutId: id,
-        existingExercises: JSON.stringify(exercises.map((exercise) => exerciseDraftSeedFromRow(exercise))),
-      },
-    });
-  }, [id, exercises]);
-
   return (
     <RNView style={styles.screenWrap}>
-      <Stack.Screen options={{ title: 'Edit Workout', ...stackHeaderHideIosBackLabel }} />
+      <Stack.Screen
+        options={{
+          title: 'Edit Workout',
+          headerRight: () => <SettingsHeaderButton />,
+          ...stackHeaderHideIosBackLabel,
+        }}
+      />
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator color={Colors[activeScheme].tint} />
@@ -456,11 +446,6 @@ export default function WorkoutEditScreen() {
           <StickySaveFooter onPress={onSave} activeScheme={activeScheme} />
         </KeyboardAvoidingView>
       )}
-      <WorkoutFormExerciseLibraryMenu
-        navigation={navigation as NavigationProp<ParamListBase>}
-        activeScheme={activeScheme}
-        onExerciseLibrary={openExerciseLibraryFromMenu}
-      />
     </RNView>
   );
 }

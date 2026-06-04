@@ -1,4 +1,4 @@
-import { useNavigation, useFocusEffect, type NavigationProp, type ParamListBase } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -12,7 +12,6 @@ import {
 
 import { DraftExerciseDraggableList } from '@/components/DraftExerciseDraggableList';
 import { StickySaveFooter } from '@/components/StickySaveFooter';
-import { WorkoutFormExerciseLibraryMenu } from '@/components/WorkoutFormExerciseLibraryMenu';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -390,18 +389,6 @@ export default function LogWorkoutScreen() {
     })();
   };
 
-  const openExerciseLibraryFromMenu = useCallback(() => {
-    router.push({
-      pathname: '/exercise-library',
-      params: {
-        libraryEntry: 'menu',
-        source: 'create',
-        createDraft: JSON.stringify({ title, daysOfWeek, iconId }),
-        existingExercises: JSON.stringify(exercises.map((exercise) => exerciseDraftSeedFromRow(exercise))),
-      },
-    });
-  }, [title, daysOfWeek, iconId, exercises]);
-
   return (
     <RNView style={styles.screenWrap}>
       <KeyboardAvoidingView
@@ -481,11 +468,6 @@ export default function LogWorkoutScreen() {
       />
         <StickySaveFooter onPress={onSave} activeScheme={activeScheme} insetBottom={false} />
       </KeyboardAvoidingView>
-      <WorkoutFormExerciseLibraryMenu
-        navigation={navigation as NavigationProp<ParamListBase>}
-        activeScheme={activeScheme}
-        onExerciseLibrary={openExerciseLibraryFromMenu}
-      />
     </RNView>
   );
 }
