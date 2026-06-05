@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { normalizeActivityType } from '@/lib/activityTypes';
 import { sanitizeWorkoutExercise } from '@/lib/exerciseDraft';
+import { readRestBetweenSetsFromStored } from '@/lib/restBetweenSets';
 import { readActualStretchSetsFromStored, readStretchSetsFromStored } from '@/lib/stretchSets';
 import { cardioPlansMatch, migrateLegacyCardioPaceFields, normalizeCardioDistanceTracking, normalizeCardioDurationTracking, normalizeCardioObjective } from '@/lib/cardioPlan';
 import { DEFAULT_CARDIO_DISTANCE_UNIT, migrateLegacyCardioSetsDurationToDistance, normalizeCardioDistanceUnit } from '@/lib/cardioDistanceUnits';
@@ -10,7 +11,14 @@ import { DEFAULT_DURATION_UNIT, normalizeCardioDurationUnit, normalizeDurationUn
 import { DEFAULT_SCORE_UNIT, normalizeScoreUnit } from '@/lib/scoreUnits';
 import { DEFAULT_WEIGHT_UNIT, normalizeWeightUnit } from '@/lib/weightUnits';
 import { newId } from '@/lib/ids';
+import { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
 import { normalizeWorkoutIconId } from '@/lib/workoutIcons';
+import {
+  loggedExerciseMatchesDefinitionForRemoval,
+  removeExerciseLibraryEntry,
+  replaceExerciseLibraryEntry,
+  upsertExerciseLibraryFromDefinitions,
+} from '@/lib/exerciseLibraryStorage';
 import {
   DAYS_OF_WEEK,
   type DayOfWeek,
@@ -159,6 +167,7 @@ function normalizeWorkoutExercise(raw: unknown): WorkoutExercise {
     score: typeof exercise.score === 'string' ? exercise.score : '',
     scoreUnit: readExerciseScoreUnit(exercise),
     stretchSets: readStretchSetsFromStored(exercise, activityType),
+    ...readRestBetweenSetsFromStored(exercise, activityType),
   });
 }
 
@@ -538,6 +547,7 @@ export async function addWorkout(
     exercises: workout.exercises,
   };
   await saveWorkouts([next, ...existing]);
+  await upsertExerciseLibraryFromDefinitions(next.exercises);
   return next;
 }
 
@@ -565,6 +575,7 @@ export async function updateWorkout(
   };
   const next = existing.map((w) => (w.id === id ? nextWorkout : w));
   await saveWorkouts(next);
+  await upsertExerciseLibraryFromDefinitions(nextWorkout.exercises);
   return nextWorkout;
 }
 
@@ -573,7 +584,7 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
   exercises: Array<
     Pick<
       WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'
     >
   >,
 ): Promise<void> {
@@ -610,42 +621,16 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
         cardioPaceDistanceUnit: definition.cardioPaceDistanceUnit,
         score: definition.score,
         scoreUnit: definition.scoreUnit,
+        restBetweenSetsEnabled: definition.restBetweenSetsEnabled,
+        restDuration: definition.restDuration,
+        restDurationUnit: definition.restDurationUnit,
       });
     }),
   }));
   await saveWorkouts(next);
 }
 
-export function matchesExerciseDefinition(
-  ex: Pick<
-    WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
-  >,
-  def: Pick<
-    WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
-  >,
-): boolean {
-  return (
-    ex.activityType === def.activityType &&
-    ex.name === def.name &&
-    ex.sets === def.sets &&
-    ex.reps === def.reps &&
-    ex.weight === def.weight &&
-    ex.weightUnit === def.weightUnit &&
-    ex.duration === def.duration &&
-    ex.durationUnit === def.durationUnit &&
-    ex.distance === def.distance &&
-    ex.distanceUnit === def.distanceUnit &&
-    cardioPlansMatch(ex, def) &&
-    (ex.cardioPaceDuration ?? 0) === (def.cardioPaceDuration ?? 0) &&
-    (ex.cardioPaceDurationUnit ?? '') === (def.cardioPaceDurationUnit ?? '') &&
-    (ex.cardioPaceDistance ?? 0) === (def.cardioPaceDistance ?? 0) &&
-    (ex.cardioPaceDistanceUnit ?? '') === (def.cardioPaceDistanceUnit ?? '') &&
-    ex.score === def.score &&
-    ex.scoreUnit === def.scoreUnit
-  );
-}
+export { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
 
 /**
  * Updates every template exercise whose definition matches `oldDef` to `nextDef` (preserving each exercise `id`),
@@ -654,18 +639,18 @@ export function matchesExerciseDefinition(
 export async function updateExercisesMatchingSignatureAcrossWorkouts(
   oldDef: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'
   >,
   nextDef: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'
   >,
 ): Promise<void> {
   const all = await loadWorkouts();
   const updates: Array<
     Pick<
       WorkoutExercise,
-      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+      'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'
     >
   > = [];
   const affectedIds = new Set<string>();
@@ -678,9 +663,7 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
     }
   }
   await propagateExerciseDefinitionsAcrossWorkouts(updates);
-  if (affectedIds.size === 0) {
-    return;
-  }
+  await replaceExerciseLibraryEntry(oldDef, nextDef);
   const cleanNext = sanitizeWorkoutExercise({
     id: 'sanitize',
     activityType: nextDef.activityType,
@@ -702,12 +685,15 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
     cardioPaceDistanceUnit: nextDef.cardioPaceDistanceUnit,
     score: nextDef.score,
     scoreUnit: nextDef.scoreUnit,
+    restBetweenSetsEnabled: nextDef.restBetweenSetsEnabled,
+    restDuration: nextDef.restDuration,
+    restDurationUnit: nextDef.restDurationUnit,
   });
   const logs = await loadLoggedWorkouts();
   const nextLogs = logs.map((log) => ({
     ...log,
     exercises: log.exercises.map((lex) =>
-      affectedIds.has(lex.workoutExerciseId)
+      affectedIds.has(lex.workoutExerciseId) || matchesExerciseDefinition(lex, oldDef)
         ? {
             ...lex,
             activityType: cleanNext.activityType,
@@ -729,6 +715,9 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
             cardioPaceDistanceUnit: cleanNext.cardioPaceDistanceUnit,
             score: cleanNext.score,
             scoreUnit: cleanNext.scoreUnit,
+            restBetweenSetsEnabled: cleanNext.restBetweenSetsEnabled,
+            restDuration: cleanNext.restDuration,
+            restDurationUnit: cleanNext.restDurationUnit,
           }
         : lex,
     ),
@@ -740,7 +729,7 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
 export async function removeExercisesMatchingSignatureFromAllWorkouts(
   def: Pick<
     WorkoutExercise,
-    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+    'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'
   >,
 ): Promise<void> {
   const all = await loadWorkouts();
@@ -756,16 +745,16 @@ export async function removeExercisesMatchingSignatureFromAllWorkouts(
     ...w,
     exercises: w.exercises.filter((ex) => !matchesExerciseDefinition(ex, def)),
   }));
-  if (idsToRemove.size === 0) {
-    return;
-  }
   await saveWorkouts(nextTemplates);
+  await removeExerciseLibraryEntry(def);
 
   const logs = await loadLoggedWorkouts();
   const nextLogs = logs
     .map((log) => ({
       ...log,
-      exercises: log.exercises.filter((lex) => !idsToRemove.has(lex.workoutExerciseId)),
+      exercises: log.exercises.filter(
+        (lex) => !loggedExerciseMatchesDefinitionForRemoval(lex, def, idsToRemove),
+      ),
     }))
     .filter((log) => log.exercises.length > 0);
   await saveLoggedWorkouts(nextLogs);

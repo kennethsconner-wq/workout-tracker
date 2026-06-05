@@ -35,6 +35,89 @@ export function getDeviceDayOfWeek(date: Date = new Date()): DayOfWeek {
   return JS_GET_DAY_TO_DAY_OF_WEEK[date.getDay()];
 }
 
+export type WorkoutDueTone = 'due_today' | 'upcoming' | 'completed_today';
+
+export type WorkoutDueIndicator = {
+  tone: WorkoutDueTone;
+  label: string;
+};
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function isLoggedOnOrAfterDay(lastLoggedAt: string | null, dayStart: Date): boolean {
+  if (!lastLoggedAt) {
+    return false;
+  }
+  return startOfLocalDay(new Date(lastLoggedAt)).getTime() >= dayStart.getTime();
+}
+
+function findScheduledDayFrom(
+  daysOfWeek: DayOfWeek[],
+  anchor: Date,
+  direction: 'past' | 'future',
+  includeAnchor: boolean,
+): { day: DayOfWeek; date: Date } | null {
+  const startOffset = includeAnchor ? 0 : 1;
+  for (let offset = startOffset; offset < 7; offset += 1) {
+    const candidate = new Date(anchor);
+    candidate.setDate(candidate.getDate() + (direction === 'past' ? -offset : offset));
+    const day = getDeviceDayOfWeek(candidate);
+    if (daysOfWeek.includes(day)) {
+      return { day, date: startOfLocalDay(candidate) };
+    }
+  }
+  return null;
+}
+
+function formatUpcomingDue(dueDate: Date, today: Date, day: DayOfWeek): WorkoutDueIndicator {
+  const daysUntil = Math.round((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (daysUntil === 1) {
+    return { tone: 'upcoming', label: 'Due tomorrow' };
+  }
+  if (daysUntil <= 6) {
+    return { tone: 'upcoming', label: `Due ${day}` };
+  }
+  return { tone: 'upcoming', label: `Due in ${daysUntil} days` };
+}
+
+/**
+ * Derives a human-readable due status from a workout's schedule and last log time.
+ * Compares calendar days in the device's local timezone.
+ */
+export function getWorkoutDueIndicator(
+  daysOfWeek: DayOfWeek[],
+  lastLoggedAt: string | null,
+  now: Date = new Date(),
+): WorkoutDueIndicator | null {
+  if (daysOfWeek.length === 0) {
+    return null;
+  }
+
+  const today = startOfLocalDay(now);
+  const todayDay = getDeviceDayOfWeek(now);
+  const loggedToday = isLoggedOnOrAfterDay(lastLoggedAt, today);
+
+  if (daysOfWeek.includes(todayDay)) {
+    if (!loggedToday) {
+      return { tone: 'due_today', label: 'Due today' };
+    }
+    const next = findScheduledDayFrom(daysOfWeek, now, 'future', false);
+    if (next) {
+      return formatUpcomingDue(next.date, today, next.day);
+    }
+    return { tone: 'completed_today', label: 'Logged today' };
+  }
+
+  const upcoming = findScheduledDayFrom(daysOfWeek, now, 'future', false);
+  if (upcoming) {
+    return formatUpcomingDue(upcoming.date, today, upcoming.day);
+  }
+
+  return null;
+}
+
 /**
  * Chooses which workout id to select when the list is shown or refreshed.
  * If exactly one workout matches the device's current weekday, that id is used.

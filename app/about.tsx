@@ -1,5 +1,5 @@
 import { Stack } from 'expo-router';
-import { Platform, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import { Text, View } from '@/components/Themed';
@@ -11,7 +11,7 @@ export default function AboutScreen() {
       <Stack.Screen
         options={{
           title: 'About',
-          presentation: 'modal',
+          presentation: 'card',
           ...stackHeaderHideIosBackLabel,
         }}
       />
@@ -25,7 +25,7 @@ export default function AboutScreen() {
             recovered from a server because none is sent off-device by this version of the app.
           </Text>
         </View>
-        <StatusBar style={Platform.OS === 'ios' ? 'light' : 'auto'} />
+        <StatusBar style="light" />
       </View>
     </>
   );

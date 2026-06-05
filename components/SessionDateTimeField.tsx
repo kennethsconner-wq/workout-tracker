@@ -372,8 +372,8 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
   fieldText: {
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 18,
+    fontWeight: '600',
     flex: 1,
   },
   modalBackdrop: {

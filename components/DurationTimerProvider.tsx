@@ -26,7 +26,7 @@ import type { DurationTimerMode } from '@/lib/durationTimer';
 
 import { countdownRemainingSeconds, isCountdownExpired } from '@/lib/durationTimer';
 
-import { cancelCountdownExpiryNotification, countdownNotificationsSupported, initializeCountdownNotifications, presentCountdownExpiryNotificationNow, setCountdownExpiryHandledListener, type CountdownLogSession } from '@/lib/countdownNotifications';
+import { cancelCountdownExpiryNotification, countdownNotificationsSupported, initializeCountdownNotifications, isSameCountdownLogSession, presentCountdownExpiryNotificationNow, setCountdownExpiryHandledListener, type CountdownLogSession } from '@/lib/countdownNotifications';
 
 import { themedAlert } from '@/lib/themedAlert';
 
@@ -52,6 +52,9 @@ type RunningTimer = {
 
   returnAlertShown: boolean;
 
+  /** When true, countdown display stays at 0:00 after expiry (no negative overtime). */
+  clampCountdownAtZero?: boolean;
+
 };
 
 
@@ -69,6 +72,8 @@ export type StartDurationTimerOptions = {
   countdownLogSession?: CountdownLogSession;
 
   notificationScheduled?: boolean;
+
+  clampCountdownAtZero?: boolean;
 
 };
 
@@ -112,6 +117,8 @@ type DurationTimerContextValue = {
 
   finishTimer: (timerId: string) => number;
 
+  hasRunningTimerForLogSession: (session: CountdownLogSession) => boolean;
+
 };
 
 
@@ -134,6 +141,10 @@ function buildTimerSnapshot(timer: RunningTimer): DurationTimerSnapshot {
 
   if (timer.mode === 'countdown' && timer.targetSeconds !== null) {
 
+    const rawRemaining = countdownRemainingSeconds(elapsedSeconds, timer.targetSeconds);
+
+    const remainingSeconds = timer.clampCountdownAtZero ? Math.max(0, rawRemaining) : rawRemaining;
+
     return {
 
       mode: timer.mode,
@@ -142,7 +153,7 @@ function buildTimerSnapshot(timer: RunningTimer): DurationTimerSnapshot {
 
       elapsedSeconds,
 
-      remainingSeconds: countdownRemainingSeconds(elapsedSeconds, timer.targetSeconds),
+      remainingSeconds,
 
       expired: isCountdownExpired(elapsedSeconds, timer.targetSeconds),
 
@@ -454,7 +465,13 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
   const isRunning = useCallback((timerId: string) => timerId in timers, [timers]);
 
-
+  const hasRunningTimerForLogSession = useCallback(
+    (session: CountdownLogSession) =>
+      Object.values(timers).some(
+        (timer) => timer.countdownLogSession && isSameCountdownLogSession(timer.countdownLogSession, session),
+      ),
+    [timers],
+  );
 
   const getTimerSnapshot = useCallback(
 
@@ -551,6 +568,8 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
         notificationScheduled: options.notificationScheduled ?? false,
 
         returnAlertShown: false,
+
+        clampCountdownAtZero: options.clampCountdownAtZero ?? false,
 
       },
 
@@ -694,9 +713,11 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
       finishTimer,
 
+      hasRunningTimerForLogSession,
+
     }),
 
-    [tick, isRunning, getTimerSnapshot, getElapsedSeconds, getDurationUnit, startTimer, setTimerNotificationScheduled, cancelTimer, finishTimer],
+    [tick, isRunning, getTimerSnapshot, getElapsedSeconds, getDurationUnit, startTimer, setTimerNotificationScheduled, cancelTimer, finishTimer, hasRunningTimerForLogSession],
 
   );
 

@@ -23,6 +23,10 @@ type Props = {
   countdownTargetSeconds?: number | null;
   countdownExerciseLabel?: string;
   countdownLogSession?: CountdownLogSession;
+  /** When true, countdown stops at 0:00 instead of showing overtime. */
+  clampCountdownAtZero?: boolean;
+  /** When false, expiry does not vibrate (e.g. rest timers). Defaults to true for countdown. */
+  notifyOnExpire?: boolean;
   onComplete: (formattedValue: string) => void;
   disabled?: boolean;
   activeScheme: 'light' | 'dark';
@@ -42,6 +46,8 @@ export function DurationTimerButton({
   countdownTargetSeconds = null,
   countdownExerciseLabel,
   countdownLogSession,
+  clampCountdownAtZero = false,
+  notifyOnExpire,
   onComplete,
   disabled = false,
   activeScheme,
@@ -69,12 +75,14 @@ export function DurationTimerButton({
     ? (snapshot?.remainingSeconds ?? countdownTargetSeconds ?? 0)
     : (snapshot?.elapsedSeconds ?? 0);
 
+  const shouldNotifyOnExpire = notifyOnExpire ?? isCountdown;
+
   useEffect(() => {
-    if (expired && !wasExpiredRef.current) {
+    if (expired && !wasExpiredRef.current && shouldNotifyOnExpire) {
       notifyCountdownExpired();
     }
     wasExpiredRef.current = expired;
-  }, [expired]);
+  }, [expired, shouldNotifyOnExpire]);
 
   useEffect(() => {
     if (!running) {
@@ -94,6 +102,7 @@ export function DurationTimerButton({
       exerciseLabel: countdownExerciseLabel,
       countdownLogSession,
       notificationScheduled: false,
+      clampCountdownAtZero,
     });
 
     if (

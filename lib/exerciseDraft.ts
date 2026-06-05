@@ -73,6 +73,15 @@ import {
 import { DEFAULT_WEIGHT_UNIT, normalizeWeightUnit, type WeightUnit } from '@/lib/weightUnits';
 
 import { newId } from '@/lib/ids';
+import {
+  DEFAULT_REST_DURATION_UNIT,
+  normalizeRestDurationUnit,
+  parseRestDurationFromDraftInput,
+  restDurationToDraftInput,
+  sanitizeRestBetweenSetsFields,
+  type RestBetweenSetsFields,
+  type RestDurationUnit,
+} from '@/lib/restBetweenSets';
 
 import type { Workout, WorkoutExercise } from '@/lib/types';
 
@@ -122,6 +131,12 @@ export type ExerciseDraftRow = {
 
   scoreUnit: ScoreUnit;
 
+  restBetweenSetsEnabled: boolean;
+
+  restDuration: string;
+
+  restDurationUnit: RestDurationUnit;
+
 };
 
 /** Exercise fields preserved when copying a workout template to Create Workout. */
@@ -149,6 +164,9 @@ export type CopyWorkoutExercisePayload = Pick<
   | 'score'
   | 'scoreUnit'
   | 'stretchSets'
+  | 'restBetweenSetsEnabled'
+  | 'restDuration'
+  | 'restDurationUnit'
 >;
 
 export type CopyWorkoutPayload = Pick<Workout, 'title' | 'daysOfWeek' | 'iconId'> & {
@@ -183,6 +201,9 @@ export function buildCopyWorkoutPayload(workout: Workout): CopyWorkoutPayload {
       score: exercise.score,
       scoreUnit: exercise.scoreUnit,
       stretchSets: exercise.stretchSets,
+      restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
+      restDuration: exercise.restDuration,
+      restDurationUnit: exercise.restDurationUnit,
     })),
   };
 }
@@ -239,11 +260,82 @@ export function emptyExerciseDraftRow(): ExerciseDraftRow {
 
     scoreUnit: DEFAULT_SCORE_UNIT,
 
+    restBetweenSetsEnabled: false,
+
+    restDuration: '',
+
+    restDurationUnit: DEFAULT_REST_DURATION_UNIT,
+
   };
 
 }
 
 
+
+function sanitizeDraftRowRestFields(
+  ex: ExerciseDraftRow,
+  activityType: ActivityType,
+): Pick<ExerciseDraftRow, 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'> {
+  if (activityType !== 'strength' && activityType !== 'stretch') {
+    return {
+      restBetweenSetsEnabled: false,
+      restDuration: '',
+      restDurationUnit: DEFAULT_REST_DURATION_UNIT,
+    };
+  }
+  if (!ex.restBetweenSetsEnabled) {
+    return {
+      restBetweenSetsEnabled: false,
+      restDuration: '',
+      restDurationUnit: DEFAULT_REST_DURATION_UNIT,
+    };
+  }
+  const parsed = parseRestDurationFromDraftInput(ex.restDuration, ex.restDurationUnit);
+  if (!parsed.ok) {
+    return {
+      restBetweenSetsEnabled: true,
+      restDuration: ex.restDuration,
+      restDurationUnit: ex.restDurationUnit,
+    };
+  }
+  const rest = sanitizeRestBetweenSetsFields({
+    activityType,
+    restBetweenSetsEnabled: true,
+    restDuration: parsed.restDuration,
+    restDurationUnit: parsed.restDurationUnit,
+  });
+  if (!rest.restBetweenSetsEnabled) {
+    return {
+      restBetweenSetsEnabled: false,
+      restDuration: '',
+      restDurationUnit: DEFAULT_REST_DURATION_UNIT,
+    };
+  }
+  return {
+    restBetweenSetsEnabled: true,
+    restDuration: restDurationToDraftInput(rest.restDuration, rest.restDurationUnit),
+    restDurationUnit: normalizeRestDurationUnit(rest.restDurationUnit),
+  };
+}
+
+function parseRestFieldsForSavedExercise(
+  ex: ExerciseDraftRow,
+  activityType: 'strength' | 'stretch',
+): RestBetweenSetsFields {
+  if (!ex.restBetweenSetsEnabled) {
+    return sanitizeRestBetweenSetsFields({ activityType, restBetweenSetsEnabled: false });
+  }
+  const parsed = parseRestDurationFromDraftInput(ex.restDuration, ex.restDurationUnit);
+  if (!parsed.ok) {
+    return sanitizeRestBetweenSetsFields({ activityType, restBetweenSetsEnabled: false });
+  }
+  return sanitizeRestBetweenSetsFields({
+    activityType,
+    restBetweenSetsEnabled: true,
+    restDuration: parsed.restDuration,
+    restDurationUnit: parsed.restDurationUnit,
+  });
+}
 
 /** Clear draft fields that do not apply to the selected activity type. */
 export function sanitizeExerciseDraftRow(ex: ExerciseDraftRow): ExerciseDraftRow {
@@ -258,6 +350,7 @@ export function sanitizeExerciseDraftRow(ex: ExerciseDraftRow): ExerciseDraftRow
         distanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
         score: '',
         scoreUnit: DEFAULT_SCORE_UNIT,
+        ...sanitizeDraftRowRestFields(ex, 'strength'),
       };
     case 'cardio': {
       const plan = normalizeCardioPlanFields({
@@ -293,6 +386,7 @@ export function sanitizeExerciseDraftRow(ex: ExerciseDraftRow): ExerciseDraftRow
             : plan.cardioObjective === 'duration' && plan.cardioDistanceTracking !== 'per_duration_unit'
               ? ''
               : ex.paceDistance,
+        ...sanitizeDraftRowRestFields(ex, 'cardio'),
       };
     }
     case 'sport':
@@ -305,6 +399,7 @@ export function sanitizeExerciseDraftRow(ex: ExerciseDraftRow): ExerciseDraftRow
         distance: '',
         distanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
         durationUnit: normalizeSportDurationUnit(ex.durationUnit),
+        ...sanitizeDraftRowRestFields(ex, 'sport'),
       };
     case 'stretch':
       return {
@@ -320,6 +415,7 @@ export function sanitizeExerciseDraftRow(ex: ExerciseDraftRow): ExerciseDraftRow
           ex.duration.trim().length > 0
             ? normalizeStretchDurationUnit(ex.durationUnit)
             : DEFAULT_STRETCH_DURATION_UNIT,
+        ...sanitizeDraftRowRestFields(ex, 'stretch'),
       };
     default:
       return ex;
@@ -432,12 +528,14 @@ export function sanitizeWorkoutExercise(exercise: WorkoutExercise): WorkoutExerc
         distanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
         score: '',
         scoreUnit: DEFAULT_SCORE_UNIT,
+        ...sanitizeRestBetweenSetsFields({ ...exercise, activityType: 'strength' }),
       };
     case 'cardio': {
       const plan = normalizeCardioPlanFields(exercise);
       const inPace = isCardioPaceTracking({ ...exercise, activityType: 'cardio' });
       return {
         ...exercise,
+        ...sanitizeRestBetweenSetsFields({ ...exercise, activityType: 'cardio' }),
         sets: 0,
         reps: 0,
         weight: 0,
@@ -470,6 +568,7 @@ export function sanitizeWorkoutExercise(exercise: WorkoutExercise): WorkoutExerc
         weightUnit: DEFAULT_WEIGHT_UNIT,
         distance: 0,
         distanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
+        ...sanitizeRestBetweenSetsFields({ ...exercise, activityType: 'sport' }),
       };
     case 'stretch':
       return {
@@ -481,6 +580,7 @@ export function sanitizeWorkoutExercise(exercise: WorkoutExercise): WorkoutExerc
         distanceUnit: DEFAULT_CARDIO_DISTANCE_UNIT,
         score: '',
         scoreUnit: DEFAULT_SCORE_UNIT,
+        ...sanitizeRestBetweenSetsFields({ ...exercise, activityType: 'stretch' }),
       };
     default:
       return exercise;
@@ -565,6 +665,12 @@ export function workoutExerciseToDraftRow(exercise: WorkoutExercise, options?: {
 
     scoreUnit: normalizeScoreUnit(exercise.scoreUnit),
 
+    restBetweenSetsEnabled: exercise.restBetweenSetsEnabled === true,
+
+    restDuration: restDurationToDraftInput(exercise.restDuration, exercise.restDurationUnit),
+
+    restDurationUnit: normalizeRestDurationUnit(exercise.restDurationUnit),
+
   };
 
 }
@@ -585,7 +691,7 @@ export function isExerciseDraftRowEmpty(ex: ExerciseDraftRow): boolean {
 
     case 'strength':
 
-      return !ex.sets.trim() && !ex.reps.trim() && !ex.weight.trim();
+      return !ex.sets.trim() && !ex.reps.trim() && !ex.weight.trim() && !ex.restBetweenSetsEnabled;
 
     case 'cardio':
 
@@ -597,7 +703,7 @@ export function isExerciseDraftRowEmpty(ex: ExerciseDraftRow): boolean {
 
     case 'stretch':
 
-      return !ex.sets.trim() && !ex.duration.trim();
+      return !ex.sets.trim() && !ex.duration.trim() && !ex.restBetweenSetsEnabled;
 
     default:
 
@@ -648,6 +754,16 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
 
 
   if (activityType === 'strength') {
+    if (sanitized.restBetweenSetsEnabled) {
+      const restParsed = parseRestDurationFromDraftInput(sanitized.restDuration, sanitized.restDurationUnit);
+      if (!restParsed.ok) {
+        return {
+          ok: false,
+          title: 'Check your numbers',
+          message: 'Enter a positive rest duration between sets.',
+        };
+      }
+    }
 
     const setsCount = resolveExerciseSetCount(sanitized.sets);
 
@@ -712,6 +828,8 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
         score: '',
 
         scoreUnit: DEFAULT_SCORE_UNIT,
+
+        ...parseRestFieldsForSavedExercise(sanitized, 'strength'),
 
       },
 
@@ -928,6 +1046,16 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
 
 
   if (activityType === 'stretch') {
+    if (sanitized.restBetweenSetsEnabled) {
+      const restParsed = parseRestDurationFromDraftInput(sanitized.restDuration, sanitized.restDurationUnit);
+      if (!restParsed.ok) {
+        return {
+          ok: false,
+          title: 'Check your numbers',
+          message: 'Enter a positive rest duration between sets.',
+        };
+      }
+    }
 
     const setsCount = resolveExerciseSetCount(sanitized.sets);
 
@@ -981,6 +1109,8 @@ export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string):
 
         scoreUnit: DEFAULT_SCORE_UNIT,
 
+        ...parseRestFieldsForSavedExercise(sanitized, 'stretch'),
+
       },
 
     };
@@ -998,7 +1128,7 @@ export type ExerciseDraftSeed = Pick<
 
   ExerciseDraftRow,
 
-  'sourceExerciseId' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'paceDuration' | 'paceDurationUnit' | 'paceDistance' | 'paceDistanceUnit' | 'score' | 'scoreUnit'
+  'sourceExerciseId' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'paceDuration' | 'paceDurationUnit' | 'paceDistance' | 'paceDistanceUnit' | 'score' | 'scoreUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'
 
 > & {
 
@@ -1065,6 +1195,12 @@ export function exerciseDraftSeedFromRow(ex: ExerciseDraftRow): ExerciseDraftSee
     score: sanitized.score,
 
     scoreUnit: sanitized.scoreUnit,
+
+    restBetweenSetsEnabled: sanitized.restBetweenSetsEnabled,
+
+    restDuration: sanitized.restDuration,
+
+    restDurationUnit: sanitized.restDurationUnit,
 
   };
 
@@ -1153,6 +1289,12 @@ export function exerciseDraftRowFromSeed(seed: ExerciseDraftSeed): ExerciseDraft
     score: seed.score ?? '',
 
     scoreUnit: normalizeScoreUnit(seed.scoreUnit),
+
+    restBetweenSetsEnabled: seed.restBetweenSetsEnabled === true,
+
+    restDuration: typeof seed.restDuration === 'string' ? seed.restDuration : '',
+
+    restDurationUnit: normalizeRestDurationUnit(seed.restDurationUnit),
 
   });
 

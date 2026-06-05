@@ -1,4 +1,4 @@
-import { useNavigation, useFocusEffect, type NavigationProp, type ParamListBase } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -12,7 +12,6 @@ import {
 
 import { DraftExerciseDraggableList } from '@/components/DraftExerciseDraggableList';
 import { StickySaveFooter } from '@/components/StickySaveFooter';
-import { WorkoutFormExerciseLibraryMenu } from '@/components/WorkoutFormExerciseLibraryMenu';
 import { Text, View } from '@/components/Themed';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -29,6 +28,7 @@ import {
 } from '@/lib/cardioPlan';
 import type { ScoreUnit } from '@/lib/scoreUnits';
 import type { WeightUnit } from '@/lib/weightUnits';
+import type { RestDurationUnit } from '@/lib/restBetweenSets';
 import {
   emptyExerciseDraftRow,
   exerciseDraftRowFromSeed,
@@ -157,7 +157,7 @@ export default function LogWorkoutScreen() {
 
   const updateExerciseField = (
     exerciseId: string,
-    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'paceDuration' | 'paceDistance' | 'score',
+    field: 'sets' | 'reps' | 'weight' | 'duration' | 'distance' | 'paceDuration' | 'paceDistance' | 'score' | 'restDuration',
     value: string,
   ) => {
     setExercises((prev) =>
@@ -223,6 +223,22 @@ export default function LogWorkoutScreen() {
     );
   };
 
+  const updateExerciseRestBetweenSetsEnabled = (exerciseId: string, enabled: boolean) => {
+    setExercises((prev) =>
+      prev.map((ex) =>
+        ex.clientId === exerciseId
+          ? { ...ex, restBetweenSetsEnabled: enabled, restDuration: enabled ? ex.restDuration : '' }
+          : ex,
+      ),
+    );
+  };
+
+  const updateExerciseRestDurationUnit = (exerciseId: string, unit: RestDurationUnit) => {
+    setExercises((prev) =>
+      prev.map((ex) => (ex.clientId === exerciseId ? { ...ex, restDurationUnit: unit } : ex)),
+    );
+  };
+
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
@@ -244,6 +260,8 @@ export default function LogWorkoutScreen() {
             }
             const latest = findTemplateExerciseById(all, templateId);
             if (!latest) {
+              // Keep drafts for exercises imported from the library (catalog ids differ from template ids).
+              next.push(ex);
               continue;
             }
             next.push(workoutExerciseToDraftRow(latest, { clientId: ex.clientId, sourceExerciseId: templateId }));
@@ -373,18 +391,6 @@ export default function LogWorkoutScreen() {
     })();
   };
 
-  const openExerciseLibraryFromMenu = useCallback(() => {
-    router.push({
-      pathname: '/exercise-library',
-      params: {
-        libraryEntry: 'menu',
-        source: 'create',
-        createDraft: JSON.stringify({ title, daysOfWeek, iconId }),
-        existingExercises: JSON.stringify(exercises.map((exercise) => exerciseDraftSeedFromRow(exercise))),
-      },
-    });
-  }, [title, daysOfWeek, iconId, exercises]);
-
   return (
     <RNView style={styles.screenWrap}>
       <KeyboardAvoidingView
@@ -415,6 +421,8 @@ export default function LogWorkoutScreen() {
         onUpdateExercisePaceDistanceUnit={updateExercisePaceDistanceUnit}
         onUpdateExerciseScoreUnit={updateExerciseScoreUnit}
         onUpdateExerciseWeightUnit={updateExerciseWeightUnit}
+        onUpdateExerciseRestBetweenSetsEnabled={updateExerciseRestBetweenSetsEnabled}
+        onUpdateExerciseRestDurationUnit={updateExerciseRestDurationUnit}
         onRemoveExercise={removeExercise}
         contentContainerStyle={styles.scroll}
         listHeader={
@@ -462,11 +470,6 @@ export default function LogWorkoutScreen() {
       />
         <StickySaveFooter onPress={onSave} activeScheme={activeScheme} insetBottom={false} />
       </KeyboardAvoidingView>
-      <WorkoutFormExerciseLibraryMenu
-        navigation={navigation as NavigationProp<ParamListBase>}
-        activeScheme={activeScheme}
-        onExerciseLibrary={openExerciseLibraryFromMenu}
-      />
     </RNView>
   );
 }

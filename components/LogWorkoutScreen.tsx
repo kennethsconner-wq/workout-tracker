@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 
 import { CardioDurationLogField } from '@/components/CardioDurationLogField';
+import { RestBetweenSetsLogRow } from '@/components/RestBetweenSetsLogRow';
+import { useDurationTimer } from '@/components/DurationTimerProvider';
 import { SessionDateTimeField } from '@/components/SessionDateTimeField';
 import { CardioDistanceUnitPicker } from '@/components/CardioDistanceUnitPicker';
 import { DurationUnitPicker } from '@/components/DurationUnitPicker';
@@ -79,11 +81,12 @@ import {
 } from '@/lib/scoreUnits';
 import { DEFAULT_WEIGHT_UNIT, formatWeightValue, normalizeWeightUnit, type WeightUnit } from '@/lib/weightUnits';
 import { formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
+import { formatRestBetweenSetsPlanLine } from '@/lib/restBetweenSets';
 import { resolveCardioDurationLogTimerConfig, resolveSportDurationLogTimerConfig, resolveStretchDurationLogTimerConfig } from '@/lib/durationTimer';
 import type { CountdownLogSession } from '@/lib/countdownNotifications';
 import { hasLoggedExerciseInput, parseLoggedExerciseFromDraft } from '@/lib/logExerciseDraft';
 import { resolveExerciseSetCount } from '@/lib/exerciseDraft';
-import { clearNewLogDraft, isNewLogFormPristine, newLogDraftStorageKey } from '@/lib/logWorkoutDraft';
+import { clearNewLogDraft, newLogDraftStorageKey, shouldPersistNewLogDraft } from '@/lib/logWorkoutDraft';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { addLoggedWorkout, loadLoggedWorkouts, loadWorkouts, updateLoggedWorkout } from '@/lib/workoutsStorage';
 
@@ -128,6 +131,9 @@ type DraftExercise = Omit<
   actualDistanceUnit: CardioDistanceUnit;
   actualScoreInput: string;
   actualScoreUnit: ScoreUnit;
+  restBetweenSetsEnabled?: boolean;
+  restDuration?: number;
+  restDurationUnit?: DurationUnit;
 };
 
 type LogWorkoutDraft = {
@@ -429,6 +435,9 @@ function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): 
     actualStretchSets: [],
     actualCardioPerSets: [],
     stretchSets: exercise.stretchSets,
+    restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
+    restDuration: exercise.restDuration,
+    restDurationUnit: exercise.restDurationUnit,
     actualDurationInput: '',
     actualDurationUnit: exercise.durationUnit,
     actualDistanceInput: '',
@@ -544,6 +553,7 @@ function resolveTemplateExerciseIdForLogged(
 /** Hydrate the edit form from what was logged in this session (not the full template). */
 function buildDraftExercisesFromLogged(logged: LoggedWorkout, template: Workout): DraftExercise[] {
   const usedTemplateIds = new Set<string>();
+  const templateById = new Map(template.exercises.map((exercise) => [exercise.id, exercise]));
 
   return ensureUniqueDraftExerciseIds(
     logged.exercises.map((le, index) => {
@@ -551,7 +561,20 @@ function buildDraftExercisesFromLogged(logged: LoggedWorkout, template: Workout)
       usedTemplateIds.add(templateExerciseId);
       const normalized =
         templateExerciseId !== le.workoutExerciseId ? { ...le, workoutExerciseId: templateExerciseId } : le;
-      return loggedExerciseToDraftExercise(normalized);
+      const draft = loggedExerciseToDraftExercise(normalized);
+      const templateExercise = templateById.get(templateExerciseId);
+      if (
+        templateExercise &&
+        (templateExercise.activityType === 'strength' || templateExercise.activityType === 'stretch')
+      ) {
+        return {
+          ...draft,
+          restBetweenSetsEnabled: templateExercise.restBetweenSetsEnabled,
+          restDuration: templateExercise.restDuration,
+          restDurationUnit: templateExercise.restDurationUnit,
+        };
+      }
+      return draft;
     }),
   );
 }
@@ -819,6 +842,9 @@ function normalizeDraftExercises(
         score: exercise.score,
         scoreUnit: exercise.scoreUnit,
         stretchSets: exercise.stretchSets,
+        restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
+        restDuration: exercise.restDuration,
+        restDurationUnit: exercise.restDurationUnit,
         actualSets:
           exercise.activityType === 'strength'
             ? Array.from({ length: strengthSetCount }, (_, setIndex) => {
@@ -918,6 +944,7 @@ export default function LogWorkoutScreen() {
     () => resolveLogWorkoutSession(params),
     [params.workoutId, params.loggedWorkoutId, params.logIntent, params.t],
   );
+  const { hasRunningTimerForLogSession } = useDurationTimer();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
   const textColor = Colors[activeScheme].text;
@@ -941,7 +968,19 @@ export default function LogWorkoutScreen() {
     omittedWorkoutExerciseIds: [] as string[],
     sessionDate: new Date(),
     session: null as LogWorkoutSession | null,
+    hasActiveLogTimers: false,
   });
+
+  const hasActiveLogTimers = useMemo(() => {
+    if (!session) {
+      return false;
+    }
+    return hasRunningTimerForLogSession({
+      workoutId: session.workoutId,
+      loggedWorkoutId: session.loggedWorkoutId,
+      intent: session.intent,
+    });
+  }, [session, hasRunningTimerForLogSession]);
 
   useEffect(() => {
     if (!session) {
@@ -1065,8 +1104,16 @@ export default function LogWorkoutScreen() {
       return;
     }
 
-    const sessionDateChanged = sessionDate.getTime() !== initialSessionDateRef.current.getTime();
-    if (isNewLogFormPristine(workout, exercises, omittedWorkoutExerciseIds) && !sessionDateChanged) {
+    if (
+      !shouldPersistNewLogDraft(
+        workout,
+        exercises,
+        omittedWorkoutExerciseIds,
+        sessionDate,
+        initialSessionDateRef.current,
+        hasActiveLogTimers,
+      )
+    ) {
       void clearNewLogDraft(workout.id);
       return;
     }
@@ -1081,9 +1128,25 @@ export default function LogWorkoutScreen() {
         updatedAt: new Date().toISOString(),
       } as LogWorkoutDraft),
     );
-  }, [draftHydrated, exercises, loading, omittedWorkoutExerciseIds, session, sessionDate, workout]);
+  }, [
+    draftHydrated,
+    exercises,
+    hasActiveLogTimers,
+    loading,
+    omittedWorkoutExerciseIds,
+    session,
+    sessionDate,
+    workout,
+  ]);
 
-  draftSnapshotRef.current = { workout, exercises, omittedWorkoutExerciseIds, sessionDate, session };
+  draftSnapshotRef.current = {
+    workout,
+    exercises,
+    omittedWorkoutExerciseIds,
+    sessionDate,
+    session,
+    hasActiveLogTimers,
+  };
 
   useEffect(() => {
     return () => {
@@ -1094,8 +1157,16 @@ export default function LogWorkoutScreen() {
       if (!snap.workout || !snap.session || snap.session.intent !== 'new') {
         return;
       }
-      const sessionDateChanged = snap.sessionDate.getTime() !== initialSessionDateRef.current.getTime();
-      if (isNewLogFormPristine(snap.workout, snap.exercises, snap.omittedWorkoutExerciseIds) && !sessionDateChanged) {
+      if (
+        !shouldPersistNewLogDraft(
+          snap.workout,
+          snap.exercises,
+          snap.omittedWorkoutExerciseIds,
+          snap.sessionDate,
+          initialSessionDateRef.current,
+          snap.hasActiveLogTimers,
+        )
+      ) {
         void clearNewLogDraft(snap.workout.id);
       }
     };
@@ -1780,6 +1851,12 @@ export default function LogWorkoutScreen() {
                 ? formatPlannedCardioObjectiveOnlySummary(exercise)
                 : formatPlannedExerciseSummary(exercise)}
             </Text>
+            {exercise.activityType === 'strength' || exercise.activityType === 'stretch' ? (
+              (() => {
+                const restLine = formatRestBetweenSetsPlanLine(exercise);
+                return restLine ? <Text style={styles.plannedLine}>{restLine}</Text> : null;
+              })()
+            ) : null}
             {exercise.activityType === 'cardio' ? (
               (() => {
                 const plannedPace = formatPlannedCardioPaceLine({ ...exercise, activityType: 'cardio' });
@@ -1793,7 +1870,8 @@ export default function LogWorkoutScreen() {
               <>
                 <View style={styles.actualSetsContainer}>
                   {exercise.actualSets.map((actualSet, setIndex) => (
-                    <View key={actualSet.id} style={styles.actualSetRow}>
+                    <View key={actualSet.id}>
+                    <View style={styles.actualSetRow}>
                       <Text style={[styles.setLabel, { color: textColor }]}>Set {setIndex + 1}</Text>
                       <View style={styles.setRowWithCheckbox}>
                         <Pressable
@@ -1859,6 +1937,18 @@ export default function LogWorkoutScreen() {
                           <Ionicons name="close" size={20} color="#ef4444" />
                         </Pressable>
                       </View>
+                    </View>
+                    {setIndex < exercise.actualSets.length - 1 ? (
+                      <RestBetweenSetsLogRow
+                        activityType="strength"
+                        exerciseId={exercise.id}
+                        afterSetIndex={setIndex}
+                        rest={exercise}
+                        activeScheme={activeScheme}
+                        borderColor={borderColor}
+                        textColor={textColor}
+                      />
+                    ) : null}
                     </View>
                   ))}
                 </View>
@@ -2242,7 +2332,8 @@ export default function LogWorkoutScreen() {
               <>
                 <View style={styles.actualSetsContainer}>
                   {exercise.actualStretchSets.map((actualSet, setIndex) => (
-                    <View key={actualSet.id} style={styles.actualSetRow}>
+                    <View key={actualSet.id}>
+                    <View style={styles.actualSetRow}>
                       <Text style={[styles.setLabel, { color: textColor }]}>Set {setIndex + 1}</Text>
                       <View style={styles.setRowWithCheckbox}>
                         <Pressable
@@ -2314,6 +2405,18 @@ export default function LogWorkoutScreen() {
                           <Ionicons name="close" size={20} color="#ef4444" />
                         </Pressable>
                       </View>
+                    </View>
+                    {setIndex < exercise.actualStretchSets.length - 1 ? (
+                      <RestBetweenSetsLogRow
+                        activityType="stretch"
+                        exerciseId={exercise.id}
+                        afterSetIndex={setIndex}
+                        rest={exercise}
+                        activeScheme={activeScheme}
+                        borderColor={borderColor}
+                        textColor={textColor}
+                      />
+                    ) : null}
                     </View>
                   ))}
                 </View>
@@ -2431,7 +2534,7 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   draftBadge: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
     color: '#D40078',
   },
@@ -2440,7 +2543,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 16,
+    fontSize: 18,
   },
   card: {
     borderWidth: 1,
@@ -2449,7 +2552,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   cardHeading: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '700',
     flex: 1,
     flexShrink: 1,
@@ -2536,7 +2639,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 12,
     top: 10,
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
   },
   actualSetsContainer: {
@@ -2551,7 +2654,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   setLabel: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
   },
   checkboxButton: {
@@ -2571,15 +2674,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   addSetButtonLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  exerciseName: {
     fontSize: 16,
     fontWeight: '600',
   },
+  exerciseName: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
   plannedLine: {
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '600',
     opacity: 0.8,
   },
   centered: {

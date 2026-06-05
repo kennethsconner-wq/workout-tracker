@@ -20,6 +20,7 @@ import type { DurationUnit } from '@/lib/durationUnits';
 import type { ScoreUnit } from '@/lib/scoreUnits';
 import type { WeightUnit } from '@/lib/weightUnits';
 import type { ExerciseDraftRow } from '@/lib/exerciseDraft';
+import type { RestDurationUnit } from '@/lib/restBetweenSets';
 import { confirmEditLinkedExercise } from '@/lib/linkedExerciseEdit';
 import { themedAlert } from '@/lib/themedAlert';
 
@@ -52,6 +53,8 @@ type Props = {
   onUpdateExercisePaceDistanceUnit: (clientId: string, unit: CardioDistanceUnit) => void;
   onUpdateExerciseScoreUnit: (clientId: string, unit: ScoreUnit) => void;
   onUpdateExerciseWeightUnit: (clientId: string, unit: WeightUnit) => void;
+  onUpdateExerciseRestBetweenSetsEnabled: (clientId: string, enabled: boolean) => void;
+  onUpdateExerciseRestDurationUnit: (clientId: string, unit: RestDurationUnit) => void;
   onRemoveExercise: (clientId: string) => void;
   /** When true (e.g. Edit Workout), show a confirmation before removing an exercise. */
   confirmBeforeRemoveExercise?: boolean;
@@ -82,6 +85,8 @@ export function DraftExerciseDraggableList({
   onUpdateExercisePaceDistanceUnit,
   onUpdateExerciseScoreUnit,
   onUpdateExerciseWeightUnit,
+  onUpdateExerciseRestBetweenSetsEnabled,
+  onUpdateExerciseRestDurationUnit,
   onRemoveExercise,
   confirmBeforeRemoveExercise = false,
 }: Props) {
@@ -207,6 +212,10 @@ export function DraftExerciseDraggableList({
                 onPaceDistanceUnitChange={(unit) => onUpdateExercisePaceDistanceUnit(exercise.clientId, unit)}
                 onScoreUnitChange={(unit) => onUpdateExerciseScoreUnit(exercise.clientId, unit)}
                 onWeightUnitChange={(unit) => onUpdateExerciseWeightUnit(exercise.clientId, unit)}
+                onRestBetweenSetsEnabledChange={(enabled) =>
+                  onUpdateExerciseRestBetweenSetsEnabled(exercise.clientId, enabled)
+                }
+                onRestDurationUnitChange={(unit) => onUpdateExerciseRestDurationUnit(exercise.clientId, unit)}
               />
             </View>
           </ScaleDecorator>

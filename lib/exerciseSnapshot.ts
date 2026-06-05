@@ -1,6 +1,6 @@
 import type { ActivityType } from '@/lib/activityTypes';
 import { normalizeActivityType } from '@/lib/activityTypes';
-import { migrateLegacyCardioPaceFields } from '@/lib/cardioPlan';
+import { cardioPlansMatch, migrateLegacyCardioPaceFields } from '@/lib/cardioPlan';
 import { hasLoggedExerciseActual } from '@/lib/exerciseDisplay';
 import type { LoggedWorkout, LoggedWorkoutExercise, Workout, WorkoutExercise } from '@/lib/types';
 
@@ -26,6 +26,9 @@ export type ExerciseDefinitionFields = Pick<
   | 'cardioDistanceMode'
   | 'score'
   | 'scoreUnit'
+  | 'restBetweenSetsEnabled'
+  | 'restDuration'
+  | 'restDurationUnit'
 >;
 
 type ExerciseDefinitionSignatureInput = ExerciseDefinitionFields;
@@ -71,13 +74,61 @@ export function normalizeExerciseDefinitionForSignature(
     cardioPaceDistanceUnit: migrated.cardioPaceDistanceUnit,
     score: exercise.score ?? '',
     scoreUnit: exercise.scoreUnit,
+    restBetweenSetsEnabled: exercise.restBetweenSetsEnabled === true,
+    restDuration: exercise.restDuration ?? 0,
+    restDurationUnit: exercise.restDurationUnit,
   };
+}
+
+export type ExerciseDefinitionMatch = ExerciseDefinitionFields;
+
+export function matchesExerciseDefinition(
+  ex: ExerciseDefinitionMatch,
+  def: ExerciseDefinitionMatch,
+): boolean {
+  return (
+    ex.activityType === def.activityType &&
+    ex.name === def.name &&
+    ex.sets === def.sets &&
+    ex.reps === def.reps &&
+    ex.weight === def.weight &&
+    ex.weightUnit === def.weightUnit &&
+    ex.duration === def.duration &&
+    ex.durationUnit === def.durationUnit &&
+    ex.distance === def.distance &&
+    ex.distanceUnit === def.distanceUnit &&
+    cardioPlansMatch(ex, def) &&
+    (ex.cardioPaceDuration ?? 0) === (def.cardioPaceDuration ?? 0) &&
+    (ex.cardioPaceDurationUnit ?? '') === (def.cardioPaceDurationUnit ?? '') &&
+    (ex.cardioPaceDistance ?? 0) === (def.cardioPaceDistance ?? 0) &&
+    (ex.cardioPaceDistanceUnit ?? '') === (def.cardioPaceDistanceUnit ?? '') &&
+    ex.score === def.score &&
+    ex.scoreUnit === def.scoreUnit &&
+    (ex.restBetweenSetsEnabled ?? false) === (def.restBetweenSetsEnabled ?? false) &&
+    (ex.restDuration ?? 0) === (def.restDuration ?? 0) &&
+    (ex.restDurationUnit ?? '') === (def.restDurationUnit ?? '')
+  );
+}
+
+function exerciseDefinitionSignatureParts(normalized: ExerciseDefinitionFields): {
+  base: string;
+  full: string;
+} {
+  const base = `${normalized.activityType}|${normalized.name}|${normalized.sets}|${normalized.reps}|${normalized.weight}|${normalized.weightUnit}|${normalized.duration}|${normalized.durationUnit}|${normalized.distance}|${normalized.distanceUnit}|${normalized.cardioObjective}|${normalized.cardioDurationTracking}|${normalized.cardioDistanceTracking}|${normalized.cardioPaceDuration}|${normalized.cardioPaceDurationUnit ?? ''}|${normalized.cardioPaceDistance}|${normalized.cardioPaceDistanceUnit ?? ''}|${normalized.score}|${normalized.scoreUnit}`;
+  const full = `${base}|${normalized.restBetweenSetsEnabled ?? false}|${normalized.restDuration ?? 0}|${normalized.restDurationUnit ?? ''}`;
+  return { base, full };
 }
 
 /** Same grouping key as the Exercise Library list (one entry per unique exercise definition). */
 export function exerciseDefinitionSignatureKey(exercise: ExerciseDefinitionSignatureInput): string {
   const normalized = normalizeExerciseDefinitionForSignature(exercise);
-  return `${normalized.activityType}|${normalized.name}|${normalized.sets}|${normalized.reps}|${normalized.weight}|${normalized.weightUnit}|${normalized.duration}|${normalized.durationUnit}|${normalized.distance}|${normalized.distanceUnit}|${normalized.cardioObjective}|${normalized.cardioDurationTracking}|${normalized.cardioDistanceTracking}|${normalized.cardioPaceDuration}|${normalized.cardioPaceDurationUnit ?? ''}|${normalized.cardioPaceDistance}|${normalized.cardioPaceDistanceUnit ?? ''}|${normalized.score}|${normalized.scoreUnit}`;
+  return exerciseDefinitionSignatureParts(normalized).full;
+}
+
+/** Definition identity without rest-between-sets (for replacing stale catalog rows when rest changes). */
+export function exerciseDefinitionBaseSignatureKey(exercise: ExerciseDefinitionSignatureInput): string {
+  const normalized = normalizeExerciseDefinitionForSignature(exercise);
+  return exerciseDefinitionSignatureParts(normalized).base;
 }
 
 export type StoredExerciseOption = {

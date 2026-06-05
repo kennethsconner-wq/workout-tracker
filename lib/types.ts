@@ -119,6 +119,10 @@ export type WorkoutExercise = {
   scoreUnit: ScoreUnit;
   /** Per-set planned durations for stretch activities. */
   stretchSets?: StretchSet[];
+  /** Strength/stretch: rest countdown between sets while logging. */
+  restBetweenSetsEnabled?: boolean;
+  restDuration?: number;
+  restDurationUnit?: DurationUnit;
 };
 
 export const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;

@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     flexShrink: 1,
     minWidth: 0,
@@ -511,7 +511,8 @@ const styles = StyleSheet.create({
     color: '#D40078',
   },
   meta: {
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '600',
     opacity: 0.7,
   },
   exerciseBlock: {
@@ -519,16 +520,17 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   exerciseName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '700',
   },
   activityTypeMeta: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 16,
+    fontWeight: '600',
     opacity: 0.65,
   },
   setLine: {
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '600',
     opacity: 0.85,
   },
 });

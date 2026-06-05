@@ -29,6 +29,14 @@ export type WorkoutSummary = {
   lastLoggedAt: string | null;
 };
 
+export type WorkoutLogStats = {
+  workoutId: string;
+  sessionCount: number;
+  lastLoggedAt: string | null;
+  firstLoggedAt: string | null;
+  sessionsThisMonth: number;
+};
+
 function toPoint(log: LoggedWorkout, exercise: LoggedWorkout['exercises'][number]): LoggedExercisePoint {
   const plannedVolume = exercise.sets * exercise.reps * exercise.weight;
   const actualSets = exercise.actualSets.length;
@@ -54,6 +62,96 @@ function toPoint(log: LoggedWorkout, exercise: LoggedWorkout['exercises'][number
 
 function byCreatedAtAscending(a: { createdAt: string }, b: { createdAt: string }): number {
   return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+}
+
+function startOfLocalMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+export function buildWorkoutLogStatsByWorkoutId(logged: LoggedWorkout[]): Map<string, WorkoutLogStats> {
+  const statsByWorkoutId = new Map<string, WorkoutLogStats>();
+  const monthStart = startOfLocalMonth(new Date());
+
+  for (const log of logged) {
+    const createdAtMs = new Date(log.createdAt).getTime();
+    const existing = statsByWorkoutId.get(log.workoutId) ?? {
+      workoutId: log.workoutId,
+      sessionCount: 0,
+      lastLoggedAt: null,
+      firstLoggedAt: null,
+      sessionsThisMonth: 0,
+    };
+
+    existing.sessionCount += 1;
+    if (!existing.lastLoggedAt || createdAtMs > new Date(existing.lastLoggedAt).getTime()) {
+      existing.lastLoggedAt = log.createdAt;
+    }
+    if (!existing.firstLoggedAt || createdAtMs < new Date(existing.firstLoggedAt).getTime()) {
+      existing.firstLoggedAt = log.createdAt;
+    }
+    if (new Date(log.createdAt) >= monthStart) {
+      existing.sessionsThisMonth += 1;
+    }
+
+    statsByWorkoutId.set(log.workoutId, existing);
+  }
+
+  return statsByWorkoutId;
+}
+
+export function formatWorkoutLastLogged(lastLoggedAt: string | null): string {
+  if (!lastLoggedAt) {
+    return 'Not yet';
+  }
+
+  const loggedDate = new Date(lastLoggedAt);
+  const today = startOfLocalDay(new Date());
+  const loggedDay = startOfLocalDay(loggedDate);
+  const dayDiff = Math.round((today.getTime() - loggedDay.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (dayDiff <= 0) {
+    return 'Today';
+  }
+  if (dayDiff === 1) {
+    return 'Yesterday';
+  }
+  if (dayDiff < 7) {
+    return `${dayDiff} days ago`;
+  }
+  if (dayDiff < 14) {
+    return '1 week ago';
+  }
+  if (dayDiff < 30) {
+    return `${Math.floor(dayDiff / 7)} weeks ago`;
+  }
+
+  return loggedDate.toLocaleDateString(undefined, { dateStyle: 'medium' });
+}
+
+export function formatWorkoutSessionCount(stats: WorkoutLogStats | undefined): string {
+  if (!stats || stats.sessionCount === 0) {
+    return 'Not logged yet';
+  }
+
+  const countLabel = `${stats.sessionCount} time${stats.sessionCount === 1 ? '' : 's'}`;
+  if (stats.sessionsThisMonth > 0) {
+    const monthLabel = `${stats.sessionsThisMonth} this month`;
+    return stats.sessionsThisMonth === stats.sessionCount ? countLabel : `${countLabel} · ${monthLabel}`;
+  }
+
+  return countLabel;
+}
+
+export function formatWorkoutTrackingSince(firstLoggedAt: string | null, sessionCount: number): string | null {
+  if (!firstLoggedAt || sessionCount < 2) {
+    return null;
+  }
+
+  return `Since ${new Date(firstLoggedAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}`;
 }
 
 export function getExerciseTrend(logged: LoggedWorkout[], workoutExerciseId: string): LoggedExercisePoint[] {

@@ -520,7 +520,7 @@ export function CardioPlanEditor({
 
           <RadioGroup
 
-            label="Duration tracking"
+            label="Pace Tracking"
 
             options={CARDIO_DURATION_TRACKING_OPTIONS}
 
@@ -676,7 +676,7 @@ export function CardioPlanEditor({
 
           <RadioGroup
 
-            label="Distance tracking"
+            label="Pace Tracking"
 
             options={CARDIO_DISTANCE_TRACKING_OPTIONS}
 
@@ -712,7 +712,7 @@ export function CardioPlanEditor({
 
                   onChangeText={onDistanceChange}
 
-                  placeholder="Distance"
+                  placeholder="Goal Distance"
 
                   placeholderTextColor={placeholderColor}
 

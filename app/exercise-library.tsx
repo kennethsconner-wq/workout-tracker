@@ -33,9 +33,11 @@ import {
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { validateExerciseNamesAfterLibraryEdit } from '@/lib/exerciseNameValidation';
 import { exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
+import { loadExerciseLibraryCatalog } from '@/lib/exerciseLibraryStorage';
+import { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
 import {
+  loadLoggedWorkouts,
   loadWorkouts,
-  matchesExerciseDefinition,
   removeExercisesMatchingSignatureFromAllWorkouts,
   updateExercisesMatchingSignatureAcrossWorkouts,
 } from '@/lib/workoutsStorage';
@@ -45,7 +47,30 @@ import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types'
 type RouteSource = 'create' | 'edit';
 type ExerciseListItem = Pick<
   WorkoutExercise,
-  'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+  | 'id'
+  | 'activityType'
+  | 'name'
+  | 'sets'
+  | 'reps'
+  | 'weight'
+  | 'weightUnit'
+  | 'duration'
+  | 'durationUnit'
+  | 'distance'
+  | 'distanceUnit'
+  | 'cardioObjective'
+  | 'cardioDurationTracking'
+  | 'cardioDistanceTracking'
+  | 'cardioPaceDuration'
+  | 'cardioPaceDurationUnit'
+  | 'cardioPaceDistance'
+  | 'cardioPaceDistanceUnit'
+  | 'cardioDistanceMode'
+  | 'score'
+  | 'scoreUnit'
+  | 'restBetweenSetsEnabled'
+  | 'restDuration'
+  | 'restDurationUnit'
 > & { key: string };
 type CreateDraftPayload = { title: string; daysOfWeek: DayOfWeek[]; iconId: WorkoutIconId };
 type ImportExercisesPayload = {
@@ -115,40 +140,36 @@ export default function ExerciseLibraryScreen() {
 
   const reloadLibrary = useCallback(async () => {
     setLoading(true);
-    const workouts = await loadWorkouts();
-    const unique = new Map<string, ExerciseListItem>();
-    for (const workout of workouts) {
-      for (const exercise of workout.exercises) {
-        const key = exerciseDefinitionSignatureKey(exercise);
-        if (!unique.has(key)) {
-          unique.set(key, {
-            key,
-            id: exercise.id,
-            activityType: exercise.activityType,
-            name: exercise.name,
-            sets: exercise.sets,
-            reps: exercise.reps,
-            weight: exercise.weight,
-            weightUnit: exercise.weightUnit,
-            duration: exercise.duration,
-            durationUnit: exercise.durationUnit,
-            distance: exercise.distance,
-            distanceUnit: exercise.distanceUnit,
-            cardioObjective: exercise.cardioObjective,
-            cardioDurationTracking: exercise.cardioDurationTracking,
-            cardioDistanceTracking: exercise.cardioDistanceTracking,
-            cardioPaceDuration: exercise.cardioPaceDuration,
-            cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
-            cardioPaceDistance: exercise.cardioPaceDistance,
-            cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
-            cardioDistanceMode: exercise.cardioDistanceMode,
-            score: exercise.score,
-            scoreUnit: exercise.scoreUnit,
-          });
-        }
-      }
-    }
-    setItems([...unique.values()].sort((a, b) => a.name.localeCompare(b.name)));
+    const [workouts, logged] = await Promise.all([loadWorkouts(), loadLoggedWorkouts()]);
+    const catalog = await loadExerciseLibraryCatalog(workouts, logged);
+    const itemsFromCatalog: ExerciseListItem[] = catalog.map((exercise) => ({
+      key: exerciseDefinitionSignatureKey(exercise),
+      id: exercise.id,
+      activityType: exercise.activityType,
+      name: exercise.name,
+      sets: exercise.sets,
+      reps: exercise.reps,
+      weight: exercise.weight,
+      weightUnit: exercise.weightUnit,
+      duration: exercise.duration,
+      durationUnit: exercise.durationUnit,
+      distance: exercise.distance,
+      distanceUnit: exercise.distanceUnit,
+      cardioObjective: exercise.cardioObjective,
+      cardioDurationTracking: exercise.cardioDurationTracking,
+      cardioDistanceTracking: exercise.cardioDistanceTracking,
+      cardioPaceDuration: exercise.cardioPaceDuration,
+      cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
+      cardioPaceDistance: exercise.cardioPaceDistance,
+      cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
+      cardioDistanceMode: exercise.cardioDistanceMode,
+      score: exercise.score,
+      scoreUnit: exercise.scoreUnit,
+      restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
+      restDuration: exercise.restDuration,
+      restDurationUnit: exercise.restDurationUnit,
+    }));
+    setItems(itemsFromCatalog);
     setLoading(false);
   }, []);
 
@@ -264,6 +285,9 @@ export default function ExerciseLibraryScreen() {
                   cardioDistanceMode: item.cardioDistanceMode,
                   score: item.score,
                   scoreUnit: item.scoreUnit,
+                  restBetweenSetsEnabled: item.restBetweenSetsEnabled,
+                  restDuration: item.restDuration,
+                  restDurationUnit: item.restDurationUnit,
                 });
                 await reloadLibrary();
               } finally {
@@ -320,6 +344,9 @@ export default function ExerciseLibraryScreen() {
           cardioDistanceMode: editBaseline.cardioDistanceMode,
           score: editBaseline.score,
           scoreUnit: editBaseline.scoreUnit,
+          restBetweenSetsEnabled: editBaseline.restBetweenSetsEnabled,
+          restDuration: editBaseline.restDuration,
+          restDurationUnit: editBaseline.restDurationUnit,
         },
         parsed.exercise,
       );
@@ -392,7 +419,9 @@ export default function ExerciseLibraryScreen() {
       {items.length === 0 ? (
         <View style={styles.centered}>
           <Text style={styles.emptyTitle}>No saved exercises found</Text>
-          <Text style={styles.emptySubtitle}>Create a workout with at least one exercise first.</Text>
+          <Text style={styles.emptySubtitle}>
+            Exercises you add to workouts appear here and stay until you delete them from the library.
+          </Text>
         </View>
       ) : (
         <>
@@ -579,6 +608,16 @@ export default function ExerciseLibraryScreen() {
                   }
                   onScoreUnitChange={(unit) => setEditDraft((prev) => (prev ? { ...prev, scoreUnit: unit } : prev))}
                   onWeightUnitChange={(unit) => setEditDraft((prev) => (prev ? { ...prev, weightUnit: unit } : prev))}
+                  onRestBetweenSetsEnabledChange={(enabled) =>
+                    setEditDraft((prev) =>
+                      prev
+                        ? { ...prev, restBetweenSetsEnabled: enabled, restDuration: enabled ? prev.restDuration : '' }
+                        : prev,
+                    )
+                  }
+                  onRestDurationUnitChange={(unit) =>
+                    setEditDraft((prev) => (prev ? { ...prev, restDurationUnit: unit } : prev))
+                  }
                 />
               ) : null}
               <Pressable
