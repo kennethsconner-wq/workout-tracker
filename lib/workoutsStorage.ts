@@ -685,6 +685,9 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
     cardioPaceDistanceUnit: nextDef.cardioPaceDistanceUnit,
     score: nextDef.score,
     scoreUnit: nextDef.scoreUnit,
+    restBetweenSetsEnabled: nextDef.restBetweenSetsEnabled,
+    restDuration: nextDef.restDuration,
+    restDurationUnit: nextDef.restDurationUnit,
   });
   const logs = await loadLoggedWorkouts();
   const nextLogs = logs.map((log) => ({
@@ -712,6 +715,9 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
             cardioPaceDistanceUnit: cleanNext.cardioPaceDistanceUnit,
             score: cleanNext.score,
             scoreUnit: cleanNext.scoreUnit,
+            restBetweenSetsEnabled: cleanNext.restBetweenSetsEnabled,
+            restDuration: cleanNext.restDuration,
+            restDurationUnit: cleanNext.restDurationUnit,
           }
         : lex,
     ),

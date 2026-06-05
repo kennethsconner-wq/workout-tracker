@@ -179,6 +179,8 @@ export default function WorkoutEditScreen() {
             }
             const latest = byId.get(templateId);
             if (!latest) {
+              // Keep drafts for exercises imported from the library that are not saved on this workout yet.
+              next.push(ex);
               continue;
             }
             next.push(workoutExerciseToDraftRow(latest, { clientId: ex.clientId, sourceExerciseId: templateId }));

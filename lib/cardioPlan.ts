@@ -35,15 +35,15 @@ export const CARDIO_OBJECTIVE_LABELS: Record<CardioObjective, string> = {
 };
 
 export const CARDIO_DURATION_TRACKING_LABELS: Record<CardioDurationTracking, string> = {
-  none: "Don't Track Duration",
-  total: 'Track Total Duration',
-  per_distance_unit: 'Track Pace',
+  none: "Don't Track Pace",
+  total: 'Track Overall Pace',
+  per_distance_unit: 'Track Pace Per Segment',
 };
 
 export const CARDIO_DISTANCE_TRACKING_LABELS: Record<CardioDistanceTracking, string> = {
-  none: "Don't Track Distance",
-  total: 'Track Total Distance',
-  per_duration_unit: 'Track Pace',
+  none: "Don't Track Pace",
+  total: 'Track Overall Pace',
+  per_duration_unit: 'Track Pace Per Segment',
 };
 
 /** @deprecated Legacy field — migrated to cardioObjective + tracking fields on load. */

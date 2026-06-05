@@ -1,6 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
+import {
+  exerciseDefinitionBaseSignatureKey,
+  exerciseDefinitionSignatureKey,
+} from '@/lib/exerciseSnapshot';
 import { sanitizeWorkoutExercise } from '@/lib/exerciseDraft';
 import { newId } from '@/lib/ids';
 import {
@@ -70,6 +73,9 @@ function definitionFields(
     cardioDistanceMode: exercise.cardioDistanceMode,
     score: exercise.score,
     scoreUnit: exercise.scoreUnit,
+    restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
+    restDuration: exercise.restDuration,
+    restDurationUnit: exercise.restDurationUnit,
   };
 }
 
@@ -98,8 +104,20 @@ function mergeDefinitionsIntoCatalog(
   for (const workout of workouts) {
     for (const exercise of workout.exercises) {
       const key = exerciseDefinitionSignatureKey(exercise);
-      if (!bySignature.has(key)) {
-        const entry = sanitizeWorkoutExercise({ ...exercise, id: newId() });
+      const baseKey = exerciseDefinitionBaseSignatureKey(exercise);
+      for (const existingKey of [...bySignature.keys()]) {
+        if (existingKey === key) {
+          continue;
+        }
+        const existingEntry = bySignature.get(existingKey);
+        if (existingEntry && exerciseDefinitionBaseSignatureKey(existingEntry) === baseKey) {
+          bySignature.delete(existingKey);
+          changed = true;
+        }
+      }
+      const existing = bySignature.get(key);
+      const entry = sanitizeWorkoutExercise({ ...exercise, id: existing?.id ?? newId() });
+      if (!existing || JSON.stringify(existing) !== JSON.stringify(entry)) {
         bySignature.set(key, entry);
         changed = true;
       }
@@ -132,6 +150,9 @@ function mergeDefinitionsIntoCatalog(
           cardioDistanceMode: exercise.cardioDistanceMode,
           score: exercise.score,
           scoreUnit: exercise.scoreUnit,
+          restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
+          restDuration: exercise.restDuration,
+          restDurationUnit: exercise.restDurationUnit,
         });
         bySignature.set(key, entry);
         changed = true;
@@ -169,15 +190,26 @@ export async function upsertExerciseLibraryFromDefinitions(
   let changed = false;
   for (const exercise of exercises) {
     const key = exerciseDefinitionSignatureKey(exercise);
-    if (bySignature.has(key)) {
-      continue;
+    const baseKey = exerciseDefinitionBaseSignatureKey(exercise);
+    for (const existingKey of [...bySignature.keys()]) {
+      if (existingKey === key) {
+        continue;
+      }
+      const existingEntry = bySignature.get(existingKey);
+      if (existingEntry && exerciseDefinitionBaseSignatureKey(existingEntry) === baseKey) {
+        bySignature.delete(existingKey);
+        changed = true;
+      }
     }
+    const existing = bySignature.get(key);
     const entry = sanitizeWorkoutExercise({
-      id: newId(),
+      id: existing?.id ?? newId(),
       ...definitionFields(exercise),
     });
-    bySignature.set(key, entry);
-    changed = true;
+    if (!existing || JSON.stringify(existing) !== JSON.stringify(entry)) {
+      bySignature.set(key, entry);
+      changed = true;
+    }
   }
   if (changed) {
     await writeExerciseLibrary(

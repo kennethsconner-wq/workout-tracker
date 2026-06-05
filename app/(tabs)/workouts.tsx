@@ -260,6 +260,8 @@ export default function LogWorkoutScreen() {
             }
             const latest = findTemplateExerciseById(all, templateId);
             if (!latest) {
+              // Keep drafts for exercises imported from the library (catalog ids differ from template ids).
+              next.push(ex);
               continue;
             }
             next.push(workoutExerciseToDraftRow(latest, { clientId: ex.clientId, sourceExerciseId: templateId }));

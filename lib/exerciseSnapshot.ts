@@ -110,10 +110,25 @@ export function matchesExerciseDefinition(
   );
 }
 
+function exerciseDefinitionSignatureParts(normalized: ExerciseDefinitionFields): {
+  base: string;
+  full: string;
+} {
+  const base = `${normalized.activityType}|${normalized.name}|${normalized.sets}|${normalized.reps}|${normalized.weight}|${normalized.weightUnit}|${normalized.duration}|${normalized.durationUnit}|${normalized.distance}|${normalized.distanceUnit}|${normalized.cardioObjective}|${normalized.cardioDurationTracking}|${normalized.cardioDistanceTracking}|${normalized.cardioPaceDuration}|${normalized.cardioPaceDurationUnit ?? ''}|${normalized.cardioPaceDistance}|${normalized.cardioPaceDistanceUnit ?? ''}|${normalized.score}|${normalized.scoreUnit}`;
+  const full = `${base}|${normalized.restBetweenSetsEnabled ?? false}|${normalized.restDuration ?? 0}|${normalized.restDurationUnit ?? ''}`;
+  return { base, full };
+}
+
 /** Same grouping key as the Exercise Library list (one entry per unique exercise definition). */
 export function exerciseDefinitionSignatureKey(exercise: ExerciseDefinitionSignatureInput): string {
   const normalized = normalizeExerciseDefinitionForSignature(exercise);
-  return `${normalized.activityType}|${normalized.name}|${normalized.sets}|${normalized.reps}|${normalized.weight}|${normalized.weightUnit}|${normalized.duration}|${normalized.durationUnit}|${normalized.distance}|${normalized.distanceUnit}|${normalized.cardioObjective}|${normalized.cardioDurationTracking}|${normalized.cardioDistanceTracking}|${normalized.cardioPaceDuration}|${normalized.cardioPaceDurationUnit ?? ''}|${normalized.cardioPaceDistance}|${normalized.cardioPaceDistanceUnit ?? ''}|${normalized.score}|${normalized.scoreUnit}|${normalized.restBetweenSetsEnabled ?? false}|${normalized.restDuration ?? 0}|${normalized.restDurationUnit ?? ''}`;
+  return exerciseDefinitionSignatureParts(normalized).full;
+}
+
+/** Definition identity without rest-between-sets (for replacing stale catalog rows when rest changes). */
+export function exerciseDefinitionBaseSignatureKey(exercise: ExerciseDefinitionSignatureInput): string {
+  const normalized = normalizeExerciseDefinitionForSignature(exercise);
+  return exerciseDefinitionSignatureParts(normalized).base;
 }
 
 export type StoredExerciseOption = {

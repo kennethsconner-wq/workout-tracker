@@ -1,5 +1,5 @@
 import type { ActivityType } from '@/lib/activityTypes';
-import { ACTIVITY_TYPE_LABELS } from '@/lib/activityTypes';
+import { ACTIVITY_TYPES, ACTIVITY_TYPE_LABELS } from '@/lib/activityTypes';
 import { formatCardioDistanceWithUnit } from '@/lib/cardioDistanceUnits';
 import { cardioPerSegmentLabel } from '@/lib/cardioPerLog';
 import {
@@ -341,4 +341,33 @@ export function getLogExerciseLogDisplay(exercise: LoggedWorkoutExercise): LogEx
 
 export function activityTypeLabel(activityType: ActivityType): string {
   return ACTIVITY_TYPE_LABELS[activityType];
+}
+
+const WORKOUT_SUMMARY_PREVIEW_COUNT = 2;
+
+export type WorkoutSummaryDisplay = {
+  countLine: string;
+  previewLine: string | null;
+};
+
+export function formatWorkoutSummary(
+  exercises: Pick<WorkoutExercise, 'name' | 'activityType'>[],
+): WorkoutSummaryDisplay {
+  if (exercises.length === 0) {
+    return { countLine: 'No exercises', previewLine: null };
+  }
+
+  const activityTypes = [...new Set(exercises.map((exercise) => exercise.activityType))].sort(
+    (left, right) => ACTIVITY_TYPES.indexOf(left) - ACTIVITY_TYPES.indexOf(right),
+  );
+  const countLine = `${exercises.length} exercise${exercises.length === 1 ? '' : 's'} · ${activityTypes
+    .map((activityType) => activityTypeLabel(activityType))
+    .join(', ')}`;
+
+  const previewNames = exercises.slice(0, WORKOUT_SUMMARY_PREVIEW_COUNT).map((exercise) => exercise.name);
+  const remainingCount = exercises.length - previewNames.length;
+  const previewLine =
+    remainingCount > 0 ? `${previewNames.join(' · ')} · +${remainingCount} more` : previewNames.join(' · ');
+
+  return { countLine, previewLine: previewLine || null };
 }

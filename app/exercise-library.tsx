@@ -47,7 +47,30 @@ import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types'
 type RouteSource = 'create' | 'edit';
 type ExerciseListItem = Pick<
   WorkoutExercise,
-  'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit'
+  | 'id'
+  | 'activityType'
+  | 'name'
+  | 'sets'
+  | 'reps'
+  | 'weight'
+  | 'weightUnit'
+  | 'duration'
+  | 'durationUnit'
+  | 'distance'
+  | 'distanceUnit'
+  | 'cardioObjective'
+  | 'cardioDurationTracking'
+  | 'cardioDistanceTracking'
+  | 'cardioPaceDuration'
+  | 'cardioPaceDurationUnit'
+  | 'cardioPaceDistance'
+  | 'cardioPaceDistanceUnit'
+  | 'cardioDistanceMode'
+  | 'score'
+  | 'scoreUnit'
+  | 'restBetweenSetsEnabled'
+  | 'restDuration'
+  | 'restDurationUnit'
 > & { key: string };
 type CreateDraftPayload = { title: string; daysOfWeek: DayOfWeek[]; iconId: WorkoutIconId };
 type ImportExercisesPayload = {
@@ -142,6 +165,9 @@ export default function ExerciseLibraryScreen() {
       cardioDistanceMode: exercise.cardioDistanceMode,
       score: exercise.score,
       scoreUnit: exercise.scoreUnit,
+      restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
+      restDuration: exercise.restDuration,
+      restDurationUnit: exercise.restDurationUnit,
     }));
     setItems(itemsFromCatalog);
     setLoading(false);
@@ -259,6 +285,9 @@ export default function ExerciseLibraryScreen() {
                   cardioDistanceMode: item.cardioDistanceMode,
                   score: item.score,
                   scoreUnit: item.scoreUnit,
+                  restBetweenSetsEnabled: item.restBetweenSetsEnabled,
+                  restDuration: item.restDuration,
+                  restDurationUnit: item.restDurationUnit,
                 });
                 await reloadLibrary();
               } finally {
@@ -315,6 +344,9 @@ export default function ExerciseLibraryScreen() {
           cardioDistanceMode: editBaseline.cardioDistanceMode,
           score: editBaseline.score,
           scoreUnit: editBaseline.scoreUnit,
+          restBetweenSetsEnabled: editBaseline.restBetweenSetsEnabled,
+          restDuration: editBaseline.restDuration,
+          restDurationUnit: editBaseline.restDurationUnit,
         },
         parsed.exercise,
       );
