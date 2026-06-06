@@ -6,6 +6,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ThemedAlertProvider } from '@/components/ThemedAlertProvider';
 import { DurationTimerProvider } from '@/components/DurationTimerProvider';
+import { AuthProvider } from '@/lib/auth/AuthProvider';
+import { DataRepositoryProvider } from '@/lib/data/DataRepositoryContext';
 import Colors from '@/constants/Colors';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useFonts } from 'expo-font';
@@ -79,6 +81,8 @@ function RootLayoutNav() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: appBackground }}>
       <SafeAreaProvider style={{ flex: 1, backgroundColor: appBackground }}>
+        <AuthProvider>
+        <DataRepositoryProvider>
         <ThemedAlertProvider>
         <DurationTimerProvider>
         <ThemeProvider value={NavigationAppTheme}>
@@ -104,6 +108,8 @@ function RootLayoutNav() {
         </ThemeProvider>
         </DurationTimerProvider>
         </ThemedAlertProvider>
+        </DataRepositoryProvider>
+        </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
