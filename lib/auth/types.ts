@@ -22,6 +22,7 @@ export type AuthContextValue = {
   resetPassword: (email: string) => Promise<AuthResult>;
   resendSignUpConfirmation: (email: string) => Promise<AuthResult>;
   updateUsername: (username: string) => Promise<AuthResult>;
+  updatePassword: (password: string) => Promise<AuthResult>;
 };
 
 export function toAuthUser(user: User | null | undefined): AuthUser | null {

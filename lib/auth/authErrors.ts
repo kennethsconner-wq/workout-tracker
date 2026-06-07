@@ -4,6 +4,8 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   invalid_credentials: 'Email or password is incorrect.',
   email_not_confirmed: 'Check your email and confirm your account before signing in.',
   user_already_exists: 'An account with this email already exists. Try signing in.',
+  email_already_registered: 'An account with this email already exists. Try signing in.',
+  username_already_taken: 'This username is already taken. Choose a different one.',
   weak_password: 'Password must be at least 6 characters.',
   over_email_send_rate_limit: 'Too many emails sent. Wait a few minutes and try again.',
   over_request_rate_limit: 'Too many attempts. Wait a few minutes and try again.',
@@ -25,6 +27,12 @@ export function toAuthErrorMessage(error: AuthError | Error | null | undefined):
     const normalizedMessage = error.message.toLowerCase();
     if (normalizedMessage.includes('invalid login credentials')) {
       return AUTH_ERROR_MESSAGES.invalid_credentials;
+    }
+    if (
+      normalizedMessage.includes('username already taken') ||
+      (normalizedMessage.includes('duplicate key value') && normalizedMessage.includes('username'))
+    ) {
+      return AUTH_ERROR_MESSAGES.username_already_taken;
     }
     if (
       normalizedMessage.includes('too many emails') ||
@@ -84,4 +92,10 @@ export function validateUsername(username: string): string | null {
 
 export function normalizeUsername(username: string): string {
   return username.trim();
+}
+
+export function mapAvailabilityError(kind: 'email' | 'username'): string {
+  return kind === 'email'
+    ? AUTH_ERROR_MESSAGES.email_already_registered
+    : AUTH_ERROR_MESSAGES.username_already_taken;
 }

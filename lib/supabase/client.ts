@@ -18,9 +18,10 @@ export function getSupabaseClient(): SupabaseClient | null {
   supabaseClient = createClient(config.url, config.anonKey, {
     auth: {
       storage: secureAuthStorage,
-      autoRefreshToken: true,
+      autoRefreshToken: false,
       persistSession: true,
       detectSessionInUrl: false,
+      flowType: 'pkce',
     },
   });
 

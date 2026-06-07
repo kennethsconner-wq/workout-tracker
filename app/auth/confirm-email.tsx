@@ -10,6 +10,11 @@ import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { navigateAfterAuth } from '@/lib/auth/navigateAfterAuth';
+import {
+  EMAIL_CONFIRMATION_RESEND_COOLDOWN_SECONDS,
+  formatResendCooldown,
+  useResendCooldown,
+} from '@/lib/auth/useResendCooldown';
 
 export default function ConfirmEmailScreen() {
   const router = useRouter();
@@ -18,6 +23,9 @@ export default function ConfirmEmailScreen() {
   const textColor = Colors[colorScheme ?? 'dark'].text;
   const borderColor = colorScheme === 'dark' ? '#333' : '#e5e5e5';
   const { isSignedIn, isAuthBusy, resendSignUpConfirmation } = useAuth();
+  const { secondsRemaining, canResend, restartCooldown } = useResendCooldown(
+    EMAIL_CONFIRMATION_RESEND_COOLDOWN_SECONDS,
+  );
   const [resendError, setResendError] = useState<string | null>(null);
   const [resendSent, setResendSent] = useState(false);
 
@@ -36,7 +44,7 @@ export default function ConfirmEmailScreen() {
   }, [email, router]);
 
   const handleResend = async () => {
-    if (!email) {
+    if (!email || !canResend) {
       return;
     }
 
@@ -49,7 +57,12 @@ export default function ConfirmEmailScreen() {
     }
 
     setResendSent(true);
+    restartCooldown();
   };
+
+  const resendLabel = canResend
+    ? 'Resend confirmation email'
+    : `Resend in ${formatResendCooldown(secondsRemaining)}`;
 
   if (!email) {
     return null;
@@ -68,10 +81,16 @@ export default function ConfirmEmailScreen() {
           screen.
         </Text>
         <AuthPrimaryButton
-          label="Resend confirmation email"
+          label={resendLabel}
           onPress={() => void handleResend()}
           loading={isAuthBusy}
+          disabled={!canResend}
         />
+        {!canResend ? (
+          <Text style={styles.cooldownHint}>
+            You can request another email in {formatResendCooldown(secondsRemaining)}.
+          </Text>
+        ) : null}
         {resendError ? <Text style={styles.error}>{resendError}</Text> : null}
         {resendSent ? <Text style={styles.success}>Confirmation email sent.</Text> : null}
         <Pressable
@@ -112,6 +131,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     opacity: 0.9,
+  },
+  cooldownHint: {
+    fontSize: 14,
+    textAlign: 'center',
+    opacity: 0.75,
   },
   secondaryButton: {
     alignItems: 'center',

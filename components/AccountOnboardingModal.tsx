@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, View as RNView } from 'react-native';
 
@@ -15,6 +15,7 @@ import {
 
 export function AccountOnboardingGate() {
   const router = useRouter();
+  const pathname = usePathname();
   const { isSignedIn, isLoading, isConfigured } = useAuth();
   const [visible, setVisible] = useState(false);
 
@@ -24,6 +25,11 @@ export function AccountOnboardingGate() {
     }
 
     if (!isConfigured) {
+      setVisible(false);
+      return;
+    }
+
+    if (pathname.startsWith('/auth')) {
       setVisible(false);
       return;
     }
@@ -44,7 +50,7 @@ export function AccountOnboardingGate() {
     return () => {
       isMounted = false;
     };
-  }, [isConfigured, isLoading, isSignedIn]);
+  }, [isConfigured, isLoading, isSignedIn, pathname]);
 
   const handleDismiss = useCallback(() => {
     void markAccountOnboardingDismissed();

@@ -1,4 +1,10 @@
 const AUTH_CALLBACK_ROUTE = '/auth/callback';
+const AUTH_RESET_PASSWORD_ROUTE = '/auth/reset-password';
+
+function isPasswordResetPath(raw: string): boolean {
+  const lower = raw.toLowerCase();
+  return lower.includes('auth/reset-password') || lower.includes('type=recovery');
+}
 
 /** Strip Expo Go's `exp://host:port/--/` prefix so auth paths are recognized. */
 function normalizeIncomingPath(raw: string): string {
@@ -44,13 +50,16 @@ function extractAuthQuery(raw: string): string | null {
 }
 
 function isAuthCallbackPath(raw: string): boolean {
+  if (isPasswordResetPath(raw)) {
+    return false;
+  }
+
   const lower = raw.toLowerCase();
   return (
     lower.includes('auth/callback') ||
     lower.includes('access_token') ||
     lower.includes('refresh_token') ||
     lower.includes('type=signup') ||
-    lower.includes('type=recovery') ||
     lower.includes('type=email')
   );
 }
@@ -66,14 +75,26 @@ export function redirectSystemPath({
   initial: boolean;
 }): string {
   try {
-    const raw = normalizeIncomingPath(unwrapDevClientUrl(path));
+    const decoded = unwrapDevClientUrl(path).replace('#', '?');
+    const raw = normalizeIncomingPath(decoded);
+
+    if (isPasswordResetPath(raw)) {
+      const query = extractAuthQuery(raw);
+      if (query) {
+        return `${AUTH_RESET_PASSWORD_ROUTE}?${query}`;
+      }
+      return AUTH_RESET_PASSWORD_ROUTE;
+    }
 
     if (!isAuthCallbackPath(raw)) {
       return path;
     }
 
     const query = extractAuthQuery(raw);
-    return query ? `${AUTH_CALLBACK_ROUTE}?${query}` : AUTH_CALLBACK_ROUTE;
+    if (query) {
+      return `${AUTH_CALLBACK_ROUTE}?${query}`;
+    }
+    return AUTH_CALLBACK_ROUTE;
   } catch {
     return path;
   }

@@ -1,30 +1,58 @@
-Workout Tracker — Privacy Policy
-Last updated: May 13, 2026
+Axios Workouts — Privacy Policy
+Last updated: June 6, 2026
 
-This policy describes how Workout Tracker (“the app”) handles information on your device. By using the app, you agree to this policy.
+This policy describes how Axios Workouts (“the app”) handles information on your device and, if you choose to create an account, through our cloud service providers. By using the app, you agree to this policy.
 
 1. Who we are
-Workout Tracker is a mobile application you install on your own device. This version is designed to work without creating an account with us.
+Axios Workouts is a mobile application you install on your own device. You can use the app without creating an account. An account is optional and is used to prepare for cloud backup of your workouts.
 
-2. Information the app stores
-The app stores workout-related information you enter or generate locally on your device, such as workout templates, exercise details, logged sessions, and similar data used to show your history and metrics. That data stays on the device unless you choose to export or share it outside the app using features your device provides (for example, screenshots or system share sheets), which are outside our control.
+2. Information stored on your device
+The app stores workout-related information you enter or generate locally on your device, such as workout templates, exercise details, logged sessions, drafts, and similar data used to show your history and metrics.
 
-3. Accounts
-This version of the app does not require you to sign in. We do not operate a user account system for this app as described here.
+Whether or not you have an account, this workout data is stored on your device first. If you do not sign in, or if you sign in before cloud backup is enabled, that data stays on your device unless you export or share it outside the app using features your device provides (for example, screenshots or system share sheets), which are outside our control.
 
-4. Network and third parties
-The app may use standard device networking for routine technical purposes (for example, software updates, crash diagnostics, or analytics) depending on your platform, build configuration, and how you distribute the app. If you use Expo or similar tooling during development, additional services may apply only in those environments.
+The app also stores small preference flags on your device (for example, whether you dismissed the account onboarding prompt).
+
+3. Optional accounts
+You may create an account with an email address, password, and username. You do not need an account to use the app’s core workout features.
+
+If you create an account, we collect and process:
+- Email address (for sign-in, account recovery, and confirmation emails)
+- Username (display name you choose)
+- Password (handled by our authentication provider; we do not store your password in plain text in the app)
+
+When you are signed in, the app stores session tokens in your device’s secure storage so you remain signed in across app launches until you sign out or clear app data.
+
+4. Cloud backup and sync
+Cloud backup is an optional feature that may not yet be enabled in every version of the app. When it is enabled and you are signed in, your workout data may be copied to cloud storage associated with your account so you can access it from other devices and recover it if your phone is lost or replaced.
+
+Until cloud backup is enabled for your account, signing in does not upload your existing workout history. Workout data on your device remains local.
+
+If you sign out, your workouts remain on the device; only the sign-in session is cleared from secure storage.
+
+5. Service providers
+When you use optional account features, we use third-party services to operate authentication and (when enabled) cloud storage. Our primary provider is Supabase (supabase.com), which processes account and cloud data on our behalf under their terms and privacy practices.
+
+Authentication-related emails (such as sign-up confirmation and password reset) are sent through Supabase’s email service. We do not use your email address for marketing unless we separately ask for your consent.
 
 We do not sell your personal information.
 
-5. Children’s privacy
-The app is not directed to children under 13 (or the minimum age required in your region). If you are a parent or guardian and believe your child has provided personal information through the app, contact us using the information in your App Store listing or support channel.
+6. Network and other technical data
+The app uses network connections when you create an account, sign in, confirm your email, reset your password, or (when enabled) sync data. Your platform or distribution channel may also collect crash diagnostics, analytics, or update-related data according to their own policies.
 
-6. Security
-We rely on your device’s operating system protections for data stored locally. No method of storage or transmission is completely secure.
+7. Children’s privacy
+The app is not directed to children under 13 (or the minimum age required in your region). If you are a parent or guardian and believe your child has provided personal information through the app, contact us using the information in your app store listing or support channel.
 
-7. Changes
+8. Security
+We rely on your device’s operating system protections for data stored locally. Account sessions use secure storage on the device. Cloud data is protected by our provider’s access controls. No method of storage or transmission is completely secure.
+
+9. Your choices
+- Use the app without an account and keep all workout data local.
+- Decline the optional account prompt and create an account later from Settings → Account.
+- Sign out at any time; local workout data remains on the device.
+
+10. Changes
 We may update this policy from time to time. The “Last updated” date at the top will change when we do. Continued use of the app after changes means you accept the updated policy.
 
-8. Contact
+11. Contact
 For privacy questions, use the contact option provided on your app store listing or in-app support, if available.

@@ -1,74 +1,61 @@
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as Linking from 'expo-linking';
 
-/** Deep link Supabase should redirect to after email confirm / password reset. */
-export function getAuthRedirectUrl(): string {
+import { parseSupabaseAuthParams } from '@/lib/auth/processAuthRedirect';
+
+function createAuthDeepLink(path: string): string {
   if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
-    // Expo Go: exp://192.168.x.x:8081/--/auth/callback (Metro must be running when the link is opened)
-    return Linking.createURL('/auth/callback');
+    // Expo Go: exp://192.168.x.x:8081/--/auth/... (Metro must be running when the link is opened)
+    return Linking.createURL(path);
   }
 
   // Dev/production builds: triple-slash avoids Android treating `auth` as the hostname.
-  return Linking.createURL('/auth/callback', { isTripleSlashed: true });
+  return Linking.createURL(path, { isTripleSlashed: true });
 }
 
-function parseAuthParams(url: string): URLSearchParams {
-  const hashIndex = url.indexOf('#');
-  if (hashIndex >= 0) {
-    return new URLSearchParams(url.slice(hashIndex + 1));
+/** Deep link Supabase should redirect to after email confirmation. */
+export function getAuthRedirectUrl(): string {
+  return createAuthDeepLink('/auth/callback');
+}
+
+/** Deep link Supabase should redirect to after a password reset email is opened. */
+export function getPasswordResetRedirectUrl(): string {
+  return createAuthDeepLink('/auth/reset-password');
+}
+
+export function isPasswordResetRedirectUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  if (lower.includes('/auth/reset-password') || lower.includes('auth/reset-password')) {
+    return true;
   }
 
-  const queryIndex = url.indexOf('?');
-  if (queryIndex >= 0) {
-    return new URLSearchParams(url.slice(queryIndex + 1));
-  }
-
-  return new URLSearchParams();
+  return parseSupabaseAuthParams(url).get('type') === 'recovery';
 }
 
 export function isAuthCallbackUrl(url: string): boolean {
+  if (isPasswordResetRedirectUrl(url)) {
+    return false;
+  }
+
   const lower = url.toLowerCase();
   return (
     lower.includes('/auth/callback') ||
     lower.includes('auth/callback') ||
     lower.includes('access_token') ||
-    lower.includes('refresh_token')
+    lower.includes('refresh_token') ||
+    lower.includes('token_hash') ||
+    lower.includes('code=')
   );
 }
 
-export type AuthRedirectResult =
-  | { ok: true; type: string | null }
-  | { ok: false; error: string };
-
-/** Exchange access/refresh tokens from a Supabase auth redirect URL for a session. */
-export async function createSessionFromAuthRedirect(url: string): Promise<AuthRedirectResult> {
-  const { getSupabaseClient } = await import('@/lib/supabase/client');
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    return { ok: false, error: 'Supabase is not configured.' };
-  }
-
-  const params = parseAuthParams(url);
-  const error = params.get('error');
-  const errorDescription = params.get('error_description');
-  if (error) {
-    return { ok: false, error: errorDescription ?? error };
-  }
-
-  const accessToken = params.get('access_token');
-  const refreshToken = params.get('refresh_token');
-  if (!accessToken || !refreshToken) {
-    return { ok: false, error: 'This confirmation link is missing auth tokens.' };
-  }
-
-  const { error: sessionError } = await supabase.auth.setSession({
-    access_token: accessToken,
-    refresh_token: refreshToken,
-  });
-
-  if (sessionError) {
-    return { ok: false, error: sessionError.message };
-  }
-
-  return { ok: true, type: params.get('type') };
+export function isSupabaseAuthRedirectUrl(url: string): boolean {
+  return isPasswordResetRedirectUrl(url) || isAuthCallbackUrl(url);
 }
+
+export {
+  buildAuthCallbackUrlFromParams,
+  buildPasswordResetUrlFromParams,
+  createSessionFromAuthRedirect,
+  parseSupabaseAuthParams,
+  type AuthRedirectResult,
+} from '@/lib/auth/processAuthRedirect';

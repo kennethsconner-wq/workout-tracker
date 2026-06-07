@@ -11,15 +11,18 @@ import {
 } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
-import { createSessionFromAuthRedirect, isAuthCallbackUrl } from '@/lib/auth/authRedirect';
+import { createSessionFromAuthRedirect, isPasswordResetRedirectUrl, isSupabaseAuthRedirectUrl } from '@/lib/auth/authRedirect';
+import { markAccountOnboardingDismissed } from '@/lib/auth/accountOnboardingStorage';
 
 import {
+  loadStoredSession,
   refreshSession,
   resendSignUpConfirmation,
   sendPasswordResetEmail,
   signInWithPassword,
   signOut as signOutFromSupabase,
   signUpWithPassword,
+  updatePassword as updatePasswordInSupabase,
   updateUsername as updateUsernameInSupabase,
 } from '@/lib/auth/authService';
 import { toAuthUser, type AuthContextValue } from '@/lib/auth/types';
@@ -46,23 +49,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     let isMounted = true;
+    let hasBootstrappedSession = false;
 
-    void supabase.auth.getSession().then(({ data }) => {
+    const bootstrapSession = async () => {
+      const nextSession = await loadStoredSession();
       if (!isMounted) {
         return;
       }
-      setSession(data.session);
-      setIsLoading(false);
-    });
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       setIsLoading(false);
+      hasBootstrappedSession = true;
+
+      if (AppState.currentState === 'active' && nextSession) {
+        supabase.auth.startAutoRefresh();
+      }
+    };
+
+    void bootstrapSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      setSession(nextSession);
+      setIsLoading(false);
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (AppState.currentState === 'active') {
+          supabase.auth.startAutoRefresh();
+        }
+      }
+
+      if (event === 'SIGNED_OUT') {
+        supabase.auth.stopAutoRefresh();
+      }
     });
 
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
-        void supabase.auth.startAutoRefresh();
+        if (!hasBootstrappedSession) {
+          return;
+        }
+        supabase.auth.startAutoRefresh();
         void refreshSession();
         return;
       }
@@ -72,10 +98,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
 
     const handleAuthRedirectUrl = (url: string) => {
-      if (!isAuthCallbackUrl(url)) {
+      if (!isSupabaseAuthRedirectUrl(url)) {
         return;
       }
-      void createSessionFromAuthRedirect(url);
+
+      const isRecovery = isPasswordResetRedirectUrl(url);
+      void createSessionFromAuthRedirect(url).then((result) => {
+        if (result.ok && !isRecovery && result.type !== 'recovery') {
+          void markAccountOnboardingDismissed();
+        }
+      });
     };
 
     void Linking.getInitialURL().then((url) => {
@@ -152,6 +184,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
+  const updatePassword = useCallback(async (password: string) => {
+    setIsAuthBusy(true);
+    try {
+      return await updatePasswordInSupabase(password);
+    } finally {
+      setIsAuthBusy(false);
+    }
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
@@ -166,8 +207,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       resetPassword,
       resendSignUpConfirmation: resendConfirmation,
       updateUsername,
+      updatePassword,
     }),
-    [session, isLoading, isAuthBusy, signIn, signUp, signOut, resetPassword, resendConfirmation, updateUsername],
+    [session, isLoading, isAuthBusy, signIn, signUp, signOut, resetPassword, resendConfirmation, updateUsername, updatePassword],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

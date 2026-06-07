@@ -2,58 +2,49 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet } from 'react-native';
 
+import { AuthRedirectListener } from '@/components/auth/AuthRedirectListener';
 import { Text, View } from '@/components/Themed';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useAuth } from '@/lib/auth/AuthProvider';
-import { createSessionFromAuthRedirect } from '@/lib/auth/authRedirect';
-import { navigateAfterAuth } from '@/lib/auth/navigateAfterAuth';
+import { navigateAfterAuth, navigateToResetPassword } from '@/lib/auth/navigateAfterAuth';
 
 export default function AuthCallbackScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
     access_token?: string | string[];
     refresh_token?: string | string[];
+    code?: string | string[];
+    token_hash?: string | string[];
+    type?: string | string[];
     '#': string | string[];
   }>();
   const { isSignedIn, isLoading } = useAuth();
   const [timedOut, setTimedOut] = useState(false);
 
   useEffect(() => {
-    const accessToken = firstParam(params.access_token);
-    const refreshToken = firstParam(params.refresh_token);
-    const hashPayload = firstParam(params['#']);
-
-    if (accessToken && refreshToken) {
-      const query = new URLSearchParams({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-      void createSessionFromAuthRedirect(`workouttracker:///auth/callback?${query.toString()}`);
-      return;
-    }
-
-    if (hashPayload) {
-      void createSessionFromAuthRedirect(`workouttracker:///auth/callback#${hashPayload}`);
-    }
-  }, [params.access_token, params.refresh_token, params['#']]);
-
-  useEffect(() => {
     if (!isLoading && isSignedIn) {
+      const typeParam = Array.isArray(params.type) ? params.type[0] : params.type;
+      if (typeParam === 'recovery') {
+        navigateToResetPassword(router);
+        return;
+      }
+
       navigateAfterAuth(router);
     }
-  }, [isLoading, isSignedIn, router]);
+  }, [isLoading, isSignedIn, params.type, router]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!isSignedIn) {
         setTimedOut(true);
       }
-    }, 8000);
+    }, 12000);
     return () => clearTimeout(timer);
   }, [isSignedIn]);
 
   return (
     <>
+      <AuthRedirectListener params={params} />
       <Stack.Screen
         options={{
           title: 'Confirm email',
@@ -66,8 +57,8 @@ export default function AuthCallbackScreen() {
           <>
             <Text style={styles.title}>Could not finish sign-in</Text>
             <Text style={styles.copy}>
-              Open the confirmation link on the same device where Axios Workouts is installed, then try
-              signing in from Settings → Account.
+              Open the confirmation link on the same device where you signed up, with the app installed. If it still
+              fails, try signing in from Settings → Account with your email and password.
             </Text>
           </>
         ) : (
@@ -79,13 +70,6 @@ export default function AuthCallbackScreen() {
       </View>
     </>
   );
-}
-
-function firstParam(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return value;
 }
 
 const styles = StyleSheet.create({

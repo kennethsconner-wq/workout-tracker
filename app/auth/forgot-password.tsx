@@ -9,6 +9,7 @@ import { Text } from '@/components/Themed';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { validateEmail } from '@/lib/auth/authErrors';
 import { useAuth } from '@/lib/auth/AuthProvider';
+import { navigateToSignIn } from '@/lib/auth/navigateAfterAuth';
 import { themedAlert } from '@/lib/themedAlert';
 
 export default function ForgotPasswordScreen() {
@@ -34,7 +35,7 @@ export default function ForgotPasswordScreen() {
     themedAlert(
       'Check your email',
       'If an account exists for that address, a password reset link has been sent.',
-      [{ text: 'OK', onPress: () => router.replace('/auth/sign-in') }],
+      [{ text: 'OK', onPress: () => navigateToSignIn(router) }],
     );
   };
 
