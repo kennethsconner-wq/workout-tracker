@@ -18,11 +18,17 @@ export default function AboutScreen() {
       <View style={styles.screen}>
         <View style={styles.container}>
           <Text style={styles.copy}>
-            Workout Tracker helps you plan and track workouts. Everything stays on your device—no account required.
+            Axios Workouts helps you plan and track workouts. No account is required—your workouts are always stored
+            locally on this device.
           </Text>
           <Text style={styles.copy}>
-            Your data is stored locally on this phone. If you remove the app or clear its data, that history is not
-            recovered from a server because none is sent off-device by this version of the app.
+            If you create an account, you can prepare for cloud backup so your workouts are accessible from other
+            devices and recoverable if this phone is lost or replaced. Until you sign in and sync is enabled, nothing
+            leaves your device.
+          </Text>
+          <Text style={styles.copy}>
+            If you use the app without an account, clearing app data or uninstalling removes your history from this
+            phone with no cloud copy.
           </Text>
         </View>
         <StatusBar style="light" />

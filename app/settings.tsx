@@ -29,6 +29,12 @@ export default function SettingsScreen() {
 
   const rows: SettingsRow[] = [
     {
+      key: 'account',
+      title: 'Account',
+      icon: 'person-circle-outline',
+      onPress: () => router.push('/account'),
+    },
+    {
       key: 'exercise-library',
       title: 'Exercise Library',
       icon: 'library-outline',

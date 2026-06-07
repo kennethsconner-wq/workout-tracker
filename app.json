@@ -14,7 +14,26 @@
     },
     "android": {
       "userInterfaceStyle": "dark",
+      "softwareKeyboardLayoutMode": "resize",
       "package": "com.kconsoft.workouttracker",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "workouttracker",
+              "pathPrefix": "/auth/callback"
+            },
+            {
+              "scheme": "workouttracker",
+              "host": "auth",
+              "pathPrefix": "/callback"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.POST_NOTIFICATIONS"

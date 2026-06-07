@@ -4,6 +4,7 @@ import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { AccountOnboardingGate } from '@/components/AccountOnboardingModal';
 import { ThemedAlertProvider } from '@/components/ThemedAlertProvider';
 import { DurationTimerProvider } from '@/components/DurationTimerProvider';
 import { AuthProvider } from '@/lib/auth/AuthProvider';
@@ -83,6 +84,7 @@ function RootLayoutNav() {
       <SafeAreaProvider style={{ flex: 1, backgroundColor: appBackground }}>
         <AuthProvider>
         <DataRepositoryProvider>
+        <AccountOnboardingGate />
         <ThemedAlertProvider>
         <DurationTimerProvider>
         <ThemeProvider value={NavigationAppTheme}>
@@ -102,6 +104,12 @@ function RootLayoutNav() {
               title: 'Log workout',
               presentation: 'card',
               ...stackHeaderHideIosBackLabel,
+            }}
+          />
+          <Stack.Screen
+            name="auth"
+            options={{
+              headerShown: false,
             }}
           />
         </Stack>
