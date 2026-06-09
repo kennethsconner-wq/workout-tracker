@@ -18,13 +18,14 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { activityTypeLabel } from '@/lib/exerciseDisplay';
 import { collectStoredExerciseOptions, countExerciseLoggedAppearances, getExerciseLastLoggedAtIso } from '@/lib/exerciseSnapshot';
-import { loadLoggedWorkouts, loadWorkouts } from '@/lib/workoutsStorage';
+import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 import type { LoggedWorkout, Workout } from '@/lib/types';
 
 /** Metrics tab: exercise-specific snapshot (full history is on the Log tab). */
 export function LoggedWorkoutsList() {
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
+  const repo = useDataRepository();
   const { width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const borderColor = activeScheme === 'dark' ? '#333' : '#e5e5e5';
@@ -53,7 +54,7 @@ export function LoggedWorkoutsList() {
     useCallback(() => {
       let cancelled = false;
       void (async () => {
-        const [nextWorkouts, nextLogged] = await Promise.all([loadWorkouts(), loadLoggedWorkouts()]);
+        const [nextWorkouts, nextLogged] = await Promise.all([repo.loadWorkouts(), repo.loadLoggedWorkouts()]);
         if (cancelled) {
           return;
         }
@@ -71,7 +72,7 @@ export function LoggedWorkoutsList() {
       return () => {
         cancelled = true;
       };
-    }, []),
+    }, [repo]),
   );
 
   if (loading) {

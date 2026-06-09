@@ -51,6 +51,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let isMounted = true;
     let hasBootstrappedSession = false;
 
+    const triggerCloudSync = () => {
+      void syncEngine.runInitialSync().catch(() => {
+        // Sync errors are surfaced via useSyncStatus on the Account screen.
+      });
+    };
+
     const bootstrapSession = async () => {
       const nextSession = await loadStoredSession();
       if (!isMounted) {
@@ -60,6 +66,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setSession(nextSession);
       setIsLoading(false);
       hasBootstrappedSession = true;
+
+      if (nextSession) {
+        void syncEngine.hydrateStatus();
+        triggerCloudSync();
+      }
 
       if (AppState.currentState === 'active' && nextSession) {
         supabase.auth.startAutoRefresh();
@@ -71,6 +82,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const { data: authListener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
       setIsLoading(false);
+
+      if (event === 'SIGNED_IN' && nextSession) {
+        void syncEngine.hydrateStatus();
+        triggerCloudSync();
+      }
 
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         if (AppState.currentState === 'active') {
@@ -89,7 +105,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
         supabase.auth.startAutoRefresh();
-        void refreshSession();
+        void refreshSession().then(() => syncEngine.syncNow());
         return;
       }
       supabase.auth.stopAutoRefresh();

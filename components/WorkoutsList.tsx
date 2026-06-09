@@ -45,7 +45,7 @@ import {
   formatWorkoutSessionCount,
   formatWorkoutTrackingSince,
 } from '@/lib/loggedWorkoutAnalytics';
-import { deleteLoggedWorkoutsByWorkoutId, deleteWorkout, loadLoggedWorkouts, loadWorkouts } from '@/lib/workoutsStorage';
+import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 import { DAYS_OF_WEEK, DAY_OF_WEEK_ABBREVIATIONS, type LoggedWorkout, type Workout } from '@/lib/types';
 
 /** Matches `@react-navigation/elements` `HeaderTitle` (Workouts screen title). */
@@ -93,6 +93,7 @@ export function WorkoutsList() {
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
   const router = useRouter();
+  const repo = useDataRepository();
   const insets = useSafeAreaInsets();
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loggedWorkouts, setLoggedWorkouts] = useState<LoggedWorkout[]>([]);
@@ -130,8 +131,8 @@ export function WorkoutsList() {
       let cancelled = false;
       void (async () => {
         const [next, nextLogged, draftIds] = await Promise.all([
-          loadWorkouts(),
-          loadLoggedWorkouts(),
+          repo.loadWorkouts(),
+          repo.loadLoggedWorkouts(),
           getWorkoutIdsWithNewLogDrafts(),
         ]);
         if (!cancelled) {
@@ -145,7 +146,7 @@ export function WorkoutsList() {
       return () => {
         cancelled = true;
       };
-    }, []),
+    }, [repo]),
   );
 
   const selected = useMemo(() => {
@@ -286,9 +287,8 @@ export function WorkoutsList() {
         onPress: () => {
           void (async () => {
             const id = workout.id;
-            await deleteWorkout(id);
-            await deleteLoggedWorkoutsByWorkoutId(id);
-            const [updated, updatedLogged] = await Promise.all([loadWorkouts(), loadLoggedWorkouts()]);
+            await repo.deleteWorkout(id);
+            const [updated, updatedLogged] = await Promise.all([repo.loadWorkouts(), repo.loadLoggedWorkouts()]);
             setWorkouts(updated);
             setLoggedWorkouts(updatedLogged);
             setSelectedId((prev) => pickWorkoutIdForDeviceCalendarDay(updated, prev === id ? null : prev));

@@ -16,7 +16,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { activityTypeLabel, getLogExerciseLogDisplay } from '@/lib/exerciseDisplay';
 import { navigateToEditLoggedWorkout } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
-import { deleteLoggedWorkout, loadLoggedWorkouts } from '@/lib/workoutsStorage';
+import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 import type { LoggedWorkout } from '@/lib/types';
 
 /** Local calendar date key `YYYY-MM-DD` from an ISO timestamp. */
@@ -47,6 +47,7 @@ const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as cons
 export function LoggedWorkoutLogList() {
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
+  const repo = useDataRepository();
   const tint = Colors[activeScheme].tint;
   const borderMuted = activeScheme === 'dark' ? '#333' : '#e5e5e5';
   const textColor = Colors[activeScheme].text;
@@ -61,7 +62,7 @@ export function LoggedWorkoutLogList() {
     useCallback(() => {
       let cancelled = false;
       void (async () => {
-        const next = await loadLoggedWorkouts();
+        const next = await repo.loadLoggedWorkouts();
         if (!cancelled) {
           setWorkouts(next);
           setLoading(false);
@@ -70,7 +71,7 @@ export function LoggedWorkoutLogList() {
       return () => {
         cancelled = true;
       };
-    }, []),
+    }, [repo]),
   );
 
   const datesWithLogs = useMemo(() => {
@@ -125,8 +126,8 @@ export function LoggedWorkoutLogList() {
         style: 'destructive',
         onPress: () => {
           void (async () => {
-            await deleteLoggedWorkout(workout.id);
-            const next = await loadLoggedWorkouts();
+            await repo.deleteLoggedWorkout(workout.id);
+            const next = await repo.loadLoggedWorkouts();
             setWorkouts(next);
             if (selectedDateKey) {
               const stillOnDay = next.filter((w) => localDateKeyFromIso(w.createdAt) === selectedDateKey);

@@ -12,7 +12,36 @@ import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
 import { validateUsername } from '@/lib/auth/authErrors';
 import { useAuth } from '@/lib/auth/AuthProvider';
+import { useSyncStatus } from '@/lib/sync/useSyncStatus';
+import { syncEngine } from '@/lib/sync/syncEngine';
 import { themedAlert } from '@/lib/themedAlert';
+
+function formatRelativeSyncTime(iso: string | null): string {
+  if (!iso) {
+    return 'Not synced yet';
+  }
+  const syncedAt = Date.parse(iso);
+  if (!Number.isFinite(syncedAt)) {
+    return 'Not synced yet';
+  }
+
+  const diffMs = Date.now() - syncedAt;
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  if (diffMinutes < 1) {
+    return 'Just now';
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes} min ago`;
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours} hr ago`;
+  }
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+}
 
 function formatAccountDate(iso: string | null): string | null {
   if (!iso) {
@@ -37,6 +66,7 @@ export default function AccountScreen() {
   const tint = Colors[activeScheme].tint;
   const borderColor = activeScheme === 'dark' ? '#333' : '#e5e5e5';
   const { user, isSignedIn, isConfigured, isAuthBusy, signOut, updateUsername } = useAuth();
+  const syncStatus = useSyncStatus();
   const [usernameDraft, setUsernameDraft] = useState('');
   const [usernameError, setUsernameError] = useState<string | null>(null);
 
@@ -139,14 +169,25 @@ export default function AccountScreen() {
                 <Ionicons name="cloud-outline" size={20} color={tint} style={styles.infoIcon} />
                 <View style={styles.infoTextBlock}>
                   <Text style={[styles.infoLabel, { color: textColor, opacity: 0.7 }]}>Sync status</Text>
-                  <Text style={[styles.infoValue, { color: textColor }]}>Not enabled yet</Text>
+                  <Text style={[styles.infoValue, { color: textColor }]}>
+                    {syncStatus.isSyncing
+                      ? 'Syncing…'
+                      : syncStatus.lastError
+                        ? 'Sync issue — tap Sync now to retry'
+                        : `Last synced: ${formatRelativeSyncTime(syncStatus.lastSyncedAt)}`}
+                  </Text>
                 </View>
               </View>
             </View>
             <Text style={styles.copy}>
-              You are signed in. Cloud sync will back up your workouts once that feature is enabled. Your data remains
-              available locally on this device.
+              Your workouts are backed up to the cloud while signed in. Edits save locally first, then sync in the
+              background.
             </Text>
+            <AuthPrimaryButton
+              label="Sync now"
+              onPress={() => void syncEngine.syncNow()}
+              loading={syncStatus.isSyncing}
+            />
             <AuthPrimaryButton label="Sign out" onPress={handleSignOut} loading={isAuthBusy} />
           </View>
         ) : (

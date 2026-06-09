@@ -51,7 +51,7 @@ import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { DAYS_OF_WEEK, type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
 import { themedAlert } from '@/lib/themedAlert';
-import { addWorkout, findTemplateExerciseById, loadWorkouts, propagateExerciseDefinitionsAcrossWorkouts } from '@/lib/workoutsStorage';
+import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 
 type ImportExercisesPayload = {
   nonce: string;
@@ -66,6 +66,7 @@ function isDayOfWeekString(value: string): value is DayOfWeek {
 
 export default function LogWorkoutScreen() {
   const navigation = useNavigation();
+  const repo = useDataRepository();
   const params = useLocalSearchParams<{ copyWorkout?: string | string[]; importExercises?: string | string[] }>();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
@@ -243,7 +244,7 @@ export default function LogWorkoutScreen() {
     useCallback(() => {
       let cancelled = false;
       void (async () => {
-        const all = await loadWorkouts();
+        const all = await repo.loadWorkouts();
         if (cancelled) {
           return;
         }
@@ -258,7 +259,7 @@ export default function LogWorkoutScreen() {
               next.push(ex);
               continue;
             }
-            const latest = findTemplateExerciseById(all, templateId);
+            const latest = repo.findTemplateExerciseById(all, templateId);
             if (!latest) {
               // Keep drafts for exercises imported from the library (catalog ids differ from template ids).
               next.push(ex);
@@ -373,19 +374,19 @@ export default function LogWorkoutScreen() {
     }
 
     void (async () => {
-      const allWorkouts = await loadWorkouts();
+      const allWorkouts = await repo.loadWorkouts();
       const nameCheck = validateExerciseNamesForWorkoutSave(allWorkouts, null, parsed.exercises);
       if (!nameCheck.ok) {
         themedAlert(nameCheck.title, nameCheck.message);
         return;
       }
-      await addWorkout({
+      await repo.addWorkout({
         title: parsed.title,
         daysOfWeek: parsed.daysOfWeek,
         iconId: parsed.iconId,
         exercises: parsed.exercises,
       });
-      await propagateExerciseDefinitionsAcrossWorkouts(parsed.exercises);
+      await repo.propagateExerciseDefinitionsAcrossWorkouts(parsed.exercises);
       resetCreateWorkoutForm();
       router.replace('/');
     })();

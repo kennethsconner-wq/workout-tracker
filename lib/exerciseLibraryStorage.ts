@@ -49,6 +49,16 @@ async function writeExerciseLibrary(entries: ExerciseLibraryEntry[]): Promise<vo
   await AsyncStorage.setItem(EXERCISE_LIBRARY_STORAGE_KEY, JSON.stringify(entries));
 }
 
+/** Raw persisted catalog entries (for cloud sync). */
+export async function loadExerciseLibraryEntries(): Promise<ExerciseLibraryEntry[]> {
+  return readExerciseLibraryRaw();
+}
+
+/** Replace the entire exercise library cache (used when merging cloud data). */
+export async function replaceExerciseLibraryEntries(entries: ExerciseLibraryEntry[]): Promise<void> {
+  await writeExerciseLibrary(entries);
+}
+
 function definitionFields(
   exercise: ExerciseDefinitionMatch,
 ): ExerciseDefinitionMatch {

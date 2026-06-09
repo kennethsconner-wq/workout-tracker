@@ -453,6 +453,11 @@ async function saveLoggedWorkouts(workouts: LoggedWorkout[]): Promise<void> {
   await AsyncStorage.setItem(LOGGED_WORKOUTS_STORAGE_KEY, JSON.stringify(workouts));
 }
 
+/** Replace all logged workouts (used when merging cloud data). */
+export async function replaceLoggedWorkouts(workouts: LoggedWorkout[]): Promise<void> {
+  await saveLoggedWorkouts(workouts);
+}
+
 export async function addLoggedWorkout(
   workout: Omit<LoggedWorkout, 'id' | 'createdAt'> & Partial<Pick<LoggedWorkout, 'id' | 'createdAt'>>,
 ): Promise<LoggedWorkout> {
@@ -532,6 +537,11 @@ export async function loadWorkouts(): Promise<Workout[]> {
 
 async function saveWorkouts(workouts: Workout[]): Promise<void> {
   await AsyncStorage.setItem(WORKOUTS_STORAGE_KEY, JSON.stringify(workouts));
+}
+
+/** Replace all workout templates (used when merging cloud data). */
+export async function replaceWorkouts(workouts: Workout[]): Promise<void> {
+  await saveWorkouts(workouts);
 }
 
 export async function addWorkout(

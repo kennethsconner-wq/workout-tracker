@@ -88,7 +88,7 @@ import { hasLoggedExerciseInput, parseLoggedExerciseFromDraft } from '@/lib/logE
 import { resolveExerciseSetCount } from '@/lib/exerciseDraft';
 import { clearNewLogDraft, newLogDraftStorageKey, shouldPersistNewLogDraft } from '@/lib/logWorkoutDraft';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
-import { addLoggedWorkout, loadLoggedWorkouts, loadWorkouts, updateLoggedWorkout } from '@/lib/workoutsStorage';
+import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 
 type DraftActualSet = {
   id: string;
@@ -934,6 +934,7 @@ function toDraftExercises(workout: Workout): DraftExercise[] {
 }
 
 export default function LogWorkoutScreen() {
+  const repo = useDataRepository();
   const params = useLocalSearchParams<{
     workoutId?: string | string[];
     loggedWorkoutId?: string | string[];
@@ -1010,7 +1011,7 @@ export default function LogWorkoutScreen() {
     setLoadedFromDraft(false);
 
     void (async () => {
-      const allWorkouts = await loadWorkouts();
+      const allWorkouts = await repo.loadWorkouts();
       if (loadGeneration !== loadGenerationRef.current) {
         return;
       }
@@ -1029,7 +1030,7 @@ export default function LogWorkoutScreen() {
       let nextSessionDate = new Date();
 
       if (intent === 'edit' && loggedWorkoutId) {
-        const allLogged = await loadLoggedWorkouts();
+        const allLogged = await repo.loadLoggedWorkouts();
         if (loadGeneration !== loadGenerationRef.current) {
           return;
         }
@@ -1714,7 +1715,7 @@ export default function LogWorkoutScreen() {
         const { loggedWorkoutId, intent } = session;
         const createdAt = sessionDate.toISOString();
         if (intent === 'edit' && loggedWorkoutId) {
-          const updated = await updateLoggedWorkout(loggedWorkoutId, {
+          const updated = await repo.updateLoggedWorkout(loggedWorkoutId, {
             workoutId: parsed.workout.id,
             title: parsed.workout.title,
             daysOfWeek: parsed.workout.daysOfWeek,
@@ -1728,7 +1729,7 @@ export default function LogWorkoutScreen() {
             return;
           }
         } else {
-          await addLoggedWorkout({
+          await repo.addLoggedWorkout({
             workoutId: parsed.workout.id,
             title: parsed.workout.title,
             daysOfWeek: parsed.workout.daysOfWeek,

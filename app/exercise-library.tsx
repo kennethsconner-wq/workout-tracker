@@ -33,14 +33,8 @@ import {
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { validateExerciseNamesAfterLibraryEdit } from '@/lib/exerciseNameValidation';
 import { exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
-import { loadExerciseLibraryCatalog } from '@/lib/exerciseLibraryStorage';
+import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 import { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
-import {
-  loadLoggedWorkouts,
-  loadWorkouts,
-  removeExercisesMatchingSignatureFromAllWorkouts,
-  updateExercisesMatchingSignatureAcrossWorkouts,
-} from '@/lib/workoutsStorage';
 import { themedAlert } from '@/lib/themedAlert';
 import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types';
 
@@ -119,6 +113,7 @@ function parseExistingSeeds(serialized: string | undefined): ExerciseDraftSeed[]
 }
 
 export default function ExerciseLibraryScreen() {
+  const repo = useDataRepository();
   const { source, workoutId, existingExercises, createDraft, libraryEntry } = useLocalSearchParams<{
     source?: RouteSource;
     workoutId?: string | string[];
@@ -140,8 +135,8 @@ export default function ExerciseLibraryScreen() {
 
   const reloadLibrary = useCallback(async () => {
     setLoading(true);
-    const [workouts, logged] = await Promise.all([loadWorkouts(), loadLoggedWorkouts()]);
-    const catalog = await loadExerciseLibraryCatalog(workouts, logged);
+    const [workouts, logged] = await Promise.all([repo.loadWorkouts(), repo.loadLoggedWorkouts()]);
+    const catalog = await repo.loadExerciseLibraryCatalog(workouts, logged);
     const itemsFromCatalog: ExerciseListItem[] = catalog.map((exercise) => ({
       key: exerciseDefinitionSignatureKey(exercise),
       id: exercise.id,
@@ -268,7 +263,7 @@ export default function ExerciseLibraryScreen() {
             void (async () => {
               try {
                 setLibraryMutationBusy(true);
-                await removeExercisesMatchingSignatureFromAllWorkouts({
+                await repo.removeExercisesMatchingSignatureFromAllWorkouts({
                   activityType: item.activityType,
                   name: item.name,
                   sets: item.sets,
@@ -312,7 +307,7 @@ export default function ExerciseLibraryScreen() {
     }
     try {
       setLibraryMutationBusy(true);
-      const allWorkouts = await loadWorkouts();
+      const allWorkouts = await repo.loadWorkouts();
       const nameCheck = validateExerciseNamesAfterLibraryEdit(
         allWorkouts,
         (exercise) => matchesExerciseDefinition(exercise, editBaseline),
@@ -322,7 +317,7 @@ export default function ExerciseLibraryScreen() {
         themedAlert(nameCheck.title, nameCheck.message);
         return;
       }
-      await updateExercisesMatchingSignatureAcrossWorkouts(
+      await repo.updateExercisesMatchingSignatureAcrossWorkouts(
         {
           activityType: editBaseline.activityType,
           name: editBaseline.name,
