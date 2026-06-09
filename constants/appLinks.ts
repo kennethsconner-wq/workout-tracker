@@ -11,6 +11,12 @@ export const PAYPAL_DONATE_URL = 'https://paypal.me/KConSoft';
 
 export const FEEDBACK_EMAIL = 'kconsoft@gmail.com';
 
+/** Public privacy policy URL — must match the hosted docs/privacy-policy.txt file. */
+export const PRIVACY_POLICY_URL =
+  'https://raw.githubusercontent.com/kennethsconner-wq/workout-tracker/main/docs/privacy-policy.txt';
+
+export const DEVELOPER_NAME = 'KConSoft';
+
 export function androidPlayStoreReviewUrl(): string {
   return `market://details?id=${ANDROID_PLAY_STORE_PACKAGE}`;
 }

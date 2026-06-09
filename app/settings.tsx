@@ -45,6 +45,12 @@ export default function SettingsScreen() {
       onPress: () => router.push('/about'),
     },
     {
+      key: 'privacy',
+      title: 'Privacy Policy',
+      icon: 'shield-checkmark-outline',
+      onPress: () => router.push('/privacy-policy'),
+    },
+    {
       key: 'feedback',
       title: 'Feedback',
       icon: 'mail-outline',

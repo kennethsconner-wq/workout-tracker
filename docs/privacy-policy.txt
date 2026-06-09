@@ -1,30 +1,68 @@
-Workout Tracker — Privacy Policy
-Last updated: May 13, 2026
+Axios Workouts — Privacy Policy
+Last updated: June 8, 2026
 
-This policy describes how Workout Tracker (“the app”) handles information on your device. By using the app, you agree to this policy.
+This policy describes how Axios Workouts (“the app”), published by KConSoft (“we,” “us,” or “our”), handles information on your device. By using the app, you agree to this policy.
 
 1. Who we are
-Workout Tracker is a mobile application you install on your own device. This version is designed to work without creating an account with us.
+Axios Workouts is a mobile fitness application developed and published by KConSoft. This version is designed to work without creating an account with us. We do not operate servers that store your workout data.
 
 2. Information the app stores
-The app stores workout-related information you enter or generate locally on your device, such as workout templates, exercise details, logged sessions, and similar data used to show your history and metrics. That data stays on the device unless you choose to export or share it outside the app using features your device provides (for example, screenshots or system share sheets), which are outside our control.
+The app stores workout-related information you enter or generate locally on your device, including:
+- Workout templates and schedules
+- Exercise names and activity details
+- Logged workout sessions (sets, reps, weight, duration, distance, and similar metrics)
+- In-progress workout drafts
+- App preferences needed for features such as workout timers
+
+That data stays on your device. We do not collect, upload, or store this information on our servers. If you share data outside the app using your device (for example, screenshots or system share sheets), that sharing is outside our control.
 
 3. Accounts
-This version of the app does not require you to sign in. We do not operate a user account system for this app as described here.
+This version of the app does not require you to sign in. We do not operate a user account system, and we do not maintain user profiles on our servers.
 
 4. Network and third parties
-The app may use standard device networking for routine technical purposes (for example, software updates, crash diagnostics, or analytics) depending on your platform, build configuration, and how you distribute the app. If you use Expo or similar tooling during development, additional services may apply only in those environments.
+The app may open external links you choose to use, such as PayPal for optional donations, your email app for feedback, or your app store listing. Those services have their own privacy policies.
 
-We do not sell your personal information.
+We do not sell your personal information. We do not use third-party analytics or advertising SDKs in this version of the app.
 
-5. Children’s privacy
-The app is not directed to children under 13 (or the minimum age required in your region). If you are a parent or guardian and believe your child has provided personal information through the app, contact us using the information in your App Store listing or support channel.
+5. Data retention
+All workout data is stored only on your device. We do not retain copies on our servers.
 
-6. Security
-We rely on your device’s operating system protections for data stored locally. No method of storage or transmission is completely secure.
+Your data is kept for as long as you keep it in the app. It remains on your device until you:
+- Delete individual workouts, logged sessions, or exercises inside the app, or
+- Clear the app’s storage through your device settings, or
+- Uninstall the app from your device
 
-7. Changes
+After you delete data from your device or uninstall the app, we do not retain that information because we never received or stored it on our servers.
+
+On Android, your device may include app data in automatic device backups if you have backup enabled at the system level. Those backups are managed by Google and your device settings, not by KConSoft.
+
+6. How to delete your data
+Because your data is stored locally on your device, you can delete it at any time using the steps below.
+
+Delete specific items in the app:
+- Logged workouts: open a workout’s history and delete individual logged sessions.
+- Workout templates: delete a template from your workout list (linked logged sessions for that template are removed as well).
+- Exercises: remove exercises from the Exercise Library (this also removes matching exercises from your workouts and logs).
+
+Delete all app data at once:
+- Android: open Settings → Apps → Axios Workouts → Storage → Clear data (wording may vary by device).
+- iOS: delete the app from your device (touch and hold the app icon → Remove App → Delete App).
+
+Uninstalling the app removes all data stored by the app on that device.
+
+Request help with deletion:
+If you need assistance deleting your data, email kconsoft@gmail.com with the subject line “Axios Workouts — Data Deletion Request.” Because we do not store your workout data on our servers, deletion is performed on your device using the steps above. We will respond to help you complete deletion on your device.
+
+7. Children’s privacy
+The app is not directed to children under 13 (or the minimum age required in your region). If you are a parent or guardian and believe your child has provided personal information through the app, contact us at kconsoft@gmail.com.
+
+8. Security
+We rely on your device’s operating system protections for data stored locally. No method of storage is completely secure.
+
+9. Changes
 We may update this policy from time to time. The “Last updated” date at the top will change when we do. Continued use of the app after changes means you accept the updated policy.
 
-8. Contact
-For privacy questions, use the contact option provided on your app store listing or in-app support, if available.
+10. Contact
+For privacy questions or data deletion assistance, contact:
+KConSoft
+Email: kconsoft@gmail.com
