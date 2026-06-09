@@ -11,9 +11,9 @@ export const PAYPAL_DONATE_URL = 'https://paypal.me/KConSoft';
 
 export const FEEDBACK_EMAIL = 'kconsoft@gmail.com';
 
-/** Public privacy policy URL — must match the hosted docs/privacy-policy.txt file. */
+/** Public privacy policy URL — must match docs/privacy-policy.txt on GitHub. */
 export const PRIVACY_POLICY_URL =
-  'https://raw.githubusercontent.com/kennethsconner-wq/workout-tracker/main/docs/privacy-policy.txt';
+  'https://github.com/kennethsconner-wq/workout-tracker/blob/master/docs/privacy-policy.txt';
 
 export const DEVELOPER_NAME = 'KConSoft';
 
