@@ -47,7 +47,8 @@
           "color": "#23D5D5"
         }
       ],
-      "./plugins/withAndroidExactAlarmPermission.js"
+      "./plugins/withAndroidExactAlarmPermission.js",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
