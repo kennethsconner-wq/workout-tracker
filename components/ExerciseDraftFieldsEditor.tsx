@@ -270,35 +270,37 @@ export function ExerciseDraftFieldsEditor({
       ) : null}
 
       {draft.activityType === 'stretch' ? (
-        <View style={styles.stretchRow}>
-          <UnitField
-            value={draft.sets}
-            onChangeText={(value) => onFieldChange('sets', value)}
-            placeholder="0"
-            suffix="sets"
-            maxDecimalPlaces={INTEGER_DECIMAL_PLACES}
-            editable={!disabled}
-            setRowInputStyle={fieldStyle}
-            suffixColor={suffixColor}
-            wrapStyle={styles.stretchSetsWrap}
-          />
-          <View style={styles.stretchDurationWrap}>
-            <NumericTextInput
-              value={draft.duration}
-              onChangeText={(value) => onFieldChange('duration', value)}
-              placeholder="Duration"
-              placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+        <View style={styles.stretchFieldsColumn}>
+          <View style={styles.stretchRow}>
+            <UnitField
+              value={draft.sets}
+              onChangeText={(value) => onFieldChange('sets', value)}
+              placeholder="0"
+              suffix="sets"
+              maxDecimalPlaces={INTEGER_DECIMAL_PLACES}
               editable={!disabled}
-              style={[fieldStyle, styles.stretchDurationInput]}
+              setRowInputStyle={fieldStyle}
+              suffixColor={suffixColor}
+              wrapStyle={styles.stretchSetsWrap}
             />
-            <DurationUnitPicker
-              value={draft.durationUnit}
-              onChange={onDurationUnitChange}
-              units={STRETCH_DURATION_UNITS}
-              disabled={disabled}
-              borderColor={borderColor}
-              textColor={textColor}
-            />
+            <View style={styles.stretchDurationWrap}>
+              <NumericTextInput
+                value={draft.duration}
+                onChangeText={(value) => onFieldChange('duration', value)}
+                placeholder="Duration"
+                placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
+                editable={!disabled}
+                style={[fieldStyle, styles.stretchDurationInput]}
+              />
+              <DurationUnitPicker
+                value={draft.durationUnit}
+                onChange={onDurationUnitChange}
+                units={STRETCH_DURATION_UNITS}
+                disabled={disabled}
+                borderColor={borderColor}
+                textColor={textColor}
+              />
+            </View>
           </View>
           <RestBetweenSetsFieldsEditor
             enabled={draft.restBetweenSetsEnabled}
@@ -326,6 +328,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     flexWrap: 'wrap',
+  },
+  stretchFieldsColumn: {
+    gap: 8,
+    alignSelf: 'stretch',
   },
   stretchRow: {
     flexDirection: 'row',
