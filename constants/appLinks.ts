@@ -5,7 +5,7 @@ export const ANDROID_PLAY_STORE_PACKAGE = 'com.kconsoft.workouttracker';
  * Numeric App Store id from App Store Connect (e.g. 1234567890).
  * Set this when the iOS app is published so "Rate the app" opens the correct listing.
  */
-export const IOS_APP_STORE_ID = '';
+export const IOS_APP_STORE_ID = '6769538214';
 
 export const PAYPAL_DONATE_URL = 'https://paypal.me/KConSoft';
 

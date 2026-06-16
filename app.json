@@ -2,7 +2,7 @@
   "expo": {
     "name": "Axios Workouts",
     "slug": "workout-tracker",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "workouttracker",
@@ -47,7 +47,8 @@
           "color": "#23D5D5"
         }
       ],
-      "./plugins/withAndroidExactAlarmPermission.js"
+      "./plugins/withAndroidExactAlarmPermission.js",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
