@@ -100,6 +100,7 @@ export function WorkoutsList() {
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
+  const [maxCardHeight, setMaxCardHeight] = useState(0);
   const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
   const [draftWorkoutIds, setDraftWorkoutIds] = useState<Set<string>>(() => new Set());
   const sheetTranslateY = useRef(new Animated.Value(ACTION_SHEET_SLIDE)).current;
@@ -188,6 +189,18 @@ export function WorkoutsList() {
     },
     [cardStride, dropdownWorkouts],
   );
+
+  useEffect(() => {
+    setMaxCardHeight(0);
+  }, [dropdownWorkouts, draftWorkoutIds, cardWidth]);
+
+  const reportWorkoutCardHeight = useCallback((height: number) => {
+    const nextHeight = Math.ceil(height);
+    if (nextHeight <= 0) {
+      return;
+    }
+    setMaxCardHeight((prev) => (nextHeight > prev ? nextHeight : prev));
+  }, []);
 
   useEffect(() => {
     scrollCarouselToWorkoutId(selectedId, false);
@@ -345,7 +358,11 @@ export function WorkoutsList() {
                 removeClippedSubviews={false}
                 showsHorizontalScrollIndicator={hasMultipleWorkouts}
                 keyboardShouldPersistTaps="handled"
-                extraData={selectedId}
+                extraData={{ selectedId, maxCardHeight, draftWorkoutIds }}
+                initialNumToRender={dropdownWorkouts.length}
+                maxToRenderPerBatch={dropdownWorkouts.length}
+                windowSize={Math.max(5, dropdownWorkouts.length)}
+                style={maxCardHeight > 0 ? { height: maxCardHeight } : undefined}
                 onMomentumScrollEnd={onCarouselMomentumEnd}
                 snapToInterval={hasMultipleWorkouts ? cardStride : undefined}
                 snapToAlignment="start"
@@ -370,6 +387,11 @@ export function WorkoutsList() {
                   const isLastCard = index === dropdownWorkouts.length - 1;
                   return (
                     <RNView
+                      onLayout={
+                        maxCardHeight > 0
+                          ? undefined
+                          : (event) => reportWorkoutCardHeight(event.nativeEvent.layout.height)
+                      }
                       style={[
                         styles.workoutCard,
                         {
@@ -378,6 +400,7 @@ export function WorkoutsList() {
                           borderColor: isSelected ? Colors[activeScheme].tint : borderColor,
                           backgroundColor: Colors[activeScheme].background,
                         },
+                        maxCardHeight > 0 ? { height: maxCardHeight } : null,
                       ]}>
                       <View style={styles.workoutCardHeader} lightColor="transparent" darkColor="transparent">
                         <View style={styles.workoutCardHeaderTopRow} lightColor="transparent" darkColor="transparent">
@@ -430,7 +453,10 @@ export function WorkoutsList() {
                           ]}
                         />
                       </View>
-                      <View style={styles.workoutCardBody} lightColor="transparent" darkColor="transparent">
+                      <View
+                        style={[styles.workoutCardBody, maxCardHeight > 0 ? styles.workoutCardBodyExpanded : null]}
+                        lightColor="transparent"
+                        darkColor="transparent">
                         <View style={styles.scheduleRow} lightColor="transparent" darkColor="transparent">
                           <View style={styles.scheduleDaysGroup} lightColor="transparent" darkColor="transparent">
                             <Ionicons name="calendar-outline" size={16} color={Colors[activeScheme].tint} />
@@ -699,7 +725,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   workoutCard: {
-    flex: 1,
     borderRadius: 12,
     borderWidth: 2,
     overflow: 'hidden',
@@ -747,10 +772,12 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   workoutCardBody: {
-    flex: 1,
     paddingHorizontal: 14,
     paddingBottom: 14,
     gap: 10,
+  },
+  workoutCardBodyExpanded: {
+    flex: 1,
   },
   scheduleRow: {
     flexDirection: 'row',

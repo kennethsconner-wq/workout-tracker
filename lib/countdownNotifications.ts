@@ -191,7 +191,7 @@ export async function promptForExactAlarmPermissionIfNeeded(): Promise<void> {
 
   themedAlert(
     'Enable precise countdown alerts',
-    'On the next screen, allow Alarms & reminders for Workout Tracker so stretch and cardio timers notify you on time. If the app is not listed, reinstall the latest build and try again.',
+    'On the next screen, allow Alarms & reminders for Axios Workouts so stretch and cardio timers notify you on time. If the app is not listed, reinstall the latest build and try again.',
     [
       {
         text: 'Open settings',

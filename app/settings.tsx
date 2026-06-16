@@ -10,6 +10,7 @@ import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import { useColorScheme } from '@/components/useColorScheme';
 import { openAppStoreReview } from '@/lib/openAppStoreReview';
 import { openFeedbackEmail } from '@/lib/openFeedbackEmail';
+import { openPrivacyPolicy } from '@/lib/openPrivacyPolicy';
 
 type SettingsRow = {
   key: string;
@@ -49,6 +50,14 @@ export default function SettingsScreen() {
       title: 'About',
       icon: 'information-circle-outline',
       onPress: () => router.push('/about'),
+    },
+    {
+      key: 'privacy',
+      title: 'Privacy Policy',
+      icon: 'shield-checkmark-outline',
+      onPress: () => {
+        void openPrivacyPolicy();
+      },
     },
     {
       key: 'feedback',
