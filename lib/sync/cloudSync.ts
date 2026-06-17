@@ -34,15 +34,39 @@ const TABLE_BY_KIND: Record<SyncEntityKind, string> = {
 };
 
 export async function getCurrentUserId(): Promise<string | null> {
+  return resolveSyncUserId();
+}
+
+/** Prefer session JWT (needed for RLS) over a bare getUser() call. */
+export async function resolveSyncUserId(explicitUserId?: string): Promise<string | null> {
+  if (explicitUserId) {
+    return explicitUserId;
+  }
+
   const supabase = getSupabaseClient();
   if (!supabase) {
     return null;
   }
 
   const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (session?.user?.id) {
+    return session.user.id;
+  }
+
+  const {
     data: { user },
   } = await supabase.auth.getUser();
   return user?.id ?? null;
+}
+
+function formatSyncError(error: unknown): string {
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    const code = 'code' in error && typeof error.code === 'string' ? ` (${error.code})` : '';
+    return `${error.message}${code}`;
+  }
+  return 'Sync failed.';
 }
 
 async function upsertRow(
@@ -70,7 +94,7 @@ async function upsertRow(
   );
 
   if (error) {
-    throw error;
+    throw new Error(formatSyncError(error));
   }
 }
 
@@ -133,7 +157,7 @@ async function fetchRows<T>(table: string, userId: string, since: string | null)
 
   const { data, error } = await query.order('updated_at', { ascending: true });
   if (error) {
-    throw error;
+    throw new Error(formatSyncError(error));
   }
 
   return (data ?? []) as T[];
@@ -174,7 +198,7 @@ export async function countCloudEntities(userId: string): Promise<number> {
       .eq('user_id', userId);
 
     if (error) {
-      throw error;
+      throw new Error(formatSyncError(error));
     }
     total += count ?? 0;
   }
@@ -214,12 +238,23 @@ export async function pushPendingChanges(userId: string, pending: PendingSyncIte
   }
 }
 
-export async function runDeviceInitialSync(userId: string): Promise<void> {
-  const alreadyDone = await isInitialSyncDone(userId);
-  if (alreadyDone) {
-    return;
+export async function ensureLocalDataUploadedIfCloudEmpty(userId: string): Promise<boolean> {
+  const [localWorkouts, localLogged, cloudCount] = await Promise.all([
+    loadWorkouts(),
+    loadLoggedWorkouts(),
+    countCloudEntities(userId),
+  ]);
+
+  const localHasData = localWorkouts.length > 0 || localLogged.length > 0;
+  if (cloudCount === 0 && localHasData) {
+    await uploadAllLocal(userId);
+    return true;
   }
 
+  return false;
+}
+
+export async function runDeviceInitialSync(userId: string): Promise<void> {
   const [localWorkouts, localLogged, cloudCount] = await Promise.all([
     loadWorkouts(),
     loadLoggedWorkouts(),
@@ -230,7 +265,15 @@ export async function runDeviceInitialSync(userId: string): Promise<void> {
 
   if (cloudCount === 0 && localHasData) {
     await uploadAllLocal(userId);
-  } else if (cloudCount > 0) {
+    await markInitialSyncDone(userId);
+    return;
+  }
+
+  if (await isInitialSyncDone(userId)) {
+    return;
+  }
+
+  if (cloudCount > 0) {
     await pullRemoteChanges(userId, null);
   }
 

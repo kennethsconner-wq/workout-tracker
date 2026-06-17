@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import { AuthFormField } from '@/components/auth/AuthFormField';
@@ -165,7 +165,7 @@ export default function AccountScreen() {
                   </View>
                 </View>
               ) : null}
-              <View style={styles.infoRow}>
+              <View style={[styles.infoRow, styles.syncStatusRow]}>
                 <Ionicons name="cloud-outline" size={20} color={tint} style={styles.infoIcon} />
                 <View style={styles.infoTextBlock}>
                   <Text style={[styles.infoLabel, { color: textColor, opacity: 0.7 }]}>Sync status</Text>
@@ -177,17 +177,27 @@ export default function AccountScreen() {
                         : `Last synced: ${formatRelativeSyncTime(syncStatus.lastSyncedAt)}`}
                   </Text>
                 </View>
+                <Pressable
+                  onPress={() => void syncEngine.syncNow()}
+                  disabled={syncStatus.isSyncing}
+                  accessibilityRole="button"
+                  accessibilityLabel="Sync now"
+                  style={({ pressed }) => [
+                    styles.syncNowButton,
+                    { opacity: syncStatus.isSyncing ? 0.7 : pressed ? 0.7 : 1 },
+                  ]}>
+                  {syncStatus.isSyncing ? (
+                    <ActivityIndicator size="small" color={tint} />
+                  ) : (
+                    <Text style={[styles.syncNowLabel, { color: tint }]}>Sync now</Text>
+                  )}
+                </Pressable>
               </View>
             </View>
             <Text style={styles.copy}>
               Your workouts are backed up to the cloud while signed in. Edits save locally first, then sync in the
               background.
             </Text>
-            <AuthPrimaryButton
-              label="Sync now"
-              onPress={() => void syncEngine.syncNow()}
-              loading={syncStatus.isSyncing}
-            />
             <AuthPrimaryButton label="Sign out" onPress={handleSignOut} loading={isAuthBusy} />
           </View>
         ) : (
@@ -233,6 +243,20 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+  },
+  syncStatusRow: {
+    alignItems: 'center',
+  },
+  syncNowButton: {
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    minWidth: 72,
+    paddingVertical: 4,
+    paddingLeft: 8,
+  },
+  syncNowLabel: {
+    fontSize: 15,
+    fontWeight: '600',
   },
   infoIcon: {
     marginRight: 12,

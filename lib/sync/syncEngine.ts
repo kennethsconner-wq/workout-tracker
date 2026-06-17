@@ -1,7 +1,9 @@
 import {
+  ensureLocalDataUploadedIfCloudEmpty,
   getCurrentUserId,
   pullRemoteChanges,
   pushPendingChanges,
+  resolveSyncUserId,
   runDeviceInitialSync,
 } from '@/lib/sync/cloudSync';
 import { loadSyncMeta, saveSyncMeta } from '@/lib/sync/syncMetaStorage';
@@ -17,6 +19,21 @@ let status: SyncStatus = { ...initialStatus };
 const pendingChanges: PendingSyncItem[] = [];
 const listeners = new Set<() => void>();
 let syncInProgress = false;
+let activeInitialSync: Promise<void> | null = null;
+
+async function runInitialSyncInternal(userId: string): Promise<void> {
+  setStatus({ isSyncing: true, lastError: null });
+  try {
+    await runDeviceInitialSync(userId);
+    await performSync(userId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Initial sync failed.';
+    setStatus({ lastError: message });
+    throw error;
+  } finally {
+    await refreshLastSyncedFromStorage(userId);
+  }
+}
 
 function notifyListeners(): void {
   for (const listener of listeners) {
@@ -58,6 +75,8 @@ async function performSync(userId: string): Promise<void> {
     if (batch.length > 0) {
       await pushPendingChanges(userId, batch);
     }
+
+    await ensureLocalDataUploadedIfCloudEmpty(userId);
 
     const meta = await loadSyncMeta(userId);
     await pullRemoteChanges(userId, meta.lastSyncedAt);
@@ -112,30 +131,31 @@ export const syncEngine = {
     });
   },
 
-  async syncNow(): Promise<void> {
-    const userId = await getCurrentUserId();
+  async syncNow(explicitUserId?: string): Promise<void> {
+    const userId = await resolveSyncUserId(explicitUserId);
     if (!userId) {
+      setStatus({ lastError: 'Could not sync: sign in and try again.' });
       return;
     }
     await performSync(userId);
   },
 
-  async runInitialSync(): Promise<void> {
-    const userId = await getCurrentUserId();
+  async runInitialSync(explicitUserId?: string): Promise<void> {
+    if (activeInitialSync) {
+      return activeInitialSync;
+    }
+
+    const userId = await resolveSyncUserId(explicitUserId);
     if (!userId) {
+      setStatus({ lastError: 'Could not sync: sign in and try again.' });
       return;
     }
 
-    setStatus({ isSyncing: true, lastError: null });
+    activeInitialSync = runInitialSyncInternal(userId);
     try {
-      await runDeviceInitialSync(userId);
-      await performSync(userId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Initial sync failed.';
-      setStatus({ lastError: message });
-      throw error;
+      await activeInitialSync;
     } finally {
-      await refreshLastSyncedFromStorage(userId);
+      activeInitialSync = null;
     }
   },
 

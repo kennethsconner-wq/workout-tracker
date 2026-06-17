@@ -13,6 +13,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { createSessionFromAuthRedirect, isPasswordResetRedirectUrl, isSupabaseAuthRedirectUrl } from '@/lib/auth/authRedirect';
 import { markAccountOnboardingDismissed } from '@/lib/auth/accountOnboardingStorage';
+import { authEventShouldTriggerSync, triggerCloudSyncAfterAuth } from '@/lib/auth/triggerCloudSync';
 
 import {
   loadStoredSession,
@@ -51,11 +52,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let isMounted = true;
     let hasBootstrappedSession = false;
 
-    const triggerCloudSync = () => {
-      void syncEngine.runInitialSync().catch(() => {
-        // Sync errors are surfaced via useSyncStatus on the Account screen.
-      });
-    };
+    const triggerCloudSync = triggerCloudSyncAfterAuth;
 
     const bootstrapSession = async () => {
       const nextSession = await loadStoredSession();
@@ -69,7 +66,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (nextSession) {
         void syncEngine.hydrateStatus();
-        triggerCloudSync();
+        triggerCloudSync(nextSession.user.id);
       }
 
       if (AppState.currentState === 'active' && nextSession) {
@@ -83,9 +80,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setSession(nextSession);
       setIsLoading(false);
 
-      if (event === 'SIGNED_IN' && nextSession) {
-        void syncEngine.hydrateStatus();
-        triggerCloudSync();
+      if (authEventShouldTriggerSync(event) && nextSession) {
+        triggerCloudSync(nextSession.user.id);
       }
 
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
@@ -120,9 +116,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       const isRecovery = isPasswordResetRedirectUrl(url);
       void createSessionFromAuthRedirect(url).then((result) => {
-        if (result.ok && !isRecovery && result.type !== 'recovery') {
-          void markAccountOnboardingDismissed();
+        if (!result.ok) {
+          return;
         }
+
+        if (isRecovery || result.type === 'recovery') {
+          void supabase.auth.getSession().then(({ data }) => {
+            triggerCloudSync(data.session?.user.id);
+          });
+          return;
+        }
+
+        void markAccountOnboardingDismissed();
+        void supabase.auth.getSession().then(({ data }) => {
+          if (data.session?.user.id) {
+            triggerCloudSync(data.session.user.id);
+          }
+        });
       });
     };
 

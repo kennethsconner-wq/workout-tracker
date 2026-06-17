@@ -12,6 +12,7 @@ import { validatePassword } from '@/lib/auth/authErrors';
 import { markAccountOnboardingDismissed } from '@/lib/auth/accountOnboardingStorage';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { navigateToSignIn, navigateToWorkouts } from '@/lib/auth/navigateAfterAuth';
+import { awaitCloudSyncAfterAuth } from '@/lib/auth/triggerCloudSync';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
@@ -23,11 +24,12 @@ export default function ResetPasswordScreen() {
     type?: string | string[];
     '#': string | string[];
   }>();
-  const { isSignedIn, isLoading, isAuthBusy, isConfigured, updatePassword } = useAuth();
+  const { isSignedIn, isLoading, isAuthBusy, isConfigured, updatePassword, session } = useAuth();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [isFinishing, setIsFinishing] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -60,7 +62,10 @@ export default function ResetPasswordScreen() {
       return;
     }
 
+    setIsFinishing(true);
     await markAccountOnboardingDismissed();
+    await awaitCloudSyncAfterAuth(session?.user.id);
+    setIsFinishing(false);
     navigateToWorkouts(router);
   };
 
@@ -114,7 +119,7 @@ export default function ResetPasswordScreen() {
           <AuthPrimaryButton
             label="Update password"
             onPress={() => void handleSubmit()}
-            loading={isAuthBusy}
+            loading={isAuthBusy || isFinishing}
           />
         </AuthScreenLayout>
       ) : (
