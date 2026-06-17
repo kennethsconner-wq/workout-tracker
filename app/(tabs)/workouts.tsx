@@ -35,6 +35,7 @@ import {
   exerciseDraftSeedFromRow,
   isExerciseDraftRowEmpty,
   parseWorkoutExerciseFromDraft,
+  resolveExercisePersistId,
   applyActivityTypeChangeToDraftRow,
   applyCardioObjectiveChangeToDraftRow,
   applyCardioDurationTrackingChangeToDraftRow,
@@ -349,7 +350,7 @@ export default function LogWorkoutScreen() {
       if (isExerciseDraftRowEmpty(ex)) {
         continue;
       }
-      const result = parseWorkoutExerciseFromDraft(ex, ex.clientId);
+      const result = parseWorkoutExerciseFromDraft(ex, resolveExercisePersistId(ex));
       if (!result.ok) {
         if (result.title) {
           themedAlert(result.title, result.message);

@@ -1,5 +1,6 @@
 import {
   ensureLocalDataUploadedIfCloudEmpty,
+  enqueueLocalChangesMissingFromSyncMeta,
   getCurrentUserId,
   pullRemoteChanges,
   pushPendingChanges,
@@ -71,6 +72,11 @@ async function performSync(userId: string): Promise<void> {
   setStatus({ isSyncing: true, lastError: null });
 
   try {
+    const missing = await enqueueLocalChangesMissingFromSyncMeta(userId);
+    for (const item of missing) {
+      dedupePending(item);
+    }
+
     const batch = pendingChanges.splice(0, pendingChanges.length);
     if (batch.length > 0) {
       await pushPendingChanges(userId, batch);

@@ -120,13 +120,20 @@ function mergeDefinitionsIntoCatalog(
           continue;
         }
         const existingEntry = bySignature.get(existingKey);
-        if (existingEntry && exerciseDefinitionBaseSignatureKey(existingEntry) === baseKey) {
+        if (
+          existingEntry &&
+          (matchesExerciseDefinition(existingEntry, exercise) ||
+            exerciseDefinitionBaseSignatureKey(existingEntry) === baseKey)
+        ) {
           bySignature.delete(existingKey);
           changed = true;
         }
       }
       const existing = bySignature.get(key);
-      const entry = sanitizeWorkoutExercise({ ...exercise, id: existing?.id ?? newId() });
+      const entry = sanitizeWorkoutExercise({
+        ...exercise,
+        id: existing?.id ?? exercise.id ?? newId(),
+      });
       if (!existing || JSON.stringify(existing) !== JSON.stringify(entry)) {
         bySignature.set(key, entry);
         changed = true;
@@ -189,8 +196,10 @@ export async function loadExerciseLibraryCatalog(
   return entries;
 }
 
+type ExerciseDefinitionWithId = ExerciseDefinitionMatch & { id?: string };
+
 export async function upsertExerciseLibraryFromDefinitions(
-  exercises: ReadonlyArray<ExerciseDefinitionMatch>,
+  exercises: ReadonlyArray<ExerciseDefinitionWithId>,
 ): Promise<void> {
   if (exercises.length === 0) {
     return;
@@ -199,6 +208,8 @@ export async function upsertExerciseLibraryFromDefinitions(
   const bySignature = new Map(catalog.map((entry) => [exerciseDefinitionSignatureKey(entry), entry]));
   let changed = false;
   for (const exercise of exercises) {
+    const workoutExerciseId =
+      typeof exercise.id === 'string' && exercise.id.trim().length > 0 ? exercise.id : undefined;
     const key = exerciseDefinitionSignatureKey(exercise);
     const baseKey = exerciseDefinitionBaseSignatureKey(exercise);
     for (const existingKey of [...bySignature.keys()]) {
@@ -206,14 +217,30 @@ export async function upsertExerciseLibraryFromDefinitions(
         continue;
       }
       const existingEntry = bySignature.get(existingKey);
-      if (existingEntry && exerciseDefinitionBaseSignatureKey(existingEntry) === baseKey) {
+      if (
+        existingEntry &&
+        (matchesExerciseDefinition(existingEntry, exercise) ||
+          exerciseDefinitionBaseSignatureKey(existingEntry) === baseKey ||
+          (workoutExerciseId && existingEntry.id === workoutExerciseId))
+      ) {
         bySignature.delete(existingKey);
         changed = true;
       }
     }
     const existing = bySignature.get(key);
+    const entryId = workoutExerciseId ?? existing?.id ?? newId();
+    for (const existingKey of [...bySignature.keys()]) {
+      if (existingKey === key) {
+        continue;
+      }
+      const existingEntry = bySignature.get(existingKey);
+      if (existingEntry?.id === entryId) {
+        bySignature.delete(existingKey);
+        changed = true;
+      }
+    }
     const entry = sanitizeWorkoutExercise({
-      id: existing?.id ?? newId(),
+      id: entryId,
       ...definitionFields(exercise),
     });
     if (!existing || JSON.stringify(existing) !== JSON.stringify(entry)) {
@@ -228,46 +255,103 @@ export async function upsertExerciseLibraryFromDefinitions(
   }
 }
 
+/** Collapse duplicate catalog rows that share the same definition signature. */
+export async function dedupeExerciseLibraryBySignature(
+  preferIds?: ReadonlySet<string>,
+): Promise<string[]> {
+  const catalog = await readExerciseLibraryRaw();
+  const byKey = new Map<string, ExerciseLibraryEntry>();
+  const removedIds: string[] = [];
+  for (const entry of catalog) {
+    const key = exerciseDefinitionSignatureKey(entry);
+    const kept = byKey.get(key);
+    if (!kept) {
+      byKey.set(key, entry);
+      continue;
+    }
+    const preferEntry =
+      preferIds && preferIds.has(entry.id) && !preferIds.has(kept.id);
+    if (preferEntry) {
+      removedIds.push(kept.id);
+      byKey.set(key, entry);
+    } else {
+      removedIds.push(entry.id);
+    }
+  }
+  if (removedIds.length > 0) {
+    await writeExerciseLibrary(
+      [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    );
+  }
+  return removedIds;
+}
+
 export async function replaceExerciseLibraryEntry(
   oldDef: ExerciseDefinitionMatch,
   nextDef: ExerciseDefinitionMatch,
-): Promise<void> {
+  options?: { catalogEntryId?: string },
+): Promise<{ entryId: string; removedIds: string[] }> {
   const catalog = await readExerciseLibraryRaw();
   const oldKey = exerciseDefinitionSignatureKey(oldDef);
   const nextKey = exerciseDefinitionSignatureKey(nextDef);
-  let changed = false;
-  const next = catalog.flatMap((entry) => {
-    if (!matchesExerciseDefinition(entry, oldDef)) {
-      return [entry];
+  const removedIds: string[] = [];
+  let preservedId = options?.catalogEntryId;
+
+  for (const entry of catalog) {
+    if (preservedId && entry.id === preservedId) {
+      preservedId = entry.id;
+      continue;
     }
-    changed = true;
-    if (oldKey === nextKey) {
-      return [
-        sanitizeWorkoutExercise({
-          ...entry,
-          ...definitionFields(nextDef),
-        }),
-      ];
+    if (
+      matchesExerciseDefinition(entry, oldDef) ||
+      exerciseDefinitionSignatureKey(entry) === oldKey
+    ) {
+      preservedId ??= entry.id;
     }
-    return [];
+  }
+
+  const entryId = preservedId ?? newId();
+  const updated = sanitizeWorkoutExercise({
+    id: entryId,
+    ...definitionFields(nextDef),
   });
-  if (oldKey !== nextKey && !next.some((entry) => exerciseDefinitionSignatureKey(entry) === nextKey)) {
-    next.push(
-      sanitizeWorkoutExercise({
-        id: newId(),
-        ...definitionFields(nextDef),
-      }),
-    );
-    changed = true;
-  }
-  if (changed) {
-    await writeExerciseLibrary(next.sort((a, b) => a.name.localeCompare(b.name)));
-  }
+
+  const kept = catalog.filter((entry) => {
+    if (entry.id === entryId) {
+      return false;
+    }
+    const shouldRemove =
+      matchesExerciseDefinition(entry, oldDef) ||
+      matchesExerciseDefinition(entry, nextDef) ||
+      exerciseDefinitionSignatureKey(entry) === oldKey ||
+      exerciseDefinitionSignatureKey(entry) === nextKey;
+    if (shouldRemove) {
+      removedIds.push(entry.id);
+      return false;
+    }
+    return true;
+  });
+
+  kept.push(updated);
+  await writeExerciseLibrary(kept.sort((a, b) => a.name.localeCompare(b.name)));
+
+  return {
+    entryId,
+    removedIds: removedIds.filter((id) => id !== entryId),
+  };
 }
 
-export async function removeExerciseLibraryEntry(def: ExerciseDefinitionMatch): Promise<void> {
+export async function removeExerciseLibraryEntry(
+  def: ExerciseDefinitionMatch,
+  options?: { catalogEntryId?: string },
+): Promise<void> {
   const catalog = await readExerciseLibraryRaw();
-  const next = catalog.filter((entry) => !matchesExerciseDefinition(entry, def));
+  const next = catalog.filter((entry) => {
+    if (options?.catalogEntryId && entry.id === options.catalogEntryId) {
+      return false;
+    }
+    return !matchesExerciseDefinition(entry, def);
+  });
   if (next.length !== catalog.length) {
     await writeExerciseLibrary(next);
   }

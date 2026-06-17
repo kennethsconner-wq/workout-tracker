@@ -1,5 +1,4 @@
 import {
-  collectLocalExerciseLibraryForUpload,
   collectLocalLoggedWorkoutsForUpload,
   collectLocalWorkoutsForUpload,
   mergeExerciseLibraryRows,
@@ -22,9 +21,10 @@ import type {
   SyncEntityKind,
 } from '@/lib/supabase/types';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
 import type { LoggedWorkout, Workout } from '@/lib/types';
 import type { ExerciseLibraryEntry } from '@/lib/exerciseLibraryStorage';
-import { loadExerciseLibraryEntries } from '@/lib/exerciseLibraryStorage';
+import { loadExerciseLibraryCatalog, loadExerciseLibraryEntries } from '@/lib/exerciseLibraryStorage';
 import { loadLoggedWorkouts, loadWorkouts } from '@/lib/workoutsStorage';
 
 const TABLE_BY_KIND: Record<SyncEntityKind, string> = {
@@ -211,7 +211,7 @@ export async function uploadAllLocal(userId: string): Promise<void> {
   const [workouts, loggedWorkouts, libraryEntries] = await Promise.all([
     collectLocalWorkoutsForUpload(),
     collectLocalLoggedWorkoutsForUpload(),
-    collectLocalExerciseLibraryForUpload(),
+    loadMergedExerciseLibraryCatalog(),
   ]);
 
   for (const workout of workouts) {
@@ -232,6 +232,72 @@ export async function uploadAllLocal(userId: string): Promise<void> {
   }
 }
 
+async function loadMergedExerciseLibraryCatalog(): Promise<ExerciseLibraryEntry[]> {
+  const workouts = await loadWorkouts();
+  const logged = await loadLoggedWorkouts();
+  return loadExerciseLibraryCatalog(workouts, logged);
+}
+
+async function localHasPersistedData(): Promise<boolean> {
+  const [workouts, logged, library] = await Promise.all([
+    loadWorkouts(),
+    loadLoggedWorkouts(),
+    loadMergedExerciseLibraryCatalog(),
+  ]);
+  return workouts.length > 0 || logged.length > 0 || library.length > 0;
+}
+
+/** Queue local rows that have never been uploaded for this signed-in user. */
+export async function enqueueLocalChangesMissingFromSyncMeta(userId: string): Promise<PendingSyncItem[]> {
+  const meta = await loadSyncMeta(userId);
+  const now = new Date().toISOString();
+  const workouts = await loadWorkouts();
+  const logged = await loadLoggedWorkouts();
+  const libraryEntries = await loadMergedExerciseLibraryCatalog();
+  const items: PendingSyncItem[] = [];
+
+  for (const workout of workouts) {
+    const key = entityMetaKey('workout', workout.id);
+    if (!meta.entities[key]) {
+      items.push({
+        kind: 'workout',
+        id: workout.id,
+        updatedAt: workout.createdAt ?? now,
+      });
+    }
+  }
+
+  for (const log of logged) {
+    const key = entityMetaKey('logged_workout', log.id);
+    if (!meta.entities[key]) {
+      items.push({
+        kind: 'logged_workout',
+        id: log.id,
+        updatedAt: log.createdAt ?? now,
+      });
+    }
+  }
+
+  const seenLibrarySignatures = new Set<string>();
+  for (const entry of libraryEntries) {
+    const signature = exerciseDefinitionSignatureKey(entry);
+    if (seenLibrarySignatures.has(signature)) {
+      continue;
+    }
+    seenLibrarySignatures.add(signature);
+    const key = entityMetaKey('exercise_library', entry.id);
+    if (!meta.entities[key]) {
+      items.push({
+        kind: 'exercise_library',
+        id: entry.id,
+        updatedAt: now,
+      });
+    }
+  }
+
+  return items;
+}
+
 export async function pushPendingChanges(userId: string, pending: PendingSyncItem[]): Promise<void> {
   for (const item of pending) {
     await uploadPendingItem(userId, item);
@@ -239,13 +305,8 @@ export async function pushPendingChanges(userId: string, pending: PendingSyncIte
 }
 
 export async function ensureLocalDataUploadedIfCloudEmpty(userId: string): Promise<boolean> {
-  const [localWorkouts, localLogged, cloudCount] = await Promise.all([
-    loadWorkouts(),
-    loadLoggedWorkouts(),
-    countCloudEntities(userId),
-  ]);
-
-  const localHasData = localWorkouts.length > 0 || localLogged.length > 0;
+  const cloudCount = await countCloudEntities(userId);
+  const localHasData = await localHasPersistedData();
   if (cloudCount === 0 && localHasData) {
     await uploadAllLocal(userId);
     return true;
@@ -255,13 +316,10 @@ export async function ensureLocalDataUploadedIfCloudEmpty(userId: string): Promi
 }
 
 export async function runDeviceInitialSync(userId: string): Promise<void> {
-  const [localWorkouts, localLogged, cloudCount] = await Promise.all([
-    loadWorkouts(),
-    loadLoggedWorkouts(),
+  const [cloudCount, localHasData] = await Promise.all([
     countCloudEntities(userId),
+    localHasPersistedData(),
   ]);
-
-  const localHasData = localWorkouts.length > 0 || localLogged.length > 0;
 
   if (cloudCount === 0 && localHasData) {
     await uploadAllLocal(userId);
@@ -284,7 +342,7 @@ export async function enqueueAllLocalChanges(userId: string, updatedAt: string):
   const [workouts, loggedWorkouts, libraryEntries] = await Promise.all([
     loadWorkouts(),
     loadLoggedWorkouts(),
-    loadExerciseLibraryEntries(),
+    loadMergedExerciseLibraryCatalog(),
   ]);
 
   const items: PendingSyncItem[] = [

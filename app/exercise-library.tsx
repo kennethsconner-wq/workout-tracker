@@ -263,27 +263,34 @@ export default function ExerciseLibraryScreen() {
             void (async () => {
               try {
                 setLibraryMutationBusy(true);
-                await repo.removeExercisesMatchingSignatureFromAllWorkouts({
-                  activityType: item.activityType,
-                  name: item.name,
-                  sets: item.sets,
-                  reps: item.reps,
-                  weight: item.weight,
-                  weightUnit: item.weightUnit,
-                  duration: item.duration,
-                  durationUnit: item.durationUnit,
-                  distance: item.distance,
-                  distanceUnit: item.distanceUnit,
-                  cardioObjective: item.cardioObjective,
-                  cardioDurationTracking: item.cardioDurationTracking,
-                  cardioDistanceTracking: item.cardioDistanceTracking,
-                  cardioDistanceMode: item.cardioDistanceMode,
-                  score: item.score,
-                  scoreUnit: item.scoreUnit,
-                  restBetweenSetsEnabled: item.restBetweenSetsEnabled,
-                  restDuration: item.restDuration,
-                  restDurationUnit: item.restDurationUnit,
-                });
+                await repo.removeExercisesMatchingSignatureFromAllWorkouts(
+                  {
+                    activityType: item.activityType,
+                    name: item.name,
+                    sets: item.sets,
+                    reps: item.reps,
+                    weight: item.weight,
+                    weightUnit: item.weightUnit,
+                    duration: item.duration,
+                    durationUnit: item.durationUnit,
+                    distance: item.distance,
+                    distanceUnit: item.distanceUnit,
+                    cardioObjective: item.cardioObjective,
+                    cardioDurationTracking: item.cardioDurationTracking,
+                    cardioDistanceTracking: item.cardioDistanceTracking,
+                    cardioPaceDuration: item.cardioPaceDuration,
+                    cardioPaceDurationUnit: item.cardioPaceDurationUnit,
+                    cardioPaceDistance: item.cardioPaceDistance,
+                    cardioPaceDistanceUnit: item.cardioPaceDistanceUnit,
+                    cardioDistanceMode: item.cardioDistanceMode,
+                    score: item.score,
+                    scoreUnit: item.scoreUnit,
+                    restBetweenSetsEnabled: item.restBetweenSetsEnabled,
+                    restDuration: item.restDuration,
+                    restDurationUnit: item.restDurationUnit,
+                  },
+                  { catalogEntryId: item.id },
+                );
                 await reloadLibrary();
               } finally {
                 setLibraryMutationBusy(false);
@@ -344,6 +351,7 @@ export default function ExerciseLibraryScreen() {
           restDurationUnit: editBaseline.restDurationUnit,
         },
         parsed.exercise,
+        { catalogEntryId: editBaseline.id },
       );
       closeEditForm();
       await reloadLibrary();

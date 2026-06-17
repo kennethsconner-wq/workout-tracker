@@ -14,6 +14,8 @@ import { newId } from '@/lib/ids';
 import { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
 import { normalizeWorkoutIconId } from '@/lib/workoutIcons';
 import {
+  dedupeExerciseLibraryBySignature,
+  loadExerciseLibraryEntries,
   loggedExerciseMatchesDefinitionForRemoval,
   removeExerciseLibraryEntry,
   replaceExerciseLibraryEntry,
@@ -546,7 +548,7 @@ export async function replaceWorkouts(workouts: Workout[]): Promise<void> {
 
 export async function addWorkout(
   workout: Omit<Workout, 'id' | 'createdAt'> & Partial<Pick<Workout, 'id' | 'createdAt'>>,
-): Promise<Workout> {
+): Promise<{ workout: Workout; removedCatalogIds: string[] }> {
   const existing = await loadWorkouts();
   const next: Workout = {
     id: workout.id ?? newId(),
@@ -558,7 +560,10 @@ export async function addWorkout(
   };
   await saveWorkouts([next, ...existing]);
   await upsertExerciseLibraryFromDefinitions(next.exercises);
-  return next;
+  const removedCatalogIds = await dedupeExerciseLibraryBySignature(
+    new Set(next.exercises.map((exercise) => exercise.id)),
+  );
+  return { workout: next, removedCatalogIds };
 }
 
 export async function deleteWorkout(id: string): Promise<void> {
@@ -569,11 +574,24 @@ export async function deleteWorkout(id: string): Promise<void> {
 export async function updateWorkout(
   id: string,
   updates: Omit<Workout, 'id' | 'createdAt'>,
-): Promise<Workout | null> {
+): Promise<{ workout: Workout; removedCatalogIds: string[]; updatedCatalogEntryIds: string[] } | null> {
   const existing = await loadWorkouts();
   const target = existing.find((w) => w.id === id);
   if (!target) {
     return null;
+  }
+
+  const removedCatalogIds: string[] = [];
+  const updatedCatalogEntryIds: string[] = [];
+  for (const newEx of updates.exercises) {
+    const oldEx = target.exercises.find((exercise) => exercise.id === newEx.id);
+    if (oldEx && !matchesExerciseDefinition(oldEx, newEx)) {
+      const { entryId, removedIds } = await replaceExerciseLibraryEntry(oldEx, newEx, {
+        catalogEntryId: newEx.id,
+      });
+      removedCatalogIds.push(...removedIds);
+      updatedCatalogEntryIds.push(entryId);
+    }
   }
 
   const nextWorkout: Workout = {
@@ -586,7 +604,16 @@ export async function updateWorkout(
   const next = existing.map((w) => (w.id === id ? nextWorkout : w));
   await saveWorkouts(next);
   await upsertExerciseLibraryFromDefinitions(nextWorkout.exercises);
-  return nextWorkout;
+  removedCatalogIds.push(
+    ...(await dedupeExerciseLibraryBySignature(
+      new Set(nextWorkout.exercises.map((exercise) => exercise.id)),
+    )),
+  );
+  return {
+    workout: nextWorkout,
+    removedCatalogIds,
+    updatedCatalogEntryIds,
+  };
 }
 
 /** For each exercise id, apply name/activityType/sets/reps/weight/duration/distance/score to every workout that contains that exercise id (linked / library exercises). */
@@ -655,7 +682,8 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
     WorkoutExercise,
     'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'
   >,
-): Promise<void> {
+  options?: { catalogEntryId?: string },
+): Promise<{ catalogEntryId: string; removedCatalogIds: string[] }> {
   const all = await loadWorkouts();
   const updates: Array<
     Pick<
@@ -673,7 +701,9 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
     }
   }
   await propagateExerciseDefinitionsAcrossWorkouts(updates);
-  await replaceExerciseLibraryEntry(oldDef, nextDef);
+  const catalogReplace = await replaceExerciseLibraryEntry(oldDef, nextDef, {
+    catalogEntryId: options?.catalogEntryId,
+  });
   const cleanNext = sanitizeWorkoutExercise({
     id: 'sanitize',
     activityType: nextDef.activityType,
@@ -733,6 +763,10 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
     ),
   }));
   await saveLoggedWorkouts(nextLogs);
+  return {
+    catalogEntryId: catalogReplace.entryId,
+    removedCatalogIds: catalogReplace.removedIds,
+  };
 }
 
 /** Removes matching exercises from all workout templates and from logged workouts; drops empty logs. */
@@ -741,29 +775,40 @@ export async function removeExercisesMatchingSignatureFromAllWorkouts(
     WorkoutExercise,
     'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'
   >,
+  options?: { catalogEntryId?: string },
 ): Promise<void> {
+  let matchDef = def;
+  if (options?.catalogEntryId) {
+    const catalogEntry = (await loadExerciseLibraryEntries()).find(
+      (entry) => entry.id === options.catalogEntryId,
+    );
+    if (catalogEntry) {
+      matchDef = catalogEntry;
+    }
+  }
+
   const all = await loadWorkouts();
   const idsToRemove = new Set<string>();
   for (const w of all) {
     for (const ex of w.exercises) {
-      if (matchesExerciseDefinition(ex, def)) {
+      if (matchesExerciseDefinition(ex, matchDef)) {
         idsToRemove.add(ex.id);
       }
     }
   }
   const nextTemplates = all.map((w) => ({
     ...w,
-    exercises: w.exercises.filter((ex) => !matchesExerciseDefinition(ex, def)),
+    exercises: w.exercises.filter((ex) => !matchesExerciseDefinition(ex, matchDef)),
   }));
   await saveWorkouts(nextTemplates);
-  await removeExerciseLibraryEntry(def);
+  await removeExerciseLibraryEntry(matchDef, options);
 
   const logs = await loadLoggedWorkouts();
   const nextLogs = logs
     .map((log) => ({
       ...log,
       exercises: log.exercises.filter(
-        (lex) => !loggedExerciseMatchesDefinitionForRemoval(lex, def, idsToRemove),
+        (lex) => !loggedExerciseMatchesDefinitionForRemoval(lex, matchDef, idsToRemove),
       ),
     }))
     .filter((log) => log.exercises.length > 0);

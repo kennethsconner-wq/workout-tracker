@@ -1,5 +1,7 @@
 import type { DataRepository } from '@/lib/data/DataRepository';
+import type { ExerciseDefinitionMatch, ExerciseLibraryEntry } from '@/lib/exerciseLibraryStorage';
 import { localDataRepository } from '@/lib/data/LocalDataRepository';
+import { matchesExerciseDefinition, exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
 import { syncEngine } from '@/lib/sync/syncEngine';
 
 function nowIso(): string {
@@ -22,20 +24,71 @@ async function enqueueAllLogged(): Promise<void> {
   }
 }
 
-async function enqueueLibraryEntryByDefinition(
+async function findCatalogEntryByDefinition(
   def: Parameters<DataRepository['removeExerciseLibraryEntry']>[0],
-): Promise<void> {
+): Promise<ExerciseLibraryEntry | undefined> {
   const workouts = await localDataRepository.loadWorkouts();
   const logged = await localDataRepository.loadLoggedWorkouts();
   const catalog = await localDataRepository.loadExerciseLibraryCatalog(workouts, logged);
-  const { exerciseDefinitionSignatureKey, matchesExerciseDefinition } = await import('@/lib/exerciseSnapshot');
-  const entry = catalog.find(
-    (item) =>
-      matchesExerciseDefinition(item, def) ||
-      exerciseDefinitionSignatureKey(item) === exerciseDefinitionSignatureKey(def),
-  );
+  return catalog.find((item) => matchesExerciseDefinition(item, def));
+}
+
+function enqueueExerciseLibrarySync(id: string, updatedAt: string = nowIso()): void {
+  syncEngine.enqueueChange({ kind: 'exercise_library', id, updatedAt });
+}
+
+function enqueueExerciseLibraryCatalogSync(
+  catalogEntryId: string,
+  removedCatalogIds: ReadonlyArray<string>,
+): void {
+  const updatedAt = nowIso();
+  for (const id of removedCatalogIds) {
+    if (id !== catalogEntryId) {
+      enqueueExerciseLibrarySync(id, updatedAt);
+    }
+  }
+  enqueueExerciseLibrarySync(catalogEntryId, updatedAt);
+}
+
+/** Queue cloud sync for a catalog row (by id or post-edit definition). */
+async function enqueueLibraryEntrySync(
+  def: Parameters<DataRepository['removeExerciseLibraryEntry']>[0],
+  catalogEntryId?: string,
+): Promise<void> {
+  if (catalogEntryId) {
+    enqueueExerciseLibrarySync(catalogEntryId);
+    return;
+  }
+  const entry = await findCatalogEntryByDefinition(def);
   if (entry) {
-    syncEngine.enqueueChange({ kind: 'exercise_library', id: entry.id, updatedAt: nowIso() });
+    enqueueExerciseLibrarySync(entry.id);
+  }
+}
+
+/** Queue cloud sync for catalog rows matching these exercise definitions. */
+async function enqueueLibraryEntriesForDefinitions(
+  exercises: ReadonlyArray<ExerciseDefinitionMatch>,
+): Promise<void> {
+  if (exercises.length === 0) {
+    return;
+  }
+  const updatedAt = nowIso();
+  const workouts = await localDataRepository.loadWorkouts();
+  const logged = await localDataRepository.loadLoggedWorkouts();
+  const catalog = await localDataRepository.loadExerciseLibraryCatalog(workouts, logged);
+  const enqueued = new Set<string>();
+  const enqueuedSignatures = new Set<string>();
+  for (const exercise of exercises) {
+    const signature = exerciseDefinitionSignatureKey(exercise);
+    if (enqueuedSignatures.has(signature)) {
+      continue;
+    }
+    const entry = catalog.find((item) => matchesExerciseDefinition(item, exercise));
+    if (entry && !enqueued.has(entry.id)) {
+      enqueued.add(entry.id);
+      enqueuedSignatures.add(signature);
+      enqueueExerciseLibrarySync(entry.id, updatedAt);
+    }
   }
 }
 
@@ -46,18 +99,34 @@ export function createSyncedDataRepository(): DataRepository {
   return {
     loadWorkouts: () => localDataRepository.loadWorkouts(),
     addWorkout: async (workout) => {
-      const created = await localDataRepository.addWorkout(workout);
-      syncEngine.enqueueChange({ kind: 'workout', id: created.id, updatedAt: nowIso() });
+      const { workout: created, removedCatalogIds } = await localDataRepository.addWorkout(workout);
+      const updatedAt = nowIso();
+      syncEngine.enqueueChange({ kind: 'workout', id: created.id, updatedAt });
+      for (const removedId of removedCatalogIds) {
+        enqueueExerciseLibrarySync(removedId, updatedAt);
+      }
+      await enqueueLibraryEntriesForDefinitions(created.exercises);
       void syncEngine.syncNow();
-      return created;
+      return { workout: created, removedCatalogIds };
     },
     updateWorkout: async (id, updates) => {
-      const updated = await localDataRepository.updateWorkout(id, updates);
-      if (updated) {
-        syncEngine.enqueueChange({ kind: 'workout', id: updated.id, updatedAt: nowIso() });
+      const result = await localDataRepository.updateWorkout(id, updates);
+      if (result) {
+        const updatedAt = nowIso();
+        syncEngine.enqueueChange({ kind: 'workout', id: result.workout.id, updatedAt });
+        const catalogIds = new Set<string>(result.updatedCatalogEntryIds);
+        for (const removedId of result.removedCatalogIds) {
+          if (!catalogIds.has(removedId)) {
+            enqueueExerciseLibrarySync(removedId, updatedAt);
+          }
+        }
+        for (const entryId of catalogIds) {
+          enqueueExerciseLibrarySync(entryId, updatedAt);
+        }
+        await enqueueLibraryEntriesForDefinitions(result.workout.exercises);
         void syncEngine.syncNow();
       }
-      return updated;
+      return result?.workout ?? null;
     },
     deleteWorkout: async (id) => {
       const logged = await localDataRepository.loadLoggedWorkouts();
@@ -73,21 +142,28 @@ export function createSyncedDataRepository(): DataRepository {
     },
     propagateExerciseDefinitionsAcrossWorkouts: async (exercises) => {
       await localDataRepository.propagateExerciseDefinitionsAcrossWorkouts(exercises);
+      await localDataRepository.upsertExerciseLibraryFromDefinitions(exercises);
       await enqueueAllTemplates();
+      await enqueueLibraryEntriesForDefinitions(exercises);
       void syncEngine.syncNow();
     },
-    updateExercisesMatchingSignatureAcrossWorkouts: async (oldDef, nextDef) => {
-      await localDataRepository.updateExercisesMatchingSignatureAcrossWorkouts(oldDef, nextDef);
+    updateExercisesMatchingSignatureAcrossWorkouts: async (oldDef, nextDef, options) => {
+      const { catalogEntryId, removedCatalogIds } =
+        await localDataRepository.updateExercisesMatchingSignatureAcrossWorkouts(oldDef, nextDef, options);
       await enqueueAllTemplates();
       await enqueueAllLogged();
-      await enqueueLibraryEntryByDefinition(oldDef);
+      enqueueExerciseLibraryCatalogSync(catalogEntryId, removedCatalogIds);
       void syncEngine.syncNow();
     },
-    removeExercisesMatchingSignatureFromAllWorkouts: async (def) => {
-      await localDataRepository.removeExercisesMatchingSignatureFromAllWorkouts(def);
+    removeExercisesMatchingSignatureFromAllWorkouts: async (def, options) => {
+      const syncLibraryId =
+        options?.catalogEntryId ?? (await findCatalogEntryByDefinition(def))?.id;
+      await localDataRepository.removeExercisesMatchingSignatureFromAllWorkouts(def, options);
       await enqueueAllTemplates();
       await enqueueAllLogged();
-      await enqueueLibraryEntryByDefinition(def);
+      if (syncLibraryId) {
+        enqueueExerciseLibrarySync(syncLibraryId);
+      }
       void syncEngine.syncNow();
     },
     findTemplateExerciseById: localDataRepository.findTemplateExerciseById,
@@ -95,14 +171,20 @@ export function createSyncedDataRepository(): DataRepository {
     loadLoggedWorkouts: () => localDataRepository.loadLoggedWorkouts(),
     addLoggedWorkout: async (workout) => {
       const created = await localDataRepository.addLoggedWorkout(workout);
-      syncEngine.enqueueChange({ kind: 'logged_workout', id: created.id, updatedAt: nowIso() });
+      await localDataRepository.upsertExerciseLibraryFromDefinitions(created.exercises);
+      const updatedAt = nowIso();
+      syncEngine.enqueueChange({ kind: 'logged_workout', id: created.id, updatedAt });
+      await enqueueLibraryEntriesForDefinitions(created.exercises);
       void syncEngine.syncNow();
       return created;
     },
     updateLoggedWorkout: async (id, patch) => {
       const updated = await localDataRepository.updateLoggedWorkout(id, patch);
       if (updated) {
-        syncEngine.enqueueChange({ kind: 'logged_workout', id: updated.id, updatedAt: nowIso() });
+        await localDataRepository.upsertExerciseLibraryFromDefinitions(updated.exercises);
+        const updatedAt = nowIso();
+        syncEngine.enqueueChange({ kind: 'logged_workout', id: updated.id, updatedAt });
+        await enqueueLibraryEntriesForDefinitions(updated.exercises);
         void syncEngine.syncNow();
       }
       return updated;
@@ -127,32 +209,26 @@ export function createSyncedDataRepository(): DataRepository {
       localDataRepository.loadExerciseLibraryCatalog(workouts, logged),
     upsertExerciseLibraryFromDefinitions: async (exercises) => {
       await localDataRepository.upsertExerciseLibraryFromDefinitions(exercises);
-      syncEngine.enqueueAllLocal(nowIso());
+      await enqueueLibraryEntriesForDefinitions(exercises);
       void syncEngine.syncNow();
     },
-    replaceExerciseLibraryEntry: async (oldDef, nextDef) => {
-      await localDataRepository.replaceExerciseLibraryEntry(oldDef, nextDef);
+    replaceExerciseLibraryEntry: async (oldDef, nextDef, options) => {
+      const { entryId, removedIds } = await localDataRepository.replaceExerciseLibraryEntry(
+        oldDef,
+        nextDef,
+        options,
+      );
       await enqueueAllTemplates();
       await enqueueAllLogged();
-      await enqueueLibraryEntryByDefinition(oldDef);
-      await enqueueLibraryEntryByDefinition(nextDef);
+      enqueueExerciseLibraryCatalogSync(entryId, removedIds);
       void syncEngine.syncNow();
     },
-    removeExerciseLibraryEntry: async (def) => {
-      const workouts = await localDataRepository.loadWorkouts();
-      const logged = await localDataRepository.loadLoggedWorkouts();
-      const catalog = await localDataRepository.loadExerciseLibraryCatalog(workouts, logged);
-      const { exerciseDefinitionSignatureKey, matchesExerciseDefinition } = await import(
-        '@/lib/exerciseSnapshot'
-      );
-      const entry = catalog.find(
-        (item) =>
-          matchesExerciseDefinition(item, def) ||
-          exerciseDefinitionSignatureKey(item) === exerciseDefinitionSignatureKey(def),
-      );
-      await localDataRepository.removeExerciseLibraryEntry(def);
-      if (entry) {
-        syncEngine.enqueueChange({ kind: 'exercise_library', id: entry.id, updatedAt: nowIso() });
+    removeExerciseLibraryEntry: async (def, options) => {
+      const syncLibraryId =
+        options?.catalogEntryId ?? (await findCatalogEntryByDefinition(def))?.id;
+      await localDataRepository.removeExerciseLibraryEntry(def, options);
+      if (syncLibraryId) {
+        enqueueExerciseLibrarySync(syncLibraryId);
       }
       void syncEngine.syncNow();
     },

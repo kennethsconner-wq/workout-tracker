@@ -57,23 +57,40 @@ export type PropagateExerciseDefinition = Pick<
   | 'restDurationUnit'
 >;
 
+export type WorkoutAddResult = {
+  workout: Workout;
+  removedCatalogIds: string[];
+};
+
+export type WorkoutUpdateResult = {
+  workout: Workout;
+  removedCatalogIds: string[];
+  updatedCatalogEntryIds: string[];
+};
+
 /**
- * Persistence contract for workout data.
  * Screens should migrate to this interface over direct storage imports.
  */
 export interface DataRepository {
   loadWorkouts(): Promise<Workout[]>;
   addWorkout(
     workout: Omit<Workout, 'id' | 'createdAt'> & Partial<Pick<Workout, 'id' | 'createdAt'>>,
-  ): Promise<Workout>;
-  updateWorkout(id: string, updates: Omit<Workout, 'id' | 'createdAt'>): Promise<Workout | null>;
+  ): Promise<WorkoutAddResult>;
+  updateWorkout(
+    id: string,
+    updates: Omit<Workout, 'id' | 'createdAt'>,
+  ): Promise<WorkoutUpdateResult | null>;
   deleteWorkout(id: string): Promise<void>;
   propagateExerciseDefinitionsAcrossWorkouts(exercises: PropagateExerciseDefinition[]): Promise<void>;
   updateExercisesMatchingSignatureAcrossWorkouts(
     oldDef: ExerciseDefinitionFields,
     nextDef: ExerciseDefinitionFields,
+    options?: { catalogEntryId?: string },
+  ): Promise<{ catalogEntryId: string; removedCatalogIds: string[] }>;
+  removeExercisesMatchingSignatureFromAllWorkouts(
+    def: ExerciseDefinitionFields,
+    options?: { catalogEntryId?: string },
   ): Promise<void>;
-  removeExercisesMatchingSignatureFromAllWorkouts(def: ExerciseDefinitionFields): Promise<void>;
   findTemplateExerciseById(workouts: Workout[], exerciseId: string): WorkoutExercise | undefined;
 
   loadLoggedWorkouts(): Promise<LoggedWorkout[]>;
@@ -90,6 +107,13 @@ export interface DataRepository {
 
   loadExerciseLibraryCatalog(workouts: Workout[], logged: LoggedWorkout[]): Promise<ExerciseLibraryEntry[]>;
   upsertExerciseLibraryFromDefinitions(exercises: ReadonlyArray<ExerciseDefinitionMatch>): Promise<void>;
-  replaceExerciseLibraryEntry(oldDef: ExerciseDefinitionMatch, nextDef: ExerciseDefinitionMatch): Promise<void>;
-  removeExerciseLibraryEntry(def: ExerciseDefinitionMatch): Promise<void>;
+  replaceExerciseLibraryEntry(
+    oldDef: ExerciseDefinitionMatch,
+    nextDef: ExerciseDefinitionMatch,
+    options?: { catalogEntryId?: string },
+  ): Promise<{ entryId: string; removedIds: string[] }>;
+  removeExerciseLibraryEntry(
+    def: ExerciseDefinitionMatch,
+    options?: { catalogEntryId?: string },
+  ): Promise<void>;
 }
