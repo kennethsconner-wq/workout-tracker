@@ -32,9 +32,7 @@ import {
 } from '@/lib/exerciseDraft';
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { validateExerciseNamesAfterLibraryEdit } from '@/lib/exerciseNameValidation';
-import { exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
 import { useDataRepository } from '@/lib/data/DataRepositoryContext';
-import { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
 import { themedAlert } from '@/lib/themedAlert';
 import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types';
 
@@ -138,7 +136,7 @@ export default function ExerciseLibraryScreen() {
     const [workouts, logged] = await Promise.all([repo.loadWorkouts(), repo.loadLoggedWorkouts()]);
     const catalog = await repo.loadExerciseLibraryCatalog(workouts, logged);
     const itemsFromCatalog: ExerciseListItem[] = catalog.map((exercise) => ({
-      key: exerciseDefinitionSignatureKey(exercise),
+      key: exercise.id,
       id: exercise.id,
       activityType: exercise.activityType,
       name: exercise.name,
@@ -317,7 +315,7 @@ export default function ExerciseLibraryScreen() {
       const allWorkouts = await repo.loadWorkouts();
       const nameCheck = validateExerciseNamesAfterLibraryEdit(
         allWorkouts,
-        (exercise) => matchesExerciseDefinition(exercise, editBaseline),
+        (exercise) => exercise.id === editBaseline.id,
         parsed.exercise,
       );
       if (!nameCheck.ok) {

@@ -39,12 +39,8 @@ import {
   navigateToResumeLogWorkout,
 } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
-import {
-  buildWorkoutLogStatsByWorkoutId,
-  formatWorkoutLastLogged,
-  formatWorkoutSessionCount,
-  formatWorkoutTrackingSince,
-} from '@/lib/loggedWorkoutAnalytics';
+import { buildWorkoutLogStatsByWorkoutId, formatWorkoutLastLogged, formatWorkoutSessionCount, formatWorkoutTrackingSince } from '@/lib/loggedWorkoutAnalytics';
+import { findWorkoutById } from '@/lib/workoutsStorage';
 import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 import { DAYS_OF_WEEK, DAY_OF_WEEK_ABBREVIATIONS, type LoggedWorkout, type Workout } from '@/lib/types';
 
@@ -154,7 +150,10 @@ export function WorkoutsList() {
     if (workouts.length === 0) {
       return undefined;
     }
-    return workouts.find((w) => w.id === selectedId) ?? workouts[0];
+    if (!selectedId) {
+      return workouts[0];
+    }
+    return findWorkoutById(workouts, selectedId) ?? workouts[0];
   }, [workouts, selectedId]);
 
   const dropdownWorkouts = useMemo(() => sortWorkoutsForDropdown(workouts), [workouts]);

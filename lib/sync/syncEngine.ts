@@ -1,14 +1,45 @@
 import {
   ensureLocalDataUploadedIfCloudEmpty,
   enqueueLocalChangesMissingFromSyncMeta,
+  enqueueOfflineLocalChanges,
   getCurrentUserId,
   pullRemoteChanges,
   pushPendingChanges,
   resolveSyncUserId,
   runDeviceInitialSync,
 } from '@/lib/sync/cloudSync';
+import { isOfflineSyncError } from '@/lib/sync/isOfflineSyncError';
+import { clearOfflineChanges, loadOfflineChanges, markOfflineChanges } from '@/lib/sync/offlineChangeStorage';
 import { loadSyncMeta, saveSyncMeta } from '@/lib/sync/syncMetaStorage';
 import type { PendingSyncItem, SyncStatus } from '@/lib/sync/types';
+
+const OFFLINE_SYNC_MESSAGE = 'Offline — connect to the internet to sync.';
+
+type SyncOptions = {
+  userInitiated?: boolean;
+};
+
+function handleSyncFailure(error: unknown, options?: SyncOptions): void {
+  if (isOfflineSyncError(error)) {
+    if (options?.userInitiated) {
+      setStatus({ lastError: OFFLINE_SYNC_MESSAGE });
+    }
+    return;
+  }
+
+  const message = error instanceof Error ? error.message : 'Sync failed.';
+  setStatus({ lastError: message });
+}
+
+function restorePendingBatch(batch: PendingSyncItem[]): void {
+  for (const item of batch) {
+    dedupePending(item);
+  }
+}
+
+function persistUnsyncedBatch(batch: PendingSyncItem[]): void {
+  void markOfflineChanges(batch.map((item) => ({ kind: item.kind, id: item.id })));
+}
 
 const initialStatus: SyncStatus = {
   lastSyncedAt: null,
@@ -21,6 +52,7 @@ const pendingChanges: PendingSyncItem[] = [];
 const listeners = new Set<() => void>();
 let syncInProgress = false;
 let activeInitialSync: Promise<void> | null = null;
+let syncRequestedWhileBusy = false;
 
 async function runInitialSyncInternal(userId: string): Promise<void> {
   setStatus({ isSyncing: true, lastError: null });
@@ -28,10 +60,12 @@ async function runInitialSyncInternal(userId: string): Promise<void> {
     await runDeviceInitialSync(userId);
     await performSync(userId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Initial sync failed.';
-    setStatus({ lastError: message });
-    throw error;
+    handleSyncFailure(error);
+    if (!isOfflineSyncError(error)) {
+      throw error;
+    }
   } finally {
+    setStatus({ isSyncing: false });
     await refreshLastSyncedFromStorage(userId);
   }
 }
@@ -63,23 +97,36 @@ async function refreshLastSyncedFromStorage(userId: string): Promise<void> {
   setStatus({ lastSyncedAt: meta.lastSyncedAt });
 }
 
-async function performSync(userId: string): Promise<void> {
+async function performSync(userId: string, options?: SyncOptions): Promise<void> {
   if (syncInProgress) {
+    syncRequestedWhileBusy = true;
     return;
   }
 
   syncInProgress = true;
   setStatus({ isSyncing: true, lastError: null });
 
+  let pushCompleted = false;
+  let batch: PendingSyncItem[] = [];
+
   try {
-    const missing = await enqueueLocalChangesMissingFromSyncMeta(userId);
-    for (const item of missing) {
+    const [missing, offline] = await Promise.all([
+      enqueueLocalChangesMissingFromSyncMeta(userId),
+      enqueueOfflineLocalChanges(),
+    ]);
+    for (const item of [...missing, ...offline]) {
       dedupePending(item);
     }
 
-    const batch = pendingChanges.splice(0, pendingChanges.length);
+    batch = pendingChanges.splice(0, pendingChanges.length);
+    const offlineBeforePush = await loadOfflineChanges();
     if (batch.length > 0) {
       await pushPendingChanges(userId, batch);
+      const uploadedOffline = offlineBeforePush.filter((change) =>
+        batch.some((item) => item.kind === change.kind && item.id === change.id),
+      );
+      await clearOfflineChanges(uploadedOffline);
+      pushCompleted = true;
     }
 
     await ensureLocalDataUploadedIfCloudEmpty(userId);
@@ -99,12 +146,21 @@ async function performSync(userId: string): Promise<void> {
       lastError: null,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Sync failed.';
-    setStatus({ lastError: message });
-    throw error;
+    if (!pushCompleted && batch.length > 0) {
+      restorePendingBatch(batch);
+      persistUnsyncedBatch(batch);
+    }
+    handleSyncFailure(error, options);
+    if (!isOfflineSyncError(error)) {
+      throw error;
+    }
   } finally {
     syncInProgress = false;
     setStatus({ isSyncing: false });
+    if (syncRequestedWhileBusy) {
+      syncRequestedWhileBusy = false;
+      void performSync(userId, options);
+    }
   }
 }
 
@@ -143,7 +199,7 @@ export const syncEngine = {
       setStatus({ lastError: 'Could not sync: sign in and try again.' });
       return;
     }
-    await performSync(userId);
+    await performSync(userId, { userInitiated: true });
   },
 
   async runInitialSync(explicitUserId?: string): Promise<void> {

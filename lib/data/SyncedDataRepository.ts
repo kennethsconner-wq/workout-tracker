@@ -1,7 +1,7 @@
 import type { DataRepository } from '@/lib/data/DataRepository';
 import type { ExerciseDefinitionMatch, ExerciseLibraryEntry } from '@/lib/exerciseLibraryStorage';
 import { localDataRepository } from '@/lib/data/LocalDataRepository';
-import { matchesExerciseDefinition, exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
+import { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
 import { syncEngine } from '@/lib/sync/syncEngine';
 
 function nowIso(): string {
@@ -65,9 +65,9 @@ async function enqueueLibraryEntrySync(
   }
 }
 
-/** Queue cloud sync for catalog rows matching these exercise definitions. */
+/** Queue cloud sync for catalog rows (prefer stable exercise id over definition signature). */
 async function enqueueLibraryEntriesForDefinitions(
-  exercises: ReadonlyArray<ExerciseDefinitionMatch>,
+  exercises: ReadonlyArray<ExerciseDefinitionMatch & { id?: string }>,
 ): Promise<void> {
   if (exercises.length === 0) {
     return;
@@ -77,16 +77,18 @@ async function enqueueLibraryEntriesForDefinitions(
   const logged = await localDataRepository.loadLoggedWorkouts();
   const catalog = await localDataRepository.loadExerciseLibraryCatalog(workouts, logged);
   const enqueued = new Set<string>();
-  const enqueuedSignatures = new Set<string>();
   for (const exercise of exercises) {
-    const signature = exerciseDefinitionSignatureKey(exercise);
-    if (enqueuedSignatures.has(signature)) {
+    const explicitId = typeof exercise.id === 'string' && exercise.id.trim().length > 0 ? exercise.id : undefined;
+    if (explicitId) {
+      if (!enqueued.has(explicitId)) {
+        enqueued.add(explicitId);
+        enqueueExerciseLibrarySync(explicitId, updatedAt);
+      }
       continue;
     }
     const entry = catalog.find((item) => matchesExerciseDefinition(item, exercise));
     if (entry && !enqueued.has(entry.id)) {
       enqueued.add(entry.id);
-      enqueuedSignatures.add(signature);
       enqueueExerciseLibrarySync(entry.id, updatedAt);
     }
   }
@@ -98,6 +100,7 @@ async function enqueueLibraryEntriesForDefinitions(
 export function createSyncedDataRepository(): DataRepository {
   return {
     loadWorkouts: () => localDataRepository.loadWorkouts(),
+    getWorkoutById: (id) => localDataRepository.getWorkoutById(id),
     addWorkout: async (workout) => {
       const { workout: created, removedCatalogIds } = await localDataRepository.addWorkout(workout);
       const updatedAt = nowIso();
@@ -126,7 +129,7 @@ export function createSyncedDataRepository(): DataRepository {
         await enqueueLibraryEntriesForDefinitions(result.workout.exercises);
         void syncEngine.syncNow();
       }
-      return result?.workout ?? null;
+      return result;
     },
     deleteWorkout: async (id) => {
       const logged = await localDataRepository.loadLoggedWorkouts();
@@ -169,22 +172,19 @@ export function createSyncedDataRepository(): DataRepository {
     findTemplateExerciseById: localDataRepository.findTemplateExerciseById,
 
     loadLoggedWorkouts: () => localDataRepository.loadLoggedWorkouts(),
+    getLoggedWorkoutById: (id) => localDataRepository.getLoggedWorkoutById(id),
     addLoggedWorkout: async (workout) => {
       const created = await localDataRepository.addLoggedWorkout(workout);
-      await localDataRepository.upsertExerciseLibraryFromDefinitions(created.exercises);
       const updatedAt = nowIso();
       syncEngine.enqueueChange({ kind: 'logged_workout', id: created.id, updatedAt });
-      await enqueueLibraryEntriesForDefinitions(created.exercises);
       void syncEngine.syncNow();
       return created;
     },
     updateLoggedWorkout: async (id, patch) => {
       const updated = await localDataRepository.updateLoggedWorkout(id, patch);
       if (updated) {
-        await localDataRepository.upsertExerciseLibraryFromDefinitions(updated.exercises);
         const updatedAt = nowIso();
         syncEngine.enqueueChange({ kind: 'logged_workout', id: updated.id, updatedAt });
-        await enqueueLibraryEntriesForDefinitions(updated.exercises);
         void syncEngine.syncNow();
       }
       return updated;

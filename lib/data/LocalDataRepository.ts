@@ -12,6 +12,8 @@ import {
   deleteLoggedWorkoutsByWorkoutId,
   deleteWorkout,
   findTemplateExerciseById,
+  getLoggedWorkoutById,
+  getWorkoutById,
   loadLoggedWorkouts,
   loadWorkouts,
   propagateExerciseDefinitionsAcrossWorkouts,
@@ -24,6 +26,7 @@ import {
 /** AsyncStorage-only repository; used for all users and as the local cache when signed in. */
 export const localDataRepository: DataRepository = {
   loadWorkouts,
+  getWorkoutById,
   addWorkout,
   updateWorkout,
   deleteWorkout,
@@ -33,6 +36,7 @@ export const localDataRepository: DataRepository = {
   findTemplateExerciseById,
 
   loadLoggedWorkouts,
+  getLoggedWorkoutById,
   addLoggedWorkout,
   updateLoggedWorkout,
   deleteLoggedWorkout,

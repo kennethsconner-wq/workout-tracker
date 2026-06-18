@@ -173,7 +173,7 @@ export default function AccountScreen() {
                     {syncStatus.isSyncing
                       ? 'Syncing…'
                       : syncStatus.lastError
-                        ? 'Sync issue — tap Sync now to retry'
+                        ? syncStatus.lastError
                         : `Last synced: ${formatRelativeSyncTime(syncStatus.lastSyncedAt)}`}
                   </Text>
                 </View>

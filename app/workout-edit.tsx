@@ -106,11 +106,10 @@ export default function WorkoutEditScreen() {
     editScreenInitialLoadDoneRef.current = false;
 
     void (async () => {
-      const workouts = await repo.loadWorkouts();
+      const workout = await repo.getWorkoutById(id);
       if (cancelled) {
         return;
       }
-      const workout = workouts.find((w) => w.id === id);
       if (!workout) {
         themedAlert('Workout not found', 'Could not find this workout.');
         router.back();
@@ -159,11 +158,10 @@ export default function WorkoutEditScreen() {
       }
       let cancelled = false;
       void (async () => {
-        const workouts = await repo.loadWorkouts();
+        const workout = await repo.getWorkoutById(id);
         if (cancelled) {
           return;
         }
-        const workout = workouts.find((w) => w.id === id);
         if (!workout) {
           return;
         }

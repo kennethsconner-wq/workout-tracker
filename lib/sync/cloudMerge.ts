@@ -19,6 +19,14 @@ function shouldApplyRemote(localUpdatedAt: string, remoteUpdatedAt: string): boo
   return parseTime(remoteUpdatedAt) >= parseTime(localUpdatedAt);
 }
 
+/** Cloud row primary key must match the persisted entity id inside `data` (sync tracks by row id). */
+function alignCloudEntityDataId<T extends { id: string }>(rowId: string, data: T): T {
+  if (data.id === rowId) {
+    return data;
+  }
+  return { ...data, id: rowId };
+}
+
 export async function mergeWorkoutRows(
   rows: CloudWorkoutRow[],
   entities: Record<string, EntityMeta>,
@@ -41,7 +49,7 @@ export async function mergeWorkoutRows(
     if (row.deleted_at) {
       byId.delete(row.id);
     } else {
-      byId.set(row.id, row.data);
+      byId.set(row.id, alignCloudEntityDataId(row.id, row.data));
     }
     nextEntities[key] = { updatedAt: row.updated_at };
   }
@@ -72,7 +80,7 @@ export async function mergeLoggedWorkoutRows(
     if (row.deleted_at) {
       byId.delete(row.id);
     } else {
-      byId.set(row.id, row.data);
+      byId.set(row.id, alignCloudEntityDataId(row.id, row.data));
     }
     nextEntities[key] = { updatedAt: row.updated_at };
   }
@@ -103,7 +111,7 @@ export async function mergeExerciseLibraryRows(
     if (row.deleted_at) {
       byId.delete(row.id);
     } else {
-      byId.set(row.id, row.data);
+      byId.set(row.id, alignCloudEntityDataId(row.id, row.data));
     }
     nextEntities[key] = { updatedAt: row.updated_at };
   }

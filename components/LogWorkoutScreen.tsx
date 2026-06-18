@@ -1011,12 +1011,11 @@ export default function LogWorkoutScreen() {
     setLoadedFromDraft(false);
 
     void (async () => {
-      const allWorkouts = await repo.loadWorkouts();
+      const selectedWorkout = await repo.getWorkoutById(workoutId);
       if (loadGeneration !== loadGenerationRef.current) {
         return;
       }
 
-      const selectedWorkout = allWorkouts.find((entry) => entry.id === workoutId);
       if (!selectedWorkout) {
         themedAlert('Workout not found', 'Could not find the workout template for this log.');
         router.replace('/');
@@ -1030,12 +1029,11 @@ export default function LogWorkoutScreen() {
       let nextSessionDate = new Date();
 
       if (intent === 'edit' && loggedWorkoutId) {
-        const allLogged = await repo.loadLoggedWorkouts();
+        const logged = await repo.getLoggedWorkoutById(loggedWorkoutId);
         if (loadGeneration !== loadGenerationRef.current) {
           return;
         }
 
-        const logged = allLogged.find((l) => l.id === loggedWorkoutId);
         if (!logged) {
           themedAlert('Log not found', 'This logged workout no longer exists.');
           router.replace('/workout-log');

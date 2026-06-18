@@ -73,6 +73,7 @@ export type WorkoutUpdateResult = {
  */
 export interface DataRepository {
   loadWorkouts(): Promise<Workout[]>;
+  getWorkoutById(id: string): Promise<Workout | undefined>;
   addWorkout(
     workout: Omit<Workout, 'id' | 'createdAt'> & Partial<Pick<Workout, 'id' | 'createdAt'>>,
   ): Promise<WorkoutAddResult>;
@@ -94,6 +95,7 @@ export interface DataRepository {
   findTemplateExerciseById(workouts: Workout[], exerciseId: string): WorkoutExercise | undefined;
 
   loadLoggedWorkouts(): Promise<LoggedWorkout[]>;
+  getLoggedWorkoutById(id: string): Promise<LoggedWorkout | undefined>;
   addLoggedWorkout(
     workout: Omit<LoggedWorkout, 'id' | 'createdAt'> & Partial<Pick<LoggedWorkout, 'id' | 'createdAt'>>,
   ): Promise<LoggedWorkout>;

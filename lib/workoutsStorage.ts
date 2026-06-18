@@ -15,8 +15,6 @@ import { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
 import { normalizeWorkoutIconId } from '@/lib/workoutIcons';
 import {
   dedupeExerciseLibraryBySignature,
-  loadExerciseLibraryEntries,
-  loggedExerciseMatchesDefinitionForRemoval,
   removeExerciseLibraryEntry,
   replaceExerciseLibraryEntry,
   upsertExerciseLibraryFromDefinitions,
@@ -31,6 +29,15 @@ import {
 
 function isDayOfWeek(value: string): value is DayOfWeek {
   return (DAYS_OF_WEEK as readonly string[]).includes(value);
+}
+
+/** Stable primary key for persisted workouts and logged workouts (never user-visible title/name). */
+function readPersistedId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 const LEGACY_TITLE_DAY_RE = new RegExp(`^(.+?)\\s+\\((${DAYS_OF_WEEK.join('|')})\\)$`);
@@ -191,9 +198,11 @@ function normalizeWorkoutExercises(raw: unknown): WorkoutExercise[] {
 }
 
 function normalizeStoredWorkout(raw: Workout & { dayOfWeek?: string; iconId?: unknown; daysOfWeek?: unknown }): Workout {
-  const { id, createdAt, exercises: rawExercises } = raw;
+  const id = readPersistedId(raw.id) ?? newId();
+  const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString();
+  const { exercises: rawExercises } = raw;
   const exercises = normalizeWorkoutExercises(rawExercises);
-  let title = raw.title;
+  let title = typeof raw.title === 'string' ? raw.title : '';
   const daysFromArray = Array.isArray(raw.daysOfWeek)
     ? raw.daysOfWeek.filter((day): day is DayOfWeek => typeof day === 'string' && isDayOfWeek(day))
     : [];
@@ -223,9 +232,12 @@ function normalizeStoredWorkout(raw: Workout & { dayOfWeek?: string; iconId?: un
 const LOGGED_WORKOUTS_STORAGE_KEY = 'workouts@v1';
 const WORKOUTS_STORAGE_KEY = 'workout-templates@v1';
 
-function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown; daysOfWeek?: unknown; iconId?: unknown }): LoggedWorkout {
-  const normalizedExercises = Array.isArray(raw.exercises)
-    ? raw.exercises.map((exercise) => {
+function normalizeLoggedWorkoutExercises(raw: unknown): LoggedWorkout['exercises'] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const seenIds = new Set<string>();
+  return raw.map((exercise) => {
         const rawLegacyPlannedSets = (exercise as unknown as { sets?: unknown }).sets;
         const plannedSetsFromLegacyArray = Array.isArray(rawLegacyPlannedSets)
           ? (rawLegacyPlannedSets as Array<{ reps?: unknown; weightKg?: unknown }>)
@@ -344,12 +356,17 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
           distanceUnit: readExerciseDistanceUnit(exercise as Record<string, unknown>),
         });
 
+        const exerciseId = readPersistedId(exercise.id) ?? newId();
+        const workoutExerciseId = readPersistedId((exercise as { workoutExerciseId?: unknown }).workoutExerciseId) ?? '';
+        let uniqueExerciseId = exerciseId;
+        if (seenIds.has(uniqueExerciseId)) {
+          uniqueExerciseId = newId();
+        }
+        seenIds.add(uniqueExerciseId);
+
         return {
-          id: typeof exercise.id === 'string' ? exercise.id : newId(),
-          workoutExerciseId:
-            typeof (exercise as { workoutExerciseId?: unknown }).workoutExerciseId === 'string'
-              ? (exercise as { workoutExerciseId: string }).workoutExerciseId
-              : '',
+          id: uniqueExerciseId,
+          workoutExerciseId,
           activityType,
           name: typeof exercise.name === 'string' ? exercise.name : '',
           sets:
@@ -420,18 +437,21 @@ function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown
           actualCardioPerSets: readActualCardioPerSetsFromStored(exercise as Record<string, unknown>),
           stretchSets: readStretchSetsFromStored(exercise as Record<string, unknown>, activityType),
         };
-      })
-    : [];
+  });
+}
+
+function normalizeStoredLoggedWorkout(raw: LoggedWorkout & { workoutId?: unknown; daysOfWeek?: unknown; iconId?: unknown }): LoggedWorkout {
+  const normalizedExercises = normalizeLoggedWorkoutExercises(raw.exercises);
 
   const normalizedDays = Array.isArray(raw.daysOfWeek)
     ? raw.daysOfWeek.filter((day): day is DayOfWeek => typeof day === 'string' && isDayOfWeek(day))
     : [];
 
   return {
-    id: raw.id,
-    workoutId: typeof raw.workoutId === 'string' ? raw.workoutId : raw.id,
-    createdAt: raw.createdAt,
-    title: raw.title,
+    id: readPersistedId(raw.id) ?? newId(),
+    workoutId: readPersistedId(raw.workoutId) ?? '',
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
+    title: typeof raw.title === 'string' ? raw.title : '',
     daysOfWeek: normalizedDays.length > 0 ? Array.from(new Set(normalizedDays)) : ['Monday'],
     iconId: normalizeWorkoutIconId(raw.iconId),
     exercises: normalizedExercises,
@@ -445,7 +465,10 @@ export async function loadLoggedWorkouts(): Promise<LoggedWorkout[]> {
   }
   try {
     const parsed = JSON.parse(raw) as LoggedWorkout[];
-    return Array.isArray(parsed) ? parsed.map((w) => normalizeStoredLoggedWorkout(w)) : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.map((w) => normalizeStoredLoggedWorkout(w));
   } catch {
     return [];
   }
@@ -457,7 +480,7 @@ async function saveLoggedWorkouts(workouts: LoggedWorkout[]): Promise<void> {
 
 /** Replace all logged workouts (used when merging cloud data). */
 export async function replaceLoggedWorkouts(workouts: LoggedWorkout[]): Promise<void> {
-  await saveLoggedWorkouts(workouts);
+  await saveLoggedWorkouts(workouts.map((workout) => normalizeStoredLoggedWorkout(workout)));
 }
 
 export async function addLoggedWorkout(
@@ -488,7 +511,7 @@ export async function updateLoggedWorkout(
     Partial<Pick<LoggedWorkout, 'createdAt'>>,
 ): Promise<LoggedWorkout | null> {
   const existing = await loadLoggedWorkouts();
-  const prev = existing.find((w) => w.id === id);
+  const prev = findLoggedWorkoutById(existing, id);
   if (!prev) {
     return null;
   }
@@ -508,6 +531,26 @@ export async function updateLoggedWorkout(
 export async function deleteLoggedWorkoutsByWorkoutId(workoutId: string): Promise<void> {
   const existing = await loadLoggedWorkouts();
   await saveLoggedWorkouts(existing.filter((w) => w.workoutId !== workoutId));
+}
+
+/** Look up a workout template by its stable id (never by title). */
+export function findWorkoutById(workouts: Workout[], id: string): Workout | undefined {
+  return workouts.find((workout) => workout.id === id);
+}
+
+/** Look up a logged workout session by its stable id (never by title). */
+export function findLoggedWorkoutById(logged: LoggedWorkout[], id: string): LoggedWorkout | undefined {
+  return logged.find((workout) => workout.id === id);
+}
+
+/** Load and return a workout template by id. */
+export async function getWorkoutById(id: string): Promise<Workout | undefined> {
+  return findWorkoutById(await loadWorkouts(), id);
+}
+
+/** Load and return a logged workout session by id. */
+export async function getLoggedWorkoutById(id: string): Promise<LoggedWorkout | undefined> {
+  return findLoggedWorkoutById(await loadLoggedWorkouts(), id);
 }
 
 /** First template exercise with this id across saved workouts (ids are unique per exercise). */
@@ -543,7 +586,7 @@ async function saveWorkouts(workouts: Workout[]): Promise<void> {
 
 /** Replace all workout templates (used when merging cloud data). */
 export async function replaceWorkouts(workouts: Workout[]): Promise<void> {
-  await saveWorkouts(workouts);
+  await saveWorkouts(workouts.map((workout) => normalizeStoredWorkout(workout)));
 }
 
 export async function addWorkout(
@@ -576,7 +619,7 @@ export async function updateWorkout(
   updates: Omit<Workout, 'id' | 'createdAt'>,
 ): Promise<{ workout: Workout; removedCatalogIds: string[]; updatedCatalogEntryIds: string[] } | null> {
   const existing = await loadWorkouts();
-  const target = existing.find((w) => w.id === id);
+  const target = findWorkoutById(existing, id);
   if (!target) {
     return null;
   }
@@ -694,7 +737,11 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
   const affectedIds = new Set<string>();
   for (const w of all) {
     for (const ex of w.exercises) {
-      if (matchesExerciseDefinition(ex, oldDef)) {
+      const matches =
+        options?.catalogEntryId != null
+          ? ex.id === options.catalogEntryId
+          : matchesExerciseDefinition(ex, oldDef);
+      if (matches) {
         updates.push({ id: ex.id, ...nextDef });
         affectedIds.add(ex.id);
       }
@@ -777,39 +824,31 @@ export async function removeExercisesMatchingSignatureFromAllWorkouts(
   >,
   options?: { catalogEntryId?: string },
 ): Promise<void> {
-  let matchDef = def;
-  if (options?.catalogEntryId) {
-    const catalogEntry = (await loadExerciseLibraryEntries()).find(
-      (entry) => entry.id === options.catalogEntryId,
-    );
-    if (catalogEntry) {
-      matchDef = catalogEntry;
-    }
-  }
-
   const all = await loadWorkouts();
   const idsToRemove = new Set<string>();
-  for (const w of all) {
-    for (const ex of w.exercises) {
-      if (matchesExerciseDefinition(ex, matchDef)) {
-        idsToRemove.add(ex.id);
+  if (options?.catalogEntryId) {
+    idsToRemove.add(options.catalogEntryId);
+  } else {
+    for (const w of all) {
+      for (const ex of w.exercises) {
+        if (matchesExerciseDefinition(ex, def)) {
+          idsToRemove.add(ex.id);
+        }
       }
     }
   }
   const nextTemplates = all.map((w) => ({
     ...w,
-    exercises: w.exercises.filter((ex) => !matchesExerciseDefinition(ex, matchDef)),
+    exercises: w.exercises.filter((ex) => !idsToRemove.has(ex.id)),
   }));
   await saveWorkouts(nextTemplates);
-  await removeExerciseLibraryEntry(matchDef, options);
+  await removeExerciseLibraryEntry(def, options);
 
   const logs = await loadLoggedWorkouts();
   const nextLogs = logs
     .map((log) => ({
       ...log,
-      exercises: log.exercises.filter(
-        (lex) => !loggedExerciseMatchesDefinitionForRemoval(lex, matchDef, idsToRemove),
-      ),
+      exercises: log.exercises.filter((lex) => !idsToRemove.has(lex.workoutExerciseId)),
     }))
     .filter((log) => log.exercises.length > 0);
   await saveLoggedWorkouts(nextLogs);
