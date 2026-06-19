@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AccountOnboardingGate } from '@/components/AccountOnboardingModal';
+import { SyncMergeToastProvider } from '@/components/SyncMergeToastProvider';
 import { ThemedAlertProvider } from '@/components/ThemedAlertProvider';
 import { DurationTimerProvider } from '@/components/DurationTimerProvider';
 import { AuthProvider } from '@/lib/auth/AuthProvider';
@@ -86,6 +87,7 @@ function RootLayoutNav() {
         <DataRepositoryProvider>
         <AccountOnboardingGate />
         <ThemedAlertProvider>
+        <SyncMergeToastProvider>
         <DurationTimerProvider>
         <ThemeProvider value={NavigationAppTheme}>
         <Stack screenOptions={stackScreenOptions}>
@@ -115,6 +117,7 @@ function RootLayoutNav() {
         </Stack>
         </ThemeProvider>
         </DurationTimerProvider>
+        </SyncMergeToastProvider>
         </ThemedAlertProvider>
         </DataRepositoryProvider>
         </AuthProvider>

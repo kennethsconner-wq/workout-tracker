@@ -16,7 +16,9 @@ import { markAccountOnboardingDismissed } from '@/lib/auth/accountOnboardingStor
 import { authEventShouldTriggerSync, triggerCloudSyncAfterAuth } from '@/lib/auth/triggerCloudSync';
 
 import {
-  loadStoredSession,
+  deleteAccount as deleteAccountFromSupabase,
+  type DeleteAccountParams,
+  getSafeSession,
   refreshSession,
   resendSignUpConfirmation,
   sendPasswordResetEmail,
@@ -51,11 +53,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     let isMounted = true;
     let hasBootstrappedSession = false;
+    let authListener: { subscription: { unsubscribe: () => void } } | null = null;
 
     const triggerCloudSync = triggerCloudSyncAfterAuth;
 
-    const bootstrapSession = async () => {
-      const nextSession = await loadStoredSession();
+    const bootstrapAuth = async () => {
+      // Clear stale refresh tokens before registering onAuthStateChange. Otherwise
+      // loadStoredSession and INITIAL_SESSION both attempt a refresh and Supabase
+      // logs duplicate AuthApiError overlays for invalid refresh tokens.
+      const nextSession = await getSafeSession();
       if (!isMounted) {
         return;
       }
@@ -72,28 +78,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (AppState.currentState === 'active' && nextSession) {
         supabase.auth.startAutoRefresh();
       }
+
+      const { data: listener } = supabase.auth.onAuthStateChange((event, changedSession) => {
+        if (!isMounted) {
+          return;
+        }
+
+        if (event === 'INITIAL_SESSION') {
+          return;
+        }
+
+        setSession(changedSession);
+        setIsLoading(false);
+
+        if (authEventShouldTriggerSync(event) && changedSession) {
+          triggerCloudSync(changedSession.user.id);
+        }
+
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          if (AppState.currentState === 'active') {
+            supabase.auth.startAutoRefresh();
+          }
+        }
+
+        if (event === 'SIGNED_OUT') {
+          supabase.auth.stopAutoRefresh();
+          syncEngine.reset();
+        }
+      });
+      authListener = listener;
     };
 
-    void bootstrapSession();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      setSession(nextSession);
-      setIsLoading(false);
-
-      if (authEventShouldTriggerSync(event) && nextSession) {
-        triggerCloudSync(nextSession.user.id);
-      }
-
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        if (AppState.currentState === 'active') {
-          supabase.auth.startAutoRefresh();
-        }
-      }
-
-      if (event === 'SIGNED_OUT') {
-        supabase.auth.stopAutoRefresh();
-      }
-    });
+    void bootstrapAuth();
 
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
@@ -101,7 +117,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
         supabase.auth.startAutoRefresh();
-        void refreshSession().then(() => syncEngine.syncNow());
+        void refreshSession().then((session) => {
+          if (session) {
+            void syncEngine.syncNow();
+          }
+        });
         return;
       }
       supabase.auth.stopAutoRefresh();
@@ -121,16 +141,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         if (isRecovery || result.type === 'recovery') {
-          void supabase.auth.getSession().then(({ data }) => {
-            triggerCloudSync(data.session?.user.id);
+          void getSafeSession().then((session) => {
+            triggerCloudSync(session?.user.id);
           });
           return;
         }
 
         void markAccountOnboardingDismissed();
-        void supabase.auth.getSession().then(({ data }) => {
-          if (data.session?.user.id) {
-            triggerCloudSync(data.session.user.id);
+        void getSafeSession().then((session) => {
+          if (session?.user.id) {
+            triggerCloudSync(session.user.id);
           }
         });
       });
@@ -148,7 +168,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     return () => {
       isMounted = false;
-      authListener.subscription.unsubscribe();
+      authListener?.subscription.unsubscribe();
       appStateSubscription.remove();
       linkingSubscription.remove();
       supabase.auth.stopAutoRefresh();
@@ -219,6 +239,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
+  const deleteAccount = useCallback(async (params: DeleteAccountParams) => {
+    setIsAuthBusy(true);
+    try {
+      const result = await deleteAccountFromSupabase(params);
+      if (!result.error) {
+        setSession(null);
+        syncEngine.reset();
+      }
+      return result;
+    } finally {
+      setIsAuthBusy(false);
+    }
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
@@ -234,8 +268,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       resendSignUpConfirmation: resendConfirmation,
       updateUsername,
       updatePassword,
+      deleteAccount,
     }),
-    [session, isLoading, isAuthBusy, signIn, signUp, signOut, resetPassword, resendConfirmation, updateUsername, updatePassword],
+    [session, isLoading, isAuthBusy, signIn, signUp, signOut, resetPassword, resendConfirmation, updateUsername, updatePassword, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

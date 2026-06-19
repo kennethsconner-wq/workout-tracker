@@ -8,8 +8,10 @@ import {
   resolveSyncUserId,
   runDeviceInitialSync,
 } from '@/lib/sync/cloudSync';
+import { isEditAtLeastAsNew } from '@/lib/sync/conflictResolver';
 import { isOfflineSyncError } from '@/lib/sync/isOfflineSyncError';
 import { clearOfflineChanges, loadOfflineChanges, markOfflineChanges } from '@/lib/sync/offlineChangeStorage';
+import { notifyMergeOverwrites, type MergeOverwrite } from '@/lib/sync/mergeOverwrites';
 import { loadSyncMeta, saveSyncMeta } from '@/lib/sync/syncMetaStorage';
 import type { PendingSyncItem, SyncStatus } from '@/lib/sync/types';
 
@@ -17,6 +19,8 @@ const OFFLINE_SYNC_MESSAGE = 'Offline — connect to the internet to sync.';
 
 type SyncOptions = {
   userInitiated?: boolean;
+  /** Re-evaluate all cloud rows — used on sign-in to catch local overwrites. */
+  fullPull?: boolean;
 };
 
 function handleSyncFailure(error: unknown, options?: SyncOptions): void {
@@ -38,7 +42,13 @@ function restorePendingBatch(batch: PendingSyncItem[]): void {
 }
 
 function persistUnsyncedBatch(batch: PendingSyncItem[]): void {
-  void markOfflineChanges(batch.map((item) => ({ kind: item.kind, id: item.id })));
+  void markOfflineChanges(
+    batch.map((item) => ({
+      kind: item.kind,
+      id: item.id,
+      updatedAt: item.updatedAt,
+    })),
+  );
 }
 
 const initialStatus: SyncStatus = {
@@ -57,8 +67,9 @@ let syncRequestedWhileBusy = false;
 async function runInitialSyncInternal(userId: string): Promise<void> {
   setStatus({ isSyncing: true, lastError: null });
   try {
-    await runDeviceInitialSync(userId);
-    await performSync(userId);
+    const initialOverwrites = await runDeviceInitialSync(userId);
+    const syncOverwrites = await performSync(userId, { fullPull: true });
+    notifyMergeOverwrites([...initialOverwrites, ...syncOverwrites]);
   } catch (error) {
     handleSyncFailure(error);
     if (!isOfflineSyncError(error)) {
@@ -86,7 +97,10 @@ function dedupePending(change: PendingSyncItem): void {
     (item) => item.kind === change.kind && item.id === change.id,
   );
   if (existingIndex >= 0) {
-    pendingChanges[existingIndex] = change;
+    const existing = pendingChanges[existingIndex];
+    pendingChanges[existingIndex] = isEditAtLeastAsNew(change.updatedAt, existing.updatedAt)
+      ? change
+      : existing;
     return;
   }
   pendingChanges.push(change);
@@ -97,10 +111,10 @@ async function refreshLastSyncedFromStorage(userId: string): Promise<void> {
   setStatus({ lastSyncedAt: meta.lastSyncedAt });
 }
 
-async function performSync(userId: string, options?: SyncOptions): Promise<void> {
+async function performSync(userId: string, options?: SyncOptions): Promise<MergeOverwrite[]> {
   if (syncInProgress) {
     syncRequestedWhileBusy = true;
-    return;
+    return [];
   }
 
   syncInProgress = true;
@@ -108,6 +122,7 @@ async function performSync(userId: string, options?: SyncOptions): Promise<void>
 
   let pushCompleted = false;
   let batch: PendingSyncItem[] = [];
+  let overwrites: MergeOverwrite[] = [];
 
   try {
     const [missing, offline] = await Promise.all([
@@ -132,7 +147,11 @@ async function performSync(userId: string, options?: SyncOptions): Promise<void>
     await ensureLocalDataUploadedIfCloudEmpty(userId);
 
     const meta = await loadSyncMeta(userId);
-    await pullRemoteChanges(userId, meta.lastSyncedAt);
+    const pushedThisSync = new Set(batch.map((item) => `${item.kind}:${item.id}`));
+    const pullSince = options?.fullPull ? null : meta.lastSyncedAt;
+    overwrites = await pullRemoteChanges(userId, pullSince, {
+      excludeOverwriteKeys: pushedThisSync,
+    });
 
     const syncedAt = new Date().toISOString();
     const nextMeta = await loadSyncMeta(userId);
@@ -145,6 +164,7 @@ async function performSync(userId: string, options?: SyncOptions): Promise<void>
       lastSyncedAt: syncedAt,
       lastError: null,
     });
+    return overwrites;
   } catch (error) {
     if (!pushCompleted && batch.length > 0) {
       restorePendingBatch(batch);
@@ -154,12 +174,15 @@ async function performSync(userId: string, options?: SyncOptions): Promise<void>
     if (!isOfflineSyncError(error)) {
       throw error;
     }
+    return [];
   } finally {
     syncInProgress = false;
     setStatus({ isSyncing: false });
     if (syncRequestedWhileBusy) {
       syncRequestedWhileBusy = false;
-      void performSync(userId, options);
+      void performSync(userId, options).then((queuedOverwrites) => {
+        notifyMergeOverwrites(queuedOverwrites);
+      });
     }
   }
 }
@@ -199,7 +222,8 @@ export const syncEngine = {
       setStatus({ lastError: 'Could not sync: sign in and try again.' });
       return;
     }
-    await performSync(userId, { userInitiated: true });
+    const overwrites = await performSync(userId, { userInitiated: true });
+    notifyMergeOverwrites(overwrites);
   },
 
   async runInitialSync(explicitUserId?: string): Promise<void> {

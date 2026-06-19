@@ -4,7 +4,9 @@ import {
   mergeExerciseLibraryRows,
   mergeLoggedWorkoutRows,
   mergeWorkoutRows,
+  type MergePullOptions,
 } from '@/lib/sync/cloudMerge';
+import type { MergeOverwrite } from '@/lib/sync/mergeOverwrites';
 import {
   entityMetaKey,
   isInitialSyncDone,
@@ -14,12 +16,14 @@ import {
   setEntityUpdatedAt,
 } from '@/lib/sync/syncMetaStorage';
 import type { PendingSyncItem } from '@/lib/sync/types';
+import { isEditAtLeastAsNew, resolveEditTimestamp } from '@/lib/sync/conflictResolver';
 import type {
   CloudExerciseLibraryRow,
   CloudLoggedWorkoutRow,
   CloudWorkoutRow,
   SyncEntityKind,
 } from '@/lib/supabase/types';
+import { getSafeSession } from '@/lib/auth/authService';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import type { ExerciseLibraryEntry } from '@/lib/exerciseLibraryStorage';
 import { loadExerciseLibraryCatalog, loadExerciseLibraryEntries } from '@/lib/exerciseLibraryStorage';
@@ -48,9 +52,7 @@ export async function resolveSyncUserId(explicitUserId?: string): Promise<string
     return null;
   }
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const session = await getSafeSession();
   if (session?.user?.id) {
     return session.user.id;
   }
@@ -164,8 +166,49 @@ async function uploadExerciseLibraryEntry(userId: string, id: string, updatedAt:
   await softDeleteRow('exercise_library', userId, id, updatedAt);
 }
 
+async function fetchRemoteUpdatedAt(
+  kind: SyncEntityKind,
+  userId: string,
+  id: string,
+): Promise<string | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from(TABLE_BY_KIND[kind])
+    .select('updated_at')
+    .eq('user_id', userId)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error || !data || typeof data.updated_at !== 'string') {
+    return null;
+  }
+
+  return data.updated_at;
+}
+
+async function shouldUploadLocalEdit(
+  kind: SyncEntityKind,
+  userId: string,
+  id: string,
+  localUpdatedAt: string,
+): Promise<boolean> {
+  const remoteUpdatedAt = await fetchRemoteUpdatedAt(kind, userId, id);
+  if (!remoteUpdatedAt) {
+    return true;
+  }
+  return isEditAtLeastAsNew(localUpdatedAt, remoteUpdatedAt);
+}
+
 async function uploadPendingItem(userId: string, item: PendingSyncItem): Promise<void> {
-  const updatedAt = syncTimestamp();
+  const updatedAt = resolveEditTimestamp(item.updatedAt);
+
+  if (!(await shouldUploadLocalEdit(item.kind, userId, item.id, updatedAt))) {
+    return;
+  }
 
   switch (item.kind) {
     case 'workout':
@@ -200,7 +243,11 @@ async function fetchRows<T>(table: string, userId: string, since: string | null)
   return (data ?? []) as T[];
 }
 
-export async function pullRemoteChanges(userId: string, since: string | null): Promise<void> {
+export async function pullRemoteChanges(
+  userId: string,
+  since: string | null,
+  options?: MergePullOptions,
+): Promise<MergeOverwrite[]> {
   const [allWorkouts, allLogged, allLibrary, localWorkouts, localLogged, localLibrary] = await Promise.all([
     fetchRows<CloudWorkoutRow>('workouts', userId, null),
     fetchRows<CloudLoggedWorkoutRow>('logged_workouts', userId, null),
@@ -227,15 +274,16 @@ export async function pullRemoteChanges(userId: string, since: string | null): P
   );
 
   const meta = await loadSyncMeta(userId);
-  let entities = meta.entities;
-  entities = await mergeWorkoutRows(workoutRows, entities);
-  entities = await mergeLoggedWorkoutRows(loggedRows, entities);
-  entities = await mergeExerciseLibraryRows(libraryRows, entities);
+  const workoutMerge = await mergeWorkoutRows(workoutRows, meta.entities, options);
+  const loggedMerge = await mergeLoggedWorkoutRows(loggedRows, workoutMerge.entities, options);
+  const libraryMerge = await mergeExerciseLibraryRows(libraryRows, loggedMerge.entities, options);
 
   await saveSyncMeta(userId, {
     lastSyncedAt: meta.lastSyncedAt,
-    entities,
+    entities: libraryMerge.entities,
   });
+
+  return [...workoutMerge.overwrites, ...loggedMerge.overwrites, ...libraryMerge.overwrites];
 }
 
 export async function countCloudEntities(userId: string): Promise<number> {
@@ -263,7 +311,7 @@ export async function countCloudEntities(userId: string): Promise<number> {
 }
 
 export async function uploadAllLocal(userId: string): Promise<void> {
-  const now = syncTimestamp();
+  const bootstrapUpdatedAt = syncTimestamp();
   const [workouts, loggedWorkouts, libraryEntries] = await Promise.all([
     collectLocalWorkoutsForUpload(),
     collectLocalLoggedWorkoutsForUpload(),
@@ -271,18 +319,20 @@ export async function uploadAllLocal(userId: string): Promise<void> {
   ]);
 
   for (const workout of workouts) {
-    await upsertRow('workout', userId, workout.id, workout, now, null);
-    await setEntityUpdatedAt(userId, 'workout', workout.id, now);
+    const updatedAt = resolveEditTimestamp(workout.createdAt);
+    await upsertRow('workout', userId, workout.id, workout, updatedAt, null);
+    await setEntityUpdatedAt(userId, 'workout', workout.id, updatedAt);
   }
 
   for (const workout of loggedWorkouts) {
-    await upsertRow('logged_workout', userId, workout.id, workout, now, null);
-    await setEntityUpdatedAt(userId, 'logged_workout', workout.id, now);
+    const updatedAt = resolveEditTimestamp(workout.createdAt);
+    await upsertRow('logged_workout', userId, workout.id, workout, updatedAt, null);
+    await setEntityUpdatedAt(userId, 'logged_workout', workout.id, updatedAt);
   }
 
   for (const entry of libraryEntries) {
-    await upsertRow('exercise_library', userId, entry.id, entry, now, null);
-    await setEntityUpdatedAt(userId, 'exercise_library', entry.id, now);
+    await upsertRow('exercise_library', userId, entry.id, entry, bootstrapUpdatedAt, null);
+    await setEntityUpdatedAt(userId, 'exercise_library', entry.id, bootstrapUpdatedAt);
   }
 }
 
@@ -308,18 +358,17 @@ export async function enqueueOfflineLocalChanges(): Promise<PendingSyncItem[]> {
     return [];
   }
 
-  const now = syncTimestamp();
   return offlineChanges.map((change) => ({
     kind: change.kind,
     id: change.id,
-    updatedAt: now,
+    updatedAt: resolveEditTimestamp(change.updatedAt),
   }));
 }
 
 /** Queue local rows that have never been uploaded for this signed-in user. */
 export async function enqueueLocalChangesMissingFromSyncMeta(userId: string): Promise<PendingSyncItem[]> {
   const meta = await loadSyncMeta(userId);
-  const now = syncTimestamp();
+  const bootstrapUpdatedAt = syncTimestamp();
   const workouts = await loadWorkouts();
   const logged = await loadLoggedWorkouts();
   const libraryEntries = await loadMergedExerciseLibraryCatalog();
@@ -331,7 +380,7 @@ export async function enqueueLocalChangesMissingFromSyncMeta(userId: string): Pr
       items.push({
         kind: 'workout',
         id: workout.id,
-        updatedAt: now,
+        updatedAt: resolveEditTimestamp(workout.createdAt),
       });
     }
   }
@@ -342,7 +391,7 @@ export async function enqueueLocalChangesMissingFromSyncMeta(userId: string): Pr
       items.push({
         kind: 'logged_workout',
         id: log.id,
-        updatedAt: now,
+        updatedAt: resolveEditTimestamp(log.createdAt),
       });
     }
   }
@@ -358,7 +407,7 @@ export async function enqueueLocalChangesMissingFromSyncMeta(userId: string): Pr
       items.push({
         kind: 'exercise_library',
         id: entry.id,
-        updatedAt: now,
+        updatedAt: bootstrapUpdatedAt,
       });
     }
   }
@@ -383,7 +432,7 @@ export async function ensureLocalDataUploadedIfCloudEmpty(userId: string): Promi
   return false;
 }
 
-export async function runDeviceInitialSync(userId: string): Promise<void> {
+export async function runDeviceInitialSync(userId: string): Promise<MergeOverwrite[]> {
   const [cloudCount, localHasData] = await Promise.all([
     countCloudEntities(userId),
     localHasPersistedData(),
@@ -392,18 +441,21 @@ export async function runDeviceInitialSync(userId: string): Promise<void> {
   if (cloudCount === 0 && localHasData) {
     await uploadAllLocal(userId);
     await markInitialSyncDone(userId);
-    return;
+    return [];
   }
 
   if (await isInitialSyncDone(userId)) {
-    return;
+    return [];
   }
 
   if (cloudCount > 0) {
-    await pullRemoteChanges(userId, null);
+    const overwrites = await pullRemoteChanges(userId, null);
+    await markInitialSyncDone(userId);
+    return overwrites;
   }
 
   await markInitialSyncDone(userId);
+  return [];
 }
 
 export async function enqueueAllLocalChanges(userId: string, updatedAt: string): Promise<PendingSyncItem[]> {

@@ -4,8 +4,12 @@ import { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
 import { markOfflineChange, markOfflineChanges } from '@/lib/sync/offlineChangeStorage';
 import type { SyncEntityKind } from '@/lib/supabase/types';
 
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
 function markKind(kind: SyncEntityKind, id: string): void {
-  void markOfflineChange(kind, id);
+  void markOfflineChange(kind, id, nowIso());
 }
 
 async function markLibraryEntriesForDefinitions(
@@ -15,37 +19,40 @@ async function markLibraryEntriesForDefinitions(
   if (exercises.length === 0) {
     return;
   }
+  const updatedAt = nowIso();
   const workouts = await repo.loadWorkouts();
   const logged = await repo.loadLoggedWorkouts();
   const catalog = await repo.loadExerciseLibraryCatalog(workouts, logged);
-  const changes: Array<{ kind: SyncEntityKind; id: string }> = [];
+  const changes: Array<{ kind: SyncEntityKind; id: string; updatedAt: string }> = [];
   const seen = new Set<string>();
   for (const exercise of exercises) {
     const explicitId = typeof exercise.id === 'string' && exercise.id.trim().length > 0 ? exercise.id : undefined;
     if (explicitId) {
       if (!seen.has(explicitId)) {
         seen.add(explicitId);
-        changes.push({ kind: 'exercise_library', id: explicitId });
+        changes.push({ kind: 'exercise_library', id: explicitId, updatedAt });
       }
       continue;
     }
     const entry = catalog.find((item) => matchesExerciseDefinition(item, exercise));
     if (entry && !seen.has(entry.id)) {
       seen.add(entry.id);
-      changes.push({ kind: 'exercise_library', id: entry.id });
+      changes.push({ kind: 'exercise_library', id: entry.id, updatedAt });
     }
   }
   await markOfflineChanges(changes);
 }
 
 async function markAllTemplates(repo: DataRepository): Promise<void> {
+  const updatedAt = nowIso();
   const workouts = await repo.loadWorkouts();
-  await markOfflineChanges(workouts.map((workout) => ({ kind: 'workout', id: workout.id })));
+  await markOfflineChanges(workouts.map((workout) => ({ kind: 'workout', id: workout.id, updatedAt })));
 }
 
 async function markAllLogged(repo: DataRepository): Promise<void> {
+  const updatedAt = nowIso();
   const logged = await repo.loadLoggedWorkouts();
-  await markOfflineChanges(logged.map((workout) => ({ kind: 'logged_workout', id: workout.id })));
+  await markOfflineChanges(logged.map((workout) => ({ kind: 'logged_workout', id: workout.id, updatedAt })));
 }
 
 async function findCatalogEntryByDefinition(

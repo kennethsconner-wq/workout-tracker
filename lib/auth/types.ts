@@ -1,6 +1,6 @@
 import type { Session, User } from '@supabase/supabase-js';
 
-import type { AuthResult, SignUpResult } from '@/lib/auth/authService';
+import type { AuthResult, DeleteAccountParams, SignUpResult } from '@/lib/auth/authService';
 
 export type AuthUser = {
   id: string;
@@ -23,6 +23,7 @@ export type AuthContextValue = {
   resendSignUpConfirmation: (email: string) => Promise<AuthResult>;
   updateUsername: (username: string) => Promise<AuthResult>;
   updatePassword: (password: string) => Promise<AuthResult>;
+  deleteAccount: (params: DeleteAccountParams) => Promise<AuthResult>;
 };
 
 export function toAuthUser(user: User | null | undefined): AuthUser | null {

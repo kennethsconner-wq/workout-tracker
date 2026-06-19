@@ -113,20 +113,30 @@ export function createSyncedDataRepository(): DataRepository {
       return { workout: created, removedCatalogIds };
     },
     updateWorkout: async (id, updates) => {
+      const before = await localDataRepository.getWorkoutById(id);
       const result = await localDataRepository.updateWorkout(id, updates);
       if (result) {
         const updatedAt = nowIso();
         syncEngine.enqueueChange({ kind: 'workout', id: result.workout.id, updatedAt });
         const catalogIds = new Set<string>(result.updatedCatalogEntryIds);
-        for (const removedId of result.removedCatalogIds) {
-          if (!catalogIds.has(removedId)) {
-            enqueueExerciseLibrarySync(removedId, updatedAt);
+        const exercisesChanged =
+          before != null &&
+          JSON.stringify(before.exercises) !== JSON.stringify(result.workout.exercises);
+        const catalogChanged = catalogIds.size > 0 || result.removedCatalogIds.length > 0;
+
+        if (catalogChanged) {
+          for (const removedId of result.removedCatalogIds) {
+            if (!catalogIds.has(removedId)) {
+              enqueueExerciseLibrarySync(removedId, updatedAt);
+            }
+          }
+          for (const entryId of catalogIds) {
+            enqueueExerciseLibrarySync(entryId, updatedAt);
           }
         }
-        for (const entryId of catalogIds) {
-          enqueueExerciseLibrarySync(entryId, updatedAt);
+        if (exercisesChanged || catalogChanged) {
+          await enqueueLibraryEntriesForDefinitions(result.workout.exercises);
         }
-        await enqueueLibraryEntriesForDefinitions(result.workout.exercises);
         void syncEngine.syncNow();
       }
       return result;

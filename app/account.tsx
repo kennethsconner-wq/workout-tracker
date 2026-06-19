@@ -1,7 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { AuthFormField } from '@/components/auth/AuthFormField';
@@ -65,10 +74,38 @@ export default function AccountScreen() {
   const textColor = Colors[activeScheme].text;
   const tint = Colors[activeScheme].tint;
   const borderColor = activeScheme === 'dark' ? '#333' : '#e5e5e5';
-  const { user, isSignedIn, isConfigured, isAuthBusy, signOut, updateUsername } = useAuth();
+  const { user, isSignedIn, isConfigured, isAuthBusy, signOut, updateUsername, deleteAccount } = useAuth();
   const syncStatus = useSyncStatus();
   const [usernameDraft, setUsernameDraft] = useState('');
   const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [showDeleteAccountForm, setShowDeleteAccountForm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deletePasswordError, setDeletePasswordError] = useState<string | null>(null);
+  const [clearLocalDataOnDelete, setClearLocalDataOnDelete] = useState(false);
+  const destructiveColor = '#ff453a';
+  const scrollRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
+
+  const scrollToDeleteForm = () => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
+  };
+
+  useEffect(() => {
+    if (!showDeleteAccountForm) {
+      return;
+    }
+
+    const showSubscription = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      scrollToDeleteForm,
+    );
+
+    return () => {
+      showSubscription.remove();
+    };
+  }, [showDeleteAccountForm]);
 
   const handleSaveUsername = async () => {
     const error = validateUsername(usernameDraft);
@@ -99,6 +136,44 @@ export default function AccountScreen() {
     ]);
   };
 
+  const resetDeleteAccountForm = () => {
+    setShowDeleteAccountForm(false);
+    setDeletePassword('');
+    setDeletePasswordError(null);
+    setClearLocalDataOnDelete(false);
+  };
+
+  const handleDeleteAccountPress = () => {
+    setShowDeleteAccountForm(true);
+    scrollToDeleteForm();
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    if (!deletePassword.trim()) {
+      setDeletePasswordError('Enter your password to confirm.');
+      return;
+    }
+
+    setDeletePasswordError(null);
+    const result = await deleteAccount({
+      password: deletePassword,
+      clearLocalData: clearLocalDataOnDelete,
+    });
+
+    if (result.error) {
+      setDeletePasswordError(result.error);
+      return;
+    }
+
+    resetDeleteAccountForm();
+    themedAlert(
+      'Account deleted',
+      clearLocalDataOnDelete
+        ? 'Your account and workouts on this device have been removed.'
+        : 'Your account and cloud backups have been removed. Workouts on this device were kept.',
+    );
+  };
+
   return (
     <>
       <Stack.Screen
@@ -117,7 +192,18 @@ export default function AccountScreen() {
             </Text>
           </View>
         ) : isSignedIn && user ? (
-          <View style={styles.container}>
+          <KeyboardAvoidingView
+            style={styles.flex}
+            behavior={Platform.select({ ios: 'padding', android: 'height' })}
+            keyboardVerticalOffset={Platform.select({ ios: 80, android: 24 })}>
+            <ScrollView
+              ref={scrollRef}
+              style={styles.flex}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 32) }]}
+              keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+              showsVerticalScrollIndicator={false}>
+              <View style={styles.container}>
             <View style={[styles.infoCard, { borderColor }]}>
               {user.username ? (
                 <View style={styles.infoRow}>
@@ -199,7 +285,80 @@ export default function AccountScreen() {
               background.
             </Text>
             <AuthPrimaryButton label="Sign out" onPress={handleSignOut} loading={isAuthBusy} />
-          </View>
+            {showDeleteAccountForm ? (
+              <View style={[styles.deleteCard, { borderColor: destructiveColor }]}>
+                <Text style={[styles.deleteTitle, { color: destructiveColor }]}>Delete account permanently</Text>
+                <Text style={styles.copy}>
+                  This permanently deletes your account, profile, and all cloud backups. Enter your password to
+                  confirm.
+                </Text>
+                <AuthFormField
+                  label="Password"
+                  value={deletePassword}
+                  onChangeText={setDeletePassword}
+                  secureTextEntry
+                  textContentType="password"
+                  autoComplete="password"
+                  error={deletePasswordError}
+                  onFocus={scrollToDeleteForm}
+                />
+                <Pressable
+                  onPress={() => setClearLocalDataOnDelete((value) => !value)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: clearLocalDataOnDelete }}
+                  accessibilityLabel="Also delete workouts on this device"
+                  style={({ pressed }) => [styles.deleteOptionRow, { opacity: pressed ? 0.7 : 1 }]}>
+                  <Ionicons
+                    name={clearLocalDataOnDelete ? 'checkbox' : 'square-outline'}
+                    size={22}
+                    color={clearLocalDataOnDelete ? destructiveColor : textColor}
+                    style={styles.deleteOptionIcon}
+                  />
+                  <Text style={[styles.deleteOptionLabel, { color: textColor }]}>
+                    Also delete workouts on this device
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void handleConfirmDeleteAccount()}
+                  disabled={isAuthBusy}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete account permanently"
+                  style={({ pressed }) => [
+                    styles.deleteConfirmButton,
+                    {
+                      borderColor: destructiveColor,
+                      opacity: isAuthBusy ? 0.5 : pressed ? 0.7 : 1,
+                    },
+                  ]}>
+                  {isAuthBusy ? (
+                    <ActivityIndicator color={destructiveColor} />
+                  ) : (
+                    <Text style={[styles.deleteConfirmLabel, { color: destructiveColor }]}>
+                      Delete account permanently
+                    </Text>
+                  )}
+                </Pressable>
+                <Pressable
+                  onPress={resetDeleteAccountForm}
+                  disabled={isAuthBusy}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.cancelDeleteButton, { opacity: pressed ? 0.7 : 1 }]}>
+                  <Text style={[styles.cancelDeleteLabel, { color: textColor }]}>Cancel</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable
+                onPress={handleDeleteAccountPress}
+                disabled={isAuthBusy}
+                accessibilityRole="button"
+                accessibilityLabel="Delete account"
+                style={({ pressed }) => [styles.deleteAccountLink, { opacity: isAuthBusy ? 0.5 : pressed ? 0.7 : 1 }]}>
+                <Text style={[styles.deleteAccountLinkLabel, { color: destructiveColor }]}>Delete account</Text>
+              </Pressable>
+            )}
+            </View>
+          </ScrollView>
+          </KeyboardAvoidingView>
         ) : (
           <View style={styles.container}>
             <Text style={styles.copy}>
@@ -225,8 +384,13 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
   },
-  container: {
+  flex: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  container: {
     padding: 20,
     gap: 16,
   },
@@ -284,6 +448,56 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   secondaryButtonLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteAccountLink: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  deleteAccountLinkLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
+  },
+  deleteTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  deleteOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  deleteOptionIcon: {
+    marginRight: 10,
+  },
+  deleteOptionLabel: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  deleteConfirmButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 20,
+  },
+  deleteConfirmLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cancelDeleteButton: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  cancelDeleteLabel: {
     fontSize: 16,
     fontWeight: '600',
   },

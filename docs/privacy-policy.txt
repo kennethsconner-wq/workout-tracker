@@ -1,5 +1,5 @@
 Axios Workouts — Privacy Policy
-Last updated: June 16, 2026
+Last updated: June 6, 2026
 
 This policy describes how Axios Workouts (“the app”), published by KConSoft (“we,” “us,” or “our”), handles information on your device and, if you choose to create an account, through our cloud service providers. By using the app, you agree to this policy.
 
@@ -27,9 +27,7 @@ If you create an account, we collect and process:
 When you are signed in, the app stores session tokens in your device’s secure storage so you remain signed in across app launches until you sign out or clear app data.
 
 4. Cloud backup and sync
-Cloud backup is an optional feature that may not yet be enabled in every version of the app. When it is enabled and you are signed in, your workout data may be copied to cloud storage associated with your account so you can access it from other devices and recover it if your phone is lost or replaced.
-
-Until cloud backup is enabled for your account, signing in does not upload your existing workout history. Workout data on your device remains local.
+When you are signed in, your workout data is copied to cloud storage associated with your account so you can access it from other devices and recover it if your phone is lost or replaced. Edits save on your device first, then sync in the background.
 
 If you sign out, your workouts remain on the device; only the sign-in session is cleared from secure storage.
 
@@ -48,7 +46,7 @@ The app may also open external links you choose to use, such as PayPal for optio
 7. Data retention
 Workout data is always stored on your device first. If you use the app without an account, or before cloud backup is enabled, we do not retain copies of your workout data on our servers.
 
-If cloud backup is enabled and you are signed in, copies of your workout data may be retained in cloud storage associated with your account until you delete them or request account deletion as described below.
+If cloud backup is enabled and you are signed in, copies of your workout data may be retained in cloud storage associated with your account until you delete individual items in the app, delete your account as described below, or contact us for assistance.
 
 Your data is kept on your device for as long as you keep it in the app. It remains on your device until you:
 - Delete individual workouts, logged sessions, or exercises inside the app, or
@@ -72,17 +70,20 @@ Delete all app data at once:
 Uninstalling the app removes all data stored by the app on that device.
 
 Account and cloud data:
-If you have created an account, you can sign out at any time from Settings → Account. Signing out clears your session from secure storage on the device; your local workout data remains on the phone.
+If you have created an account, you can sign out at any time from Settings → Account. Signing out clears your session from secure storage on the device; your local workout data remains on the phone unless you choose to remove it separately.
 
-If cloud backup has stored copies of your data, contact us using the email below to request deletion of cloud data associated with your account.
+You can delete your account from Settings → Account → Delete account. You will be asked to confirm with your password. Deleting your account permanently removes your account, profile, and all workout data stored in the cloud for that account. This action cannot be undone.
+
+When deleting your account, you may optionally choose to also delete workouts on the current device (templates, logged sessions, exercise library entries, and in-progress drafts). If you leave that option unchecked, workouts already on the device stay on the phone after your cloud account is removed.
 
 Request help with deletion:
-If you need assistance deleting your data, email kconsoft@gmail.com with the subject line “Axios Workouts — Data Deletion Request.” We will respond to help you delete local data on your device and, if applicable, cloud data associated with your account.
+If you need assistance deleting your data or cannot use the in-app delete option, email kconsoft@gmail.com with the subject line “Axios Workouts — Data Deletion Request.” We will respond to help you delete local data on your device and, if applicable, cloud data associated with your account.
 
 9. Your choices
 - Use the app without an account and keep all workout data local.
 - Decline the optional account prompt and create an account later from Settings → Account.
-- Sign out at any time; local workout data remains on the device.
+- Sign out at any time; local workout data remains on the device unless you delete it in the app or through device settings.
+- Delete your account from Settings → Account to remove cloud backups and your account profile.
 
 10. Children’s privacy
 The app is not directed to children under 13 (or the minimum age required in your region). If you are a parent or guardian and believe your child has provided personal information through the app, contact us at kconsoft@gmail.com.
