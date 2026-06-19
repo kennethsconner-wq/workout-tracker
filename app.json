@@ -2,7 +2,7 @@
   "expo": {
     "name": "Axios Workouts",
     "slug": "workout-tracker",
-    "version": "1.2.2",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "workouttracker",
@@ -14,7 +14,30 @@
     },
     "android": {
       "userInterfaceStyle": "dark",
+      "softwareKeyboardLayoutMode": "resize",
       "package": "com.kconsoft.workouttracker",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "workouttracker",
+              "pathPrefix": "/auth/callback"
+            },
+            {
+              "scheme": "workouttracker",
+              "pathPrefix": "/auth/reset-password"
+            },
+            {
+              "scheme": "workouttracker",
+              "host": "auth",
+              "pathPrefix": "/callback"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.POST_NOTIFICATIONS"
@@ -48,6 +71,7 @@
         }
       ],
       "./plugins/withAndroidExactAlarmPermission.js",
+      "expo-secure-store",
       "expo-asset"
     ],
     "experiments": {

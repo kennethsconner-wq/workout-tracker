@@ -35,6 +35,7 @@ import {
   exerciseDraftSeedFromRow,
   isExerciseDraftRowEmpty,
   parseWorkoutExerciseFromDraft,
+  resolveExercisePersistId,
   applyActivityTypeChangeToDraftRow,
   applyCardioObjectiveChangeToDraftRow,
   applyCardioDurationTrackingChangeToDraftRow,
@@ -50,7 +51,7 @@ import { WorkoutDaysPicker } from '@/components/WorkoutDaysPicker';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { type DayOfWeek, type Workout, type WorkoutExercise } from '@/lib/types';
 import { themedAlert } from '@/lib/themedAlert';
-import { loadWorkouts, propagateExerciseDefinitionsAcrossWorkouts, updateWorkout } from '@/lib/workoutsStorage';
+import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 
 type ImportExercisesPayload = { nonce: string; exercises: ExerciseDraftSeed[] };
 
@@ -59,6 +60,7 @@ function toDraft(exercise: WorkoutExercise): ExerciseDraftRow {
 }
 
 export default function WorkoutEditScreen() {
+  const repo = useDataRepository();
   const { id, importExercises } = useLocalSearchParams<{ id?: string; importExercises?: string | string[] }>();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
@@ -104,11 +106,10 @@ export default function WorkoutEditScreen() {
     editScreenInitialLoadDoneRef.current = false;
 
     void (async () => {
-      const workouts = await loadWorkouts();
+      const workout = await repo.getWorkoutById(id);
       if (cancelled) {
         return;
       }
-      const workout = workouts.find((w) => w.id === id);
       if (!workout) {
         themedAlert('Workout not found', 'Could not find this workout.');
         router.back();
@@ -157,11 +158,10 @@ export default function WorkoutEditScreen() {
       }
       let cancelled = false;
       void (async () => {
-        const workouts = await loadWorkouts();
+        const workout = await repo.getWorkoutById(id);
         if (cancelled) {
           return;
         }
-        const workout = workouts.find((w) => w.id === id);
         if (!workout) {
           return;
         }
@@ -307,7 +307,7 @@ export default function WorkoutEditScreen() {
       if (isExerciseDraftRowEmpty(ex)) {
         continue;
       }
-      const result = parseWorkoutExerciseFromDraft(ex, ex.clientId);
+      const result = parseWorkoutExerciseFromDraft(ex, resolveExercisePersistId(ex));
       if (!result.ok) {
         if (result.title) {
           themedAlert(result.title, result.message);
@@ -335,18 +335,18 @@ export default function WorkoutEditScreen() {
     }
 
     void (async () => {
-      const allWorkouts = await loadWorkouts();
+      const allWorkouts = await repo.loadWorkouts();
       const nameCheck = validateExerciseNamesForWorkoutSave(allWorkouts, id, parsed.exercises);
       if (!nameCheck.ok) {
         themedAlert(nameCheck.title, nameCheck.message);
         return;
       }
-      const updated = await updateWorkout(id, parsed);
+      const updated = await repo.updateWorkout(id, parsed);
       if (!updated) {
         themedAlert('Workout not found', 'Could not update this workout.');
         return;
       }
-      await propagateExerciseDefinitionsAcrossWorkouts(parsed.exercises);
+      await repo.propagateExerciseDefinitionsAcrossWorkouts(parsed.exercises);
       // Don't use router.back() — stack may be workouts → edit → exercise-library → edit, and back()
       // would reopen the library. Match Create Workout: land on Workouts tab.
       router.replace('/');

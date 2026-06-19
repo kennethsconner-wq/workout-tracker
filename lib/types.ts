@@ -29,7 +29,9 @@ export type LoggedCardioPerActualSet = {
 };
 
 export type LoggedWorkoutExercise = {
+  /** Stable primary key for this logged exercise row within the session. */
   id: string;
+  /** Template exercise id this log row was recorded against. */
   workoutExerciseId: string;
   activityType: ActivityType;
   name: string;
@@ -80,7 +82,9 @@ export type LoggedActualSet = {
 };
 
 export type LoggedWorkout = {
+  /** Stable primary key for this logged session (not the template title). */
   id: string;
+  /** Template workout this session was logged from. */
   workoutId: string;
   createdAt: string;
   title: string;
@@ -90,6 +94,7 @@ export type LoggedWorkout = {
 };
 
 export type WorkoutExercise = {
+  /** Stable primary key for this exercise slot (not the user-visible name). */
   id: string;
   activityType: ActivityType;
   name: string;
@@ -138,6 +143,7 @@ export const DAY_OF_WEEK_ABBREVIATIONS: Record<DayOfWeek, string> = {
 };
 
 export type Workout = {
+  /** Stable primary key for this workout template (not the user-visible title). */
   id: string;
   createdAt: string;
   title: string;

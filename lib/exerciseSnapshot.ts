@@ -1,6 +1,6 @@
 import type { ActivityType } from '@/lib/activityTypes';
 import { normalizeActivityType } from '@/lib/activityTypes';
-import { cardioPlansMatch, migrateLegacyCardioPaceFields } from '@/lib/cardioPlan';
+import { migrateLegacyCardioPaceFields } from '@/lib/cardioPlan';
 import { hasLoggedExerciseActual } from '@/lib/exerciseDisplay';
 import type { LoggedWorkout, LoggedWorkoutExercise, Workout, WorkoutExercise } from '@/lib/types';
 
@@ -82,32 +82,12 @@ export function normalizeExerciseDefinitionForSignature(
 
 export type ExerciseDefinitionMatch = ExerciseDefinitionFields;
 
+/** Same definition as Exercise Library grouping (normalized signature equality). */
 export function matchesExerciseDefinition(
   ex: ExerciseDefinitionMatch,
   def: ExerciseDefinitionMatch,
 ): boolean {
-  return (
-    ex.activityType === def.activityType &&
-    ex.name === def.name &&
-    ex.sets === def.sets &&
-    ex.reps === def.reps &&
-    ex.weight === def.weight &&
-    ex.weightUnit === def.weightUnit &&
-    ex.duration === def.duration &&
-    ex.durationUnit === def.durationUnit &&
-    ex.distance === def.distance &&
-    ex.distanceUnit === def.distanceUnit &&
-    cardioPlansMatch(ex, def) &&
-    (ex.cardioPaceDuration ?? 0) === (def.cardioPaceDuration ?? 0) &&
-    (ex.cardioPaceDurationUnit ?? '') === (def.cardioPaceDurationUnit ?? '') &&
-    (ex.cardioPaceDistance ?? 0) === (def.cardioPaceDistance ?? 0) &&
-    (ex.cardioPaceDistanceUnit ?? '') === (def.cardioPaceDistanceUnit ?? '') &&
-    ex.score === def.score &&
-    ex.scoreUnit === def.scoreUnit &&
-    (ex.restBetweenSetsEnabled ?? false) === (def.restBetweenSetsEnabled ?? false) &&
-    (ex.restDuration ?? 0) === (def.restDuration ?? 0) &&
-    (ex.restDurationUnit ?? '') === (def.restDurationUnit ?? '')
-  );
+  return exerciseDefinitionSignatureKey(ex) === exerciseDefinitionSignatureKey(def);
 }
 
 function exerciseDefinitionSignatureParts(normalized: ExerciseDefinitionFields): {

@@ -121,7 +121,7 @@ export function getWorkoutDueIndicator(
 /**
  * Chooses which workout id to select when the list is shown or refreshed.
  * If exactly one workout matches the device's current weekday, that id is used.
- * If several match, the one with the title first alphabetically wins.
+ * If several match today, picks one deterministically for the UI (sort order only — identity is always by id).
  * If none match, the previous selection is kept when it still exists; otherwise the first workout.
  */
 export function pickWorkoutIdForDeviceCalendarDay(

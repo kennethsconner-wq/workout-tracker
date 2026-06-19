@@ -39,13 +39,9 @@ import {
   navigateToResumeLogWorkout,
 } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
-import {
-  buildWorkoutLogStatsByWorkoutId,
-  formatWorkoutLastLogged,
-  formatWorkoutSessionCount,
-  formatWorkoutTrackingSince,
-} from '@/lib/loggedWorkoutAnalytics';
-import { deleteLoggedWorkoutsByWorkoutId, deleteWorkout, loadLoggedWorkouts, loadWorkouts } from '@/lib/workoutsStorage';
+import { buildWorkoutLogStatsByWorkoutId, formatWorkoutLastLogged, formatWorkoutSessionCount, formatWorkoutTrackingSince } from '@/lib/loggedWorkoutAnalytics';
+import { findWorkoutById } from '@/lib/workoutsStorage';
+import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 import { DAYS_OF_WEEK, DAY_OF_WEEK_ABBREVIATIONS, type LoggedWorkout, type Workout } from '@/lib/types';
 
 /** Matches `@react-navigation/elements` `HeaderTitle` (Workouts screen title). */
@@ -93,6 +89,7 @@ export function WorkoutsList() {
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
   const router = useRouter();
+  const repo = useDataRepository();
   const insets = useSafeAreaInsets();
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loggedWorkouts, setLoggedWorkouts] = useState<LoggedWorkout[]>([]);
@@ -131,8 +128,8 @@ export function WorkoutsList() {
       let cancelled = false;
       void (async () => {
         const [next, nextLogged, draftIds] = await Promise.all([
-          loadWorkouts(),
-          loadLoggedWorkouts(),
+          repo.loadWorkouts(),
+          repo.loadLoggedWorkouts(),
           getWorkoutIdsWithNewLogDrafts(),
         ]);
         if (!cancelled) {
@@ -146,14 +143,17 @@ export function WorkoutsList() {
       return () => {
         cancelled = true;
       };
-    }, []),
+    }, [repo]),
   );
 
   const selected = useMemo(() => {
     if (workouts.length === 0) {
       return undefined;
     }
-    return workouts.find((w) => w.id === selectedId) ?? workouts[0];
+    if (!selectedId) {
+      return workouts[0];
+    }
+    return findWorkoutById(workouts, selectedId) ?? workouts[0];
   }, [workouts, selectedId]);
 
   const dropdownWorkouts = useMemo(() => sortWorkoutsForDropdown(workouts), [workouts]);
@@ -299,9 +299,8 @@ export function WorkoutsList() {
         onPress: () => {
           void (async () => {
             const id = workout.id;
-            await deleteWorkout(id);
-            await deleteLoggedWorkoutsByWorkoutId(id);
-            const [updated, updatedLogged] = await Promise.all([loadWorkouts(), loadLoggedWorkouts()]);
+            await repo.deleteWorkout(id);
+            const [updated, updatedLogged] = await Promise.all([repo.loadWorkouts(), repo.loadLoggedWorkouts()]);
             setWorkouts(updated);
             setLoggedWorkouts(updatedLogged);
             setSelectedId((prev) => pickWorkoutIdForDeviceCalendarDay(updated, prev === id ? null : prev));

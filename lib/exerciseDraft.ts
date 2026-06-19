@@ -139,6 +139,10 @@ export type ExerciseDraftRow = {
 
 };
 
+export function resolveExercisePersistId(ex: ExerciseDraftRow): string {
+  return ex.sourceExerciseId ?? ex.clientId;
+}
+
 /** Exercise fields preserved when copying a workout template to Create Workout. */
 export type CopyWorkoutExercisePayload = Pick<
   WorkoutExercise,
@@ -1248,7 +1252,7 @@ export function exerciseDraftRowFromSeed(seed: ExerciseDraftSeed): ExerciseDraft
 
   return sanitizeExerciseDraftRow({
 
-    clientId: newId(),
+    clientId: seed.sourceExerciseId ?? newId(),
 
     sourceExerciseId: seed.sourceExerciseId,
 

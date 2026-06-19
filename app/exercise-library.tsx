@@ -32,15 +32,7 @@ import {
 } from '@/lib/exerciseDraft';
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { validateExerciseNamesAfterLibraryEdit } from '@/lib/exerciseNameValidation';
-import { exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
-import { loadExerciseLibraryCatalog } from '@/lib/exerciseLibraryStorage';
-import { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
-import {
-  loadLoggedWorkouts,
-  loadWorkouts,
-  removeExercisesMatchingSignatureFromAllWorkouts,
-  updateExercisesMatchingSignatureAcrossWorkouts,
-} from '@/lib/workoutsStorage';
+import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 import { themedAlert } from '@/lib/themedAlert';
 import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types';
 
@@ -119,6 +111,7 @@ function parseExistingSeeds(serialized: string | undefined): ExerciseDraftSeed[]
 }
 
 export default function ExerciseLibraryScreen() {
+  const repo = useDataRepository();
   const { source, workoutId, existingExercises, createDraft, libraryEntry } = useLocalSearchParams<{
     source?: RouteSource;
     workoutId?: string | string[];
@@ -140,10 +133,10 @@ export default function ExerciseLibraryScreen() {
 
   const reloadLibrary = useCallback(async () => {
     setLoading(true);
-    const [workouts, logged] = await Promise.all([loadWorkouts(), loadLoggedWorkouts()]);
-    const catalog = await loadExerciseLibraryCatalog(workouts, logged);
+    const [workouts, logged] = await Promise.all([repo.loadWorkouts(), repo.loadLoggedWorkouts()]);
+    const catalog = await repo.loadExerciseLibraryCatalog(workouts, logged);
     const itemsFromCatalog: ExerciseListItem[] = catalog.map((exercise) => ({
-      key: exerciseDefinitionSignatureKey(exercise),
+      key: exercise.id,
       id: exercise.id,
       activityType: exercise.activityType,
       name: exercise.name,
@@ -268,27 +261,34 @@ export default function ExerciseLibraryScreen() {
             void (async () => {
               try {
                 setLibraryMutationBusy(true);
-                await removeExercisesMatchingSignatureFromAllWorkouts({
-                  activityType: item.activityType,
-                  name: item.name,
-                  sets: item.sets,
-                  reps: item.reps,
-                  weight: item.weight,
-                  weightUnit: item.weightUnit,
-                  duration: item.duration,
-                  durationUnit: item.durationUnit,
-                  distance: item.distance,
-                  distanceUnit: item.distanceUnit,
-                  cardioObjective: item.cardioObjective,
-                  cardioDurationTracking: item.cardioDurationTracking,
-                  cardioDistanceTracking: item.cardioDistanceTracking,
-                  cardioDistanceMode: item.cardioDistanceMode,
-                  score: item.score,
-                  scoreUnit: item.scoreUnit,
-                  restBetweenSetsEnabled: item.restBetweenSetsEnabled,
-                  restDuration: item.restDuration,
-                  restDurationUnit: item.restDurationUnit,
-                });
+                await repo.removeExercisesMatchingSignatureFromAllWorkouts(
+                  {
+                    activityType: item.activityType,
+                    name: item.name,
+                    sets: item.sets,
+                    reps: item.reps,
+                    weight: item.weight,
+                    weightUnit: item.weightUnit,
+                    duration: item.duration,
+                    durationUnit: item.durationUnit,
+                    distance: item.distance,
+                    distanceUnit: item.distanceUnit,
+                    cardioObjective: item.cardioObjective,
+                    cardioDurationTracking: item.cardioDurationTracking,
+                    cardioDistanceTracking: item.cardioDistanceTracking,
+                    cardioPaceDuration: item.cardioPaceDuration,
+                    cardioPaceDurationUnit: item.cardioPaceDurationUnit,
+                    cardioPaceDistance: item.cardioPaceDistance,
+                    cardioPaceDistanceUnit: item.cardioPaceDistanceUnit,
+                    cardioDistanceMode: item.cardioDistanceMode,
+                    score: item.score,
+                    scoreUnit: item.scoreUnit,
+                    restBetweenSetsEnabled: item.restBetweenSetsEnabled,
+                    restDuration: item.restDuration,
+                    restDurationUnit: item.restDurationUnit,
+                  },
+                  { catalogEntryId: item.id },
+                );
                 await reloadLibrary();
               } finally {
                 setLibraryMutationBusy(false);
@@ -312,17 +312,17 @@ export default function ExerciseLibraryScreen() {
     }
     try {
       setLibraryMutationBusy(true);
-      const allWorkouts = await loadWorkouts();
+      const allWorkouts = await repo.loadWorkouts();
       const nameCheck = validateExerciseNamesAfterLibraryEdit(
         allWorkouts,
-        (exercise) => matchesExerciseDefinition(exercise, editBaseline),
+        (exercise) => exercise.id === editBaseline.id,
         parsed.exercise,
       );
       if (!nameCheck.ok) {
         themedAlert(nameCheck.title, nameCheck.message);
         return;
       }
-      await updateExercisesMatchingSignatureAcrossWorkouts(
+      await repo.updateExercisesMatchingSignatureAcrossWorkouts(
         {
           activityType: editBaseline.activityType,
           name: editBaseline.name,
@@ -349,6 +349,7 @@ export default function ExerciseLibraryScreen() {
           restDurationUnit: editBaseline.restDurationUnit,
         },
         parsed.exercise,
+        { catalogEntryId: editBaseline.id },
       );
       closeEditForm();
       await reloadLibrary();

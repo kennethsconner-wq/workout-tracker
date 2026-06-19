@@ -33,8 +33,10 @@ ios/.DS_Store
 ios/xcuserdata/
 *.xcuserstate
 
-# local env files
+# local env files (Supabase URL + anon key live here — never commit)
 .env
+.env.*
+!.env.example
 .env*.local
 
 # typescript

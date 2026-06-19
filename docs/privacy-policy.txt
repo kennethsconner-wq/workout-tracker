@@ -1,10 +1,10 @@
 Axios Workouts — Privacy Policy
-Last updated: June 8, 2026
+Last updated: June 6, 2026
 
-This policy describes how Axios Workouts (“the app”), published by KConSoft (“we,” “us,” or “our”), handles information on your device. By using the app, you agree to this policy.
+This policy describes how Axios Workouts (“the app”), published by KConSoft (“we,” “us,” or “our”), handles information on your device and, if you choose to create an account, through our cloud service providers. By using the app, you agree to this policy.
 
 1. Who we are
-Axios Workouts is a mobile fitness application developed and published by KConSoft. This version is designed to work without creating an account with us. We do not operate servers that store your workout data.
+Axios Workouts is a mobile fitness application developed and published by KConSoft. You can use the app without creating an account. An account is optional and enables cloud backup of your workouts when that feature is available.
 
 2. Information the app stores
 The app stores workout-related information you enter or generate locally on your device, including:
@@ -12,32 +12,51 @@ The app stores workout-related information you enter or generate locally on your
 - Exercise names and activity details
 - Logged workout sessions (sets, reps, weight, duration, distance, and similar metrics)
 - In-progress workout drafts
-- App preferences needed for features such as workout timers
+- App preferences needed for features such as workout timers and whether you dismissed the account onboarding prompt
 
-That data stays on your device. We do not collect, upload, or store this information on our servers. If you share data outside the app using your device (for example, screenshots or system share sheets), that sharing is outside our control.
+Whether or not you have an account, this workout data is stored on your device first. If you do not sign in, or if you sign in before cloud backup is enabled, that data stays on your device unless you export or share it outside the app using features your device provides (for example, screenshots or system share sheets), which are outside our control.
 
-3. Accounts
-This version of the app does not require you to sign in. We do not operate a user account system, and we do not maintain user profiles on our servers.
+3. Optional accounts
+You may create an account with an email address, password, and username. You do not need an account to use the app’s core workout features.
 
-4. Network and third parties
-The app may open external links you choose to use, such as PayPal for optional donations, your email app for feedback, or your app store listing. Those services have their own privacy policies.
+If you create an account, we collect and process:
+- Email address (for sign-in, account recovery, and confirmation emails)
+- Username (display name you choose)
+- Password (handled by our authentication provider; we do not store your password in plain text in the app)
+
+When you are signed in, the app stores session tokens in your device’s secure storage so you remain signed in across app launches until you sign out or clear app data.
+
+4. Cloud backup and sync
+When you are signed in, your workout data is copied to cloud storage associated with your account so you can access it from other devices and recover it if your phone is lost or replaced. Edits save on your device first, then sync in the background.
+
+If you sign out, your workouts remain on the device; only the sign-in session is cleared from secure storage.
+
+5. Service providers
+When you use optional account features, we use third-party services to operate authentication and (when enabled) cloud storage. Our primary provider is Supabase (supabase.com), which processes account and cloud data on our behalf under their terms and privacy practices.
+
+Authentication-related emails (such as sign-up confirmation and password reset) are sent through Supabase’s email service. We do not use your email address for marketing unless we separately ask for your consent.
 
 We do not sell your personal information. We do not use third-party analytics or advertising SDKs in this version of the app.
 
-5. Data retention
-All workout data is stored only on your device. We do not retain copies on our servers.
+6. Network and third parties
+The app uses network connections when you create an account, sign in, confirm your email, reset your password, or (when enabled) sync data. Your platform or distribution channel may also collect crash diagnostics, analytics, or update-related data according to their own policies.
 
-Your data is kept for as long as you keep it in the app. It remains on your device until you:
+The app may also open external links you choose to use, such as PayPal for optional donations, your email app for feedback, or your app store listing. Those services have their own privacy policies.
+
+7. Data retention
+Workout data is always stored on your device first. If you use the app without an account, or before cloud backup is enabled, we do not retain copies of your workout data on our servers.
+
+If cloud backup is enabled and you are signed in, copies of your workout data may be retained in cloud storage associated with your account until you delete individual items in the app, delete your account as described below, or contact us for assistance.
+
+Your data is kept on your device for as long as you keep it in the app. It remains on your device until you:
 - Delete individual workouts, logged sessions, or exercises inside the app, or
 - Clear the app’s storage through your device settings, or
 - Uninstall the app from your device
 
-After you delete data from your device or uninstall the app, we do not retain that information because we never received or stored it on our servers.
-
 On Android, your device may include app data in automatic device backups if you have backup enabled at the system level. Those backups are managed by Google and your device settings, not by KConSoft.
 
-6. How to delete your data
-Because your data is stored locally on your device, you can delete it at any time using the steps below.
+8. How to delete your data
+Because your workout data is stored locally on your device, you can delete it at any time using the steps below.
 
 Delete specific items in the app:
 - Logged workouts: open a workout’s history and delete individual logged sessions.
@@ -50,19 +69,32 @@ Delete all app data at once:
 
 Uninstalling the app removes all data stored by the app on that device.
 
-Request help with deletion:
-If you need assistance deleting your data, email kconsoft@gmail.com with the subject line “Axios Workouts — Data Deletion Request.” Because we do not store your workout data on our servers, deletion is performed on your device using the steps above. We will respond to help you complete deletion on your device.
+Account and cloud data:
+If you have created an account, you can sign out at any time from Settings → Account. Signing out clears your session from secure storage on the device; your local workout data remains on the phone unless you choose to remove it separately.
 
-7. Children’s privacy
+You can delete your account from Settings → Account → Delete account. You will be asked to confirm with your password. Deleting your account permanently removes your account, profile, and all workout data stored in the cloud for that account. This action cannot be undone.
+
+When deleting your account, you may optionally choose to also delete workouts on the current device (templates, logged sessions, exercise library entries, and in-progress drafts). If you leave that option unchecked, workouts already on the device stay on the phone after your cloud account is removed.
+
+Request help with deletion:
+If you need assistance deleting your data or cannot use the in-app delete option, email kconsoft@gmail.com with the subject line “Axios Workouts — Data Deletion Request.” We will respond to help you delete local data on your device and, if applicable, cloud data associated with your account.
+
+9. Your choices
+- Use the app without an account and keep all workout data local.
+- Decline the optional account prompt and create an account later from Settings → Account.
+- Sign out at any time; local workout data remains on the device unless you delete it in the app or through device settings.
+- Delete your account from Settings → Account to remove cloud backups and your account profile.
+
+10. Children’s privacy
 The app is not directed to children under 13 (or the minimum age required in your region). If you are a parent or guardian and believe your child has provided personal information through the app, contact us at kconsoft@gmail.com.
 
-8. Security
-We rely on your device’s operating system protections for data stored locally. No method of storage is completely secure.
+11. Security
+We rely on your device’s operating system protections for data stored locally. Account sessions use secure storage on the device. Cloud data is protected by our provider’s access controls. No method of storage or transmission is completely secure.
 
-9. Changes
+12. Changes
 We may update this policy from time to time. The “Last updated” date at the top will change when we do. Continued use of the app after changes means you accept the updated policy.
 
-10. Contact
+13. Contact
 For privacy questions or data deletion assistance, contact:
 KConSoft
 Email: kconsoft@gmail.com
