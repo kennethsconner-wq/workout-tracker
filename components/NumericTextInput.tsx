@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import { TextInput, type TextInputProps } from 'react-native';
 
 import { DISPLAY_DECIMAL_PLACES } from '@/lib/displayDecimals';
@@ -9,18 +10,17 @@ type Props = Omit<TextInputProps, 'keyboardType' | 'onChangeText'> & {
   maxDecimalPlaces?: number;
 };
 
-export function NumericTextInput({
-  value,
-  onChangeText,
-  maxDecimalPlaces = DISPLAY_DECIMAL_PLACES,
-  ...rest
-}: Props) {
+export const NumericTextInput = forwardRef<TextInput, Props>(function NumericTextInput(
+  { value, onChangeText, maxDecimalPlaces = DISPLAY_DECIMAL_PLACES, ...rest },
+  ref,
+) {
   return (
     <TextInput
       {...rest}
+      ref={ref}
       value={value}
       keyboardType={maxDecimalPlaces === INTEGER_DECIMAL_PLACES ? 'number-pad' : 'decimal-pad'}
       onChangeText={(raw) => onChangeText(sanitizeNumericInput(raw, maxDecimalPlaces))}
     />
   );
-}
+});

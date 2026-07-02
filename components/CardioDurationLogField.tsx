@@ -1,6 +1,9 @@
+import { useRef } from 'react';
 import { StyleSheet, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import type { TextInput } from 'react-native';
 
 import { DurationTimerButton } from '@/components/DurationTimerButton';
+import { useLogWorkoutKeyboardScrollOptional } from '@/components/LogWorkoutKeyboardScroll';
 import { DurationUnitPicker } from '@/components/DurationUnitPicker';
 import { NumericTextInput } from '@/components/NumericTextInput';
 import { View } from '@/components/Themed';
@@ -27,6 +30,8 @@ type Props = {
   inputBackground: string;
   timerAccessibilityLabel?: string;
   units?: readonly DurationUnit[];
+  editable?: boolean;
+  timerDisabled?: boolean;
 };
 
 export function CardioDurationLogField({
@@ -48,13 +53,28 @@ export function CardioDurationLogField({
   inputBackground,
   timerAccessibilityLabel,
   units = CARDIO_DURATION_UNITS,
+  editable = true,
+  timerDisabled = false,
 }: Props) {
+  const inputRef = useRef<TextInput>(null);
+  const keyboardScroll = useLogWorkoutKeyboardScrollOptional();
+
+  const handleInputFocus = () => {
+    keyboardScroll?.scrollFocusedInputIntoView(inputRef);
+    requestAnimationFrame(() => {
+      keyboardScroll?.scrollFocusedInputIntoView(inputRef);
+    });
+  };
+
   return (
     <View style={[styles.row, rowStyle]}>
       <View style={[styles.durationWrap, wrapStyle]}>
         <NumericTextInput
+          ref={inputRef}
           value={value}
           onChangeText={onChangeText}
+          editable={editable}
+          onFocus={handleInputFocus}
           placeholder={placeholder}
           placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
           style={[inputStyle, styles.durationInput, { color: textColor, borderColor, backgroundColor: inputBackground }]}
@@ -75,6 +95,8 @@ export function CardioDurationLogField({
         countdownTargetSeconds={countdownTargetSeconds}
         countdownExerciseLabel={countdownExerciseLabel}
         countdownLogSession={countdownLogSession}
+        showStopButton
+        disabled={timerDisabled}
         onComplete={onChangeText}
         activeScheme={activeScheme}
         accessibilityLabel={timerAccessibilityLabel}

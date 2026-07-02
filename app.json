@@ -10,7 +10,10 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.kconsoft.axiosworkouttracker"
+      "bundleIdentifier": "com.kconsoft.axiosworkouttracker",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "userInterfaceStyle": "dark",

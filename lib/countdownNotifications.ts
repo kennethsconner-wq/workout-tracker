@@ -1,16 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { Linking, Platform } from 'react-native';
+import { AppState, Linking, Platform } from 'react-native';
 
 import {
-  focusLogWorkoutSession,
+  focusLogWorkoutExercise,
   type LogWorkoutSession,
 } from '@/lib/logWorkoutNavigation';
+import { exerciseIdFromCountdownTimerId } from '@/lib/countdownTimerIds';
 import { themedAlert } from '@/lib/themedAlert';
 
 export const COUNTDOWN_EXPIRY_NOTIFICATION_TYPE = 'countdown-expiry';
 
-const ANDROID_CHANNEL_ID = 'countdown-timers';
+const ANDROID_CHANNEL_ID = 'countdown-timers-v2';
 const EXACT_ALARM_PROMPT_KEY = 'countdown-exact-alarm-prompted@v2';
 
 let initialized = false;
@@ -70,6 +71,16 @@ export function preloadCountdownNotificationsModule(): void {
   void loadNotificationsModule();
 }
 
+function isCountdownExpiryNotificationData(data: Record<string, unknown> | undefined): boolean {
+  return data?.type === COUNTDOWN_EXPIRY_NOTIFICATION_TYPE;
+}
+
+/** When true, use in-app timer alerts instead of scheduling/showing system notifications. */
+export function isAppForegroundForCountdownNotifications(): boolean {
+  // Treat `inactive` (e.g. iOS app switcher / Control Center) as foreground; only `background` is truly backgrounded.
+  return AppState.currentState !== 'background';
+}
+
 function notifyCountdownExpiryHandled(data: Record<string, unknown> | undefined): void {
   if (data?.type !== COUNTDOWN_EXPIRY_NOTIFICATION_TYPE) {
     return;
@@ -96,11 +107,14 @@ function handleCountdownNotificationResponse(data: Record<string, unknown> | und
   }
   const intent = data.logIntent === 'edit' ? 'edit' : 'new';
   const loggedWorkoutId = typeof data.loggedWorkoutId === 'string' ? data.loggedWorkoutId : undefined;
+  const exerciseIdFromData = typeof data.exerciseId === 'string' ? data.exerciseId : null;
+  const timerId = typeof data.timerId === 'string' ? data.timerId : '';
+  const exerciseId = exerciseIdFromData ?? exerciseIdFromCountdownTimerId(timerId);
   const session: LogWorkoutSession =
     intent === 'edit' && loggedWorkoutId
       ? { intent: 'edit', workoutId, loggedWorkoutId }
       : { intent: 'new', workoutId };
-  focusLogWorkoutSession(session);
+  focusLogWorkoutExercise(session, exerciseId);
 }
 
 export function initializeCountdownNotifications(): void {
@@ -119,18 +133,30 @@ export function initializeCountdownNotifications(): void {
     }
 
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
+      handleNotification: async (notification) => {
+        const data = notification.request.content.data as Record<string, unknown> | undefined;
+        if (isCountdownExpiryNotificationData(data) && isAppForegroundForCountdownNotifications()) {
+          return {
+            shouldPlaySound: false,
+            shouldSetBadge: false,
+            shouldShowBanner: false,
+            shouldShowList: false,
+          };
+        }
+
+        return {
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        };
+      },
     });
 
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
         name: 'Countdown timers',
-        importance: Notifications.AndroidImportance.HIGH,
+        importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 150, 250],
         sound: 'default',
       });
@@ -221,14 +247,21 @@ async function openExactAlarmSettings(): Promise<void> {
 
 function buildCountdownNotificationContent(input: CountdownNotificationContentInput) {
   const trimmedExerciseName = input.exerciseName.trim() || 'your exercise';
+  const exerciseId = exerciseIdFromCountdownTimerId(input.timerId);
   return {
     title: "Time's up!",
     body: `Your planned duration for ${trimmedExerciseName} has finished.`,
     sound: true as const,
-    ...(Platform.OS === 'android' ? { channelId: ANDROID_CHANNEL_ID } : {}),
+    ...(Platform.OS === 'android'
+      ? {
+          channelId: ANDROID_CHANNEL_ID,
+          priority: 'max' as const,
+        }
+      : {}),
     data: {
       type: COUNTDOWN_EXPIRY_NOTIFICATION_TYPE,
       timerId: input.timerId,
+      exerciseId,
       workoutId: input.logSession?.workoutId,
       loggedWorkoutId: input.logSession?.loggedWorkoutId,
       logIntent: input.logSession?.intent,
@@ -244,6 +277,10 @@ type ScheduleCountdownExpiryNotificationInput = CountdownNotificationContentInpu
 export async function scheduleCountdownExpiryNotification(
   input: ScheduleCountdownExpiryNotificationInput,
 ): Promise<boolean> {
+  if (isAppForegroundForCountdownNotifications()) {
+    return false;
+  }
+
   const secondsUntilFire = Math.ceil((input.fireAtMs - Date.now()) / 1000);
   if (secondsUntilFire <= 0) {
     await presentCountdownExpiryNotificationNow(input);
@@ -260,7 +297,9 @@ export async function scheduleCountdownExpiryNotification(
     return false;
   }
 
-  void promptForExactAlarmPermissionIfNeeded();
+  if (Platform.OS === 'android') {
+    await promptForExactAlarmPermissionIfNeeded();
+  }
 
   const identifier = countdownNotificationIdentifier(input.timerId);
 
@@ -282,6 +321,10 @@ export async function scheduleCountdownExpiryNotification(
 export async function presentCountdownExpiryNotificationNow(
   input: CountdownNotificationContentInput,
 ): Promise<void> {
+  if (isAppForegroundForCountdownNotifications()) {
+    return;
+  }
+
   const Notifications = await loadNotificationsModule();
   if (!Notifications) {
     return;
