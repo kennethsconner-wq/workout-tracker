@@ -333,7 +333,7 @@ export function WorkoutsList() {
         <Pressable
           style={[styles.cta, { backgroundColor: Colors[activeScheme].tint }]}
           onPress={() => router.push('/workouts')}>
-          <Text style={styles.ctaLabel}>Create a workout</Text>
+          <Text style={[styles.ctaLabel, { color: Colors[activeScheme].background }]}>Create a workout</Text>
         </Pressable>
       </View>
     );
@@ -456,64 +456,73 @@ export function WorkoutsList() {
                         style={[styles.workoutCardBody, maxCardHeight > 0 ? styles.workoutCardBodyExpanded : null]}
                         lightColor="transparent"
                         darkColor="transparent">
-                        <View style={styles.scheduleRow} lightColor="transparent" darkColor="transparent">
-                          <View style={styles.scheduleDaysGroup} lightColor="transparent" darkColor="transparent">
-                            <Ionicons name="calendar-outline" size={16} color={Colors[activeScheme].tint} />
-                            <Text
-                              style={[styles.detailDaysText, { color: Colors[activeScheme].tint }]}
-                              numberOfLines={1}>
-                              {formatDays(w.daysOfWeek)}
-                            </Text>
-                          </View>
-                          {dueIndicator && duePresentation ? (
-                            <View
-                              style={[styles.workoutDueBadge, { backgroundColor: duePresentation.backgroundColor }]}
-                              lightColor="transparent"
-                              darkColor="transparent">
-                              <Ionicons
-                                name={workoutDueIcon(dueIndicator.tone)}
-                                size={14}
-                                color={duePresentation.color}
-                              />
+                        <View style={styles.workoutCardBodyContent} lightColor="transparent" darkColor="transparent">
+                          <View style={styles.scheduleRow} lightColor="transparent" darkColor="transparent">
+                            <View style={styles.scheduleDaysGroup} lightColor="transparent" darkColor="transparent">
+                              <Ionicons name="calendar-outline" size={16} color={Colors[activeScheme].tint} />
                               <Text
-                                style={[styles.workoutDueLabel, { color: duePresentation.color }]}
+                                style={[styles.detailDaysText, { color: Colors[activeScheme].tint }]}
                                 numberOfLines={1}>
-                                {dueIndicator.label}
+                                {formatDays(w.daysOfWeek)}
                               </Text>
                             </View>
-                          ) : null}
-                        </View>
-                        <View style={styles.workoutSummary} lightColor="transparent" darkColor="transparent">
-                          <Text style={[styles.workoutSummaryCount, { color: textColor }]}>{summary.countLine}</Text>
-                          {summary.previewLine ? (
-                            <Text style={[styles.workoutSummaryPreview, { color: mutedTextColor }]} numberOfLines={2}>
-                              {summary.previewLine}
-                            </Text>
-                          ) : null}
-                        </View>
-                        <View style={styles.workoutMetrics} lightColor="transparent" darkColor="transparent">
-                          <View style={styles.workoutMetricRow} lightColor="transparent" darkColor="transparent">
-                            <Ionicons name="time-outline" size={15} color={Colors[activeScheme].tint} />
-                            <Text style={[styles.workoutMetricLabel, { color: mutedTextColor }]}>Last logged</Text>
-                            <Text style={[styles.workoutMetricValue, { color: textColor }]}>
-                              {formatWorkoutLastLogged(logStats?.lastLoggedAt ?? null)}
-                            </Text>
+                            {dueIndicator && duePresentation ? (
+                              <View
+                                style={[styles.workoutDueBadge, { backgroundColor: duePresentation.backgroundColor }]}
+                                lightColor="transparent"
+                                darkColor="transparent">
+                                <Ionicons
+                                  name={workoutDueIcon(dueIndicator.tone)}
+                                  size={14}
+                                  color={duePresentation.color}
+                                />
+                                <Text
+                                  style={[styles.workoutDueLabel, { color: duePresentation.color }]}
+                                  numberOfLines={1}>
+                                  {dueIndicator.label}
+                                </Text>
+                              </View>
+                            ) : null}
                           </View>
-                          <View style={styles.workoutMetricRow} lightColor="transparent" darkColor="transparent">
-                            <Ionicons name="repeat-outline" size={15} color={Colors[activeScheme].tint} />
-                            <Text style={[styles.workoutMetricLabel, { color: mutedTextColor }]}>Logged</Text>
-                            <Text style={[styles.workoutMetricValue, { color: textColor }]}>
-                              {formatWorkoutSessionCount(logStats)}
-                            </Text>
+                          <View style={styles.workoutSummary} lightColor="transparent" darkColor="transparent">
+                            <Text style={[styles.workoutSummaryCount, { color: textColor }]}>{summary.countLine}</Text>
+                            {summary.previewLine ? (
+                              <Text style={[styles.workoutSummaryPreview, { color: mutedTextColor }]} numberOfLines={2}>
+                                {summary.previewLine}
+                              </Text>
+                            ) : null}
                           </View>
-                          {trackingSince ? (
+                          <View style={styles.workoutMetrics} lightColor="transparent" darkColor="transparent">
                             <View style={styles.workoutMetricRow} lightColor="transparent" darkColor="transparent">
-                              <Ionicons name="calendar-outline" size={15} color={Colors[activeScheme].tint} />
-                              <Text style={[styles.workoutMetricLabel, { color: mutedTextColor }]}>Tracking</Text>
-                              <Text style={[styles.workoutMetricValue, { color: textColor }]}>{trackingSince}</Text>
+                              <Ionicons name="time-outline" size={15} color={Colors[activeScheme].tint} />
+                              <Text style={[styles.workoutMetricLabel, { color: mutedTextColor }]}>Last logged</Text>
+                              <Text style={[styles.workoutMetricValue, { color: textColor }]}>
+                                {formatWorkoutLastLogged(logStats?.lastLoggedAt ?? null)}
+                              </Text>
                             </View>
-                          ) : null}
+                            <View style={styles.workoutMetricRow} lightColor="transparent" darkColor="transparent">
+                              <Ionicons name="repeat-outline" size={15} color={Colors[activeScheme].tint} />
+                              <Text style={[styles.workoutMetricLabel, { color: mutedTextColor }]}>Logged</Text>
+                              <Text style={[styles.workoutMetricValue, { color: textColor }]}>
+                                {formatWorkoutSessionCount(logStats)}
+                              </Text>
+                            </View>
+                            {trackingSince ? (
+                              <View style={styles.workoutMetricRow} lightColor="transparent" darkColor="transparent">
+                                <Ionicons name="calendar-outline" size={15} color={Colors[activeScheme].tint} />
+                                <Text style={[styles.workoutMetricLabel, { color: mutedTextColor }]}>Tracking</Text>
+                                <Text style={[styles.workoutMetricValue, { color: textColor }]}>{trackingSince}</Text>
+                              </View>
+                            ) : null}
+                          </View>
                         </View>
+                        {maxCardHeight > 0 ? (
+                          <View
+                            style={styles.workoutCardBodySpacer}
+                            lightColor="transparent"
+                            darkColor="transparent"
+                          />
+                        ) : null}
                         <View style={styles.detailLeadingActions} lightColor="transparent" darkColor="transparent">
                           {draftWorkoutIds.has(w.id) ? (
                             <Pressable
@@ -727,6 +736,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     overflow: 'hidden',
+    flexDirection: 'column',
   },
   workoutCardHeader: {
     paddingHorizontal: 14,
@@ -777,6 +787,14 @@ const styles = StyleSheet.create({
   },
   workoutCardBodyExpanded: {
     flex: 1,
+    minHeight: 0,
+  },
+  workoutCardBodyContent: {
+    gap: 10,
+  },
+  workoutCardBodySpacer: {
+    flex: 1,
+    minHeight: 0,
   },
   scheduleRow: {
     flexDirection: 'row',
@@ -820,7 +838,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     gap: 8,
     width: '100%',
-    marginTop: 'auto',
+    flexShrink: 0,
   },
   detailDaysText: {
     fontSize: 16,
@@ -956,7 +974,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   ctaLabel: {
-    color: '#fff',
     fontWeight: '600',
     fontSize: 16,
   },

@@ -32,6 +32,11 @@ import {
 import { DEFAULT_WEIGHT_UNIT, normalizeWeightUnit, type WeightUnit } from '@/lib/weightUnits';
 import { perSegmentObjectiveInputValue } from '@/lib/cardioPerLog';
 import type { LoggedWorkoutExercise } from '@/lib/types';
+import {
+  isDraftCardioPerSegmentSetEmpty,
+  isDraftStrengthSetEmpty,
+  isDraftStretchSetEmpty,
+} from '@/lib/logSetCompletion';
 
 export type LogExerciseDraftFields = {
   activityType: ActivityType;
@@ -184,6 +189,9 @@ export function parseLoggedExerciseFromDraft(
     const parsedActualSets: LoggedWorkoutExercise['actualSets'] = [];
     for (let setIndex = 0; setIndex < exercise.actualSets.length; setIndex++) {
       const actualSet = exercise.actualSets[setIndex];
+      if (isDraftStrengthSetEmpty(actualSet)) {
+        break;
+      }
       const actualReps = Number.parseInt(actualSet.actualRepsInput.trim(), 10);
       const actualWeight = Number.parseFloat(actualSet.actualWeightInput.trim().replace(',', '.'));
 
@@ -290,6 +298,9 @@ export function parseLoggedExerciseFromDraft(
 
         for (let setIndex = 0; setIndex < exercise.actualCardioPerSets.length; setIndex++) {
           const actualSet = exercise.actualCardioPerSets[setIndex];
+          if (isDraftCardioPerSegmentSetEmpty(actualSet)) {
+            break;
+          }
           const actualDurationUnit = normalizeCardioDurationUnit(actualSet.actualDurationUnit);
           if (actualDurationUnit !== expectedPaceDurationUnit) {
             return {
@@ -485,6 +496,9 @@ export function parseLoggedExerciseFromDraft(
     const parsedActualStretchSets: LoggedWorkoutExercise['actualStretchSets'] = [];
     for (let setIndex = 0; setIndex < exercise.actualStretchSets.length; setIndex++) {
       const actualSet = exercise.actualStretchSets[setIndex];
+      if (isDraftStretchSetEmpty(actualSet)) {
+        break;
+      }
       const actualDurationUnit = normalizeDurationUnit(actualSet.actualDurationUnit);
       const actualDuration = parseDurationInput(actualSet.actualDurationInput, actualDurationUnit);
 

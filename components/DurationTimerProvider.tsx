@@ -18,7 +18,7 @@ import {
 
 } from 'react';
 
-import { AppState, Vibration } from 'react-native';
+import { AppState } from 'react-native';
 
 
 
@@ -26,9 +26,13 @@ import type { DurationTimerMode } from '@/lib/durationTimer';
 
 import { countdownRemainingSeconds, isCountdownExpired } from '@/lib/durationTimer';
 
-import { cancelCountdownExpiryNotification, countdownNotificationsSupported, initializeCountdownNotifications, isSameCountdownLogSession, presentCountdownExpiryNotificationNow, setCountdownExpiryHandledListener, type CountdownLogSession } from '@/lib/countdownNotifications';
+import { cancelCountdownExpiryNotification, countdownNotificationsSupported, initializeCountdownNotifications, isAppForegroundForCountdownNotifications, isSameCountdownLogSession, presentCountdownExpiryNotificationNow, scheduleCountdownExpiryNotification, setCountdownExpiryHandledListener, type CountdownLogSession } from '@/lib/countdownNotifications';
 
-import { themedAlert } from '@/lib/themedAlert';
+import { showCountdownExpiryInAppAlert } from '@/lib/countdownExpiryInAppAlert';
+
+import { exerciseIdFromCountdownTimerId } from '@/lib/countdownTimerIds';
+
+import { isCountdownTimerVisibleOnScreen } from '@/lib/countdownTimerVisibility';
 
 import type { DurationUnit } from '@/lib/durationUnits';
 
@@ -55,6 +59,17 @@ type RunningTimer = {
   /** When true, countdown display stays at 0:00 after expiry (no negative overtime). */
   clampCountdownAtZero?: boolean;
 
+};
+
+type PausedTimer = {
+  pausedElapsedSeconds: number;
+  durationUnit: DurationUnit;
+  mode: DurationTimerMode;
+  targetSeconds: number | null;
+  exerciseLabel?: string;
+  countdownLogSession?: CountdownLogSession;
+  returnAlertShown: boolean;
+  clampCountdownAtZero?: boolean;
 };
 
 
@@ -103,6 +118,8 @@ type DurationTimerContextValue = {
 
   isRunning: (timerId: string) => boolean;
 
+  isPaused: (timerId: string) => boolean;
+
   getTimerSnapshot: (timerId: string) => DurationTimerSnapshot | null;
 
   getElapsedSeconds: (timerId: string) => number;
@@ -114,6 +131,10 @@ type DurationTimerContextValue = {
   setTimerNotificationScheduled: (timerId: string, notificationScheduled: boolean) => void;
 
   cancelTimer: (timerId: string) => void;
+
+  pauseTimer: (timerId: string) => void;
+
+  resumeTimer: (timerId: string) => void;
 
   finishTimer: (timerId: string) => number;
 
@@ -179,23 +200,64 @@ function buildTimerSnapshot(timer: RunningTimer): DurationTimerSnapshot {
 
 
 
-function notifyCountdownReturnAlert(exerciseLabel: string | undefined) {
+function buildPausedSnapshot(timer: PausedTimer): DurationTimerSnapshot {
+  const elapsedSeconds = timer.pausedElapsedSeconds;
 
-  Vibration.vibrate([0, 350, 150, 350]);
+  if (timer.mode === 'countdown' && timer.targetSeconds !== null) {
+    const rawRemaining = countdownRemainingSeconds(elapsedSeconds, timer.targetSeconds);
+    const remainingSeconds = timer.clampCountdownAtZero ? Math.max(0, rawRemaining) : rawRemaining;
 
-  const label = exerciseLabel?.trim() || 'your exercise';
+    return {
+      mode: timer.mode,
+      durationUnit: timer.durationUnit,
+      elapsedSeconds,
+      remainingSeconds,
+      expired: isCountdownExpired(elapsedSeconds, timer.targetSeconds),
+    };
+  }
 
-  themedAlert("Time's up!", `Your planned duration for ${label} has finished.`);
-
+  return {
+    mode: timer.mode,
+    durationUnit: timer.durationUnit,
+    elapsedSeconds,
+    remainingSeconds: null,
+    expired: false,
+  };
 }
 
+function handleCountdownTimerExpired(timerId: string, timer: RunningTimer): void {
+  void cancelCountdownExpiryNotification(timerId);
 
+  if (isAppForegroundForCountdownNotifications()) {
+    if (!isCountdownTimerVisibleOnScreen(timerId)) {
+      showCountdownExpiryInAppAlert({
+        timerId,
+        exerciseName: timer.exerciseLabel ?? 'exercise',
+        exerciseId: exerciseIdFromCountdownTimerId(timerId),
+        logSession: timer.countdownLogSession,
+      });
+    }
+    return;
+  }
+
+  if (countdownNotificationsSupported()) {
+    void presentCountdownExpiryNotificationNow({
+      timerId,
+      exerciseName: timer.exerciseLabel ?? 'exercise',
+      logSession: timer.countdownLogSession,
+    });
+  }
+}
 
 export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
   const [timers, setTimers] = useState<Record<string, RunningTimer>>({});
 
+  const [pausedTimers, setPausedTimers] = useState<Record<string, PausedTimer>>({});
+
   const timersRef = useRef(timers);
+
+  const pausedTimersRef = useRef(pausedTimers);
 
   const [tick, setTick] = useState(0);
 
@@ -206,6 +268,14 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
     timersRef.current = timers;
 
   }, [timers]);
+
+
+
+  useEffect(() => {
+
+    pausedTimersRef.current = pausedTimers;
+
+  }, [pausedTimers]);
 
 
 
@@ -334,143 +404,28 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
       });
 
       timersRef.current[timerId] = {
-
         ...timer,
-
         returnAlertShown: true,
-
       };
 
-
-
-      const appState = AppState.currentState;
-
-      if (appState === 'background') {
-
-        if (timer.notificationScheduled && countdownNotificationsSupported()) {
-
-          void cancelCountdownExpiryNotification(timerId);
-
-        } else {
-
-          void cancelCountdownExpiryNotification(timerId);
-
-          void presentCountdownExpiryNotificationNow({
-
-            timerId,
-
-            exerciseName: timer.exerciseLabel ?? 'exercise',
-
-            logSession: timer.countdownLogSession,
-
-          });
-
-        }
-
-      } else if (appState === 'active') {
-
-        if (!timer.notificationScheduled || !countdownNotificationsSupported()) {
-
-          notifyCountdownReturnAlert(timer.exerciseLabel);
-
-        }
-
-      }
-
+      handleCountdownTimerExpired(timerId, timer);
     }
-
   }, [tick, hasRunning]);
-
-
-
-  useEffect(() => {
-
-    const subscription = AppState.addEventListener('change', (nextState) => {
-
-      if (nextState !== 'active') {
-
-        return;
-
-      }
-
-
-
-      for (const [timerId, timer] of Object.entries(timersRef.current)) {
-
-        if (timer.mode !== 'countdown' || timer.targetSeconds === null || timer.returnAlertShown) {
-
-          continue;
-
-        }
-
-        if (timer.notificationScheduled && countdownNotificationsSupported()) {
-
-          continue;
-
-        }
-
-
-
-        const elapsedSeconds = readElapsedSeconds(timer);
-
-        if (!isCountdownExpired(elapsedSeconds, timer.targetSeconds)) {
-
-          continue;
-
-        }
-
-
-
-        setTimers((previous) => {
-
-          const current = previous[timerId];
-
-          if (!current || current.returnAlertShown) {
-
-            return previous;
-
-          }
-
-          return {
-
-            ...previous,
-
-            [timerId]: { ...current, returnAlertShown: true },
-
-          };
-
-        });
-
-        timersRef.current[timerId] = {
-
-          ...timer,
-
-          returnAlertShown: true,
-
-        };
-
-        notifyCountdownReturnAlert(timer.exerciseLabel);
-
-      }
-
-    });
-
-
-
-    return () => subscription.remove();
-
-  }, []);
-
-
 
   const isRunning = useCallback((timerId: string) => timerId in timers, [timers]);
 
+  const isPaused = useCallback((timerId: string) => timerId in pausedTimers, [pausedTimers]);
+
   const hasRunningTimerForLogSession = useCallback(
-    (session: CountdownLogSession) =>
-      Object.values(timers).some(
-        (timer) => timer.countdownLogSession && isSameCountdownLogSession(timer.countdownLogSession, session),
-      ),
-    [timers],
+    (session: CountdownLogSession) => {
+      const matchesSession = (timer: { countdownLogSession?: CountdownLogSession }) =>
+        timer.countdownLogSession !== undefined && isSameCountdownLogSession(timer.countdownLogSession, session);
+
+      return (
+        Object.values(timers).some(matchesSession) || Object.values(pausedTimers).some(matchesSession)
+      );
+    },
+    [timers, pausedTimers],
   );
 
   const getTimerSnapshot = useCallback(
@@ -479,17 +434,25 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
       const timer = timers[timerId];
 
-      if (!timer) {
+      if (timer) {
 
-        return null;
+        return buildTimerSnapshot(timer);
 
       }
 
-      return buildTimerSnapshot(timer);
+      const paused = pausedTimers[timerId];
+
+      if (paused) {
+
+        return buildPausedSnapshot(paused);
+
+      }
+
+      return null;
 
     },
 
-    [timers, tick],
+    [timers, pausedTimers, tick],
 
   );
 
@@ -532,6 +495,28 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
     if (timersRef.current[timerId]) {
 
       return null;
+
+    }
+
+    if (pausedTimersRef.current[timerId]) {
+
+      setPausedTimers((previous) => {
+
+        if (!(timerId in previous)) {
+
+          return previous;
+
+        }
+
+        const next = { ...previous };
+
+        delete next[timerId];
+
+        pausedTimersRef.current = next;
+
+        return next;
+
+      });
 
     }
 
@@ -615,6 +600,81 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
 
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        for (const [timerId, timer] of Object.entries(timersRef.current)) {
+          if (timer.mode !== 'countdown' || timer.targetSeconds === null) {
+            continue;
+          }
+
+          void cancelCountdownExpiryNotification(timerId);
+          if (timer.notificationScheduled) {
+            setTimerNotificationScheduled(timerId, false);
+          }
+
+          if (timer.returnAlertShown) {
+            continue;
+          }
+
+          const elapsedSeconds = readElapsedSeconds(timer);
+          if (!isCountdownExpired(elapsedSeconds, timer.targetSeconds)) {
+            continue;
+          }
+
+          setTimers((previous) => {
+            const current = previous[timerId];
+            if (!current || current.returnAlertShown) {
+              return previous;
+            }
+            return {
+              ...previous,
+              [timerId]: { ...current, returnAlertShown: true },
+            };
+          });
+
+          timersRef.current[timerId] = {
+            ...timer,
+            returnAlertShown: true,
+          };
+
+          handleCountdownTimerExpired(timerId, timer);
+        }
+        return;
+      }
+
+      if (nextState !== 'background' || !countdownNotificationsSupported()) {
+        return;
+      }
+
+      for (const [timerId, timer] of Object.entries(timersRef.current)) {
+        if (timer.mode !== 'countdown' || timer.targetSeconds === null || timer.returnAlertShown) {
+          continue;
+        }
+
+        const fireAtMs = timer.startedAt + timer.targetSeconds * 1000;
+        if (Date.now() >= fireAtMs || timer.notificationScheduled) {
+          continue;
+        }
+
+        void scheduleCountdownExpiryNotification({
+          timerId,
+          exerciseName: timer.exerciseLabel ?? 'exercise',
+          fireAtMs,
+          logSession: timer.countdownLogSession,
+        }).then((scheduled) => {
+          if (scheduled) {
+            setTimerNotificationScheduled(timerId, true);
+          }
+        });
+      }
+    });
+
+    return () => subscription.remove();
+  }, [setTimerNotificationScheduled]);
+
+
+
   const cancelTimer = useCallback((timerId: string) => {
 
     const timer = timersRef.current[timerId];
@@ -638,6 +698,162 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
       const next = { ...previous };
 
       delete next[timerId];
+
+      timersRef.current = next;
+
+      return next;
+
+    });
+
+    setPausedTimers((previous) => {
+
+      if (!(timerId in previous)) {
+
+        return previous;
+
+      }
+
+      const next = { ...previous };
+
+      delete next[timerId];
+
+      pausedTimersRef.current = next;
+
+      return next;
+
+    });
+
+  }, []);
+
+
+
+  const pauseTimer = useCallback((timerId: string) => {
+
+    const timer = timersRef.current[timerId];
+
+    if (!timer) {
+
+      return;
+
+    }
+
+    if (timer.mode === 'countdown') {
+
+      void cancelCountdownExpiryNotification(timerId);
+
+    }
+
+    const pausedTimer: PausedTimer = {
+
+      pausedElapsedSeconds: readElapsedSeconds(timer),
+
+      durationUnit: timer.durationUnit,
+
+      mode: timer.mode,
+
+      targetSeconds: timer.targetSeconds,
+
+      exerciseLabel: timer.exerciseLabel,
+
+      countdownLogSession: timer.countdownLogSession,
+
+      returnAlertShown: timer.returnAlertShown,
+
+      clampCountdownAtZero: timer.clampCountdownAtZero,
+
+    };
+
+    setTimers((previous) => {
+
+      if (!(timerId in previous)) {
+
+        return previous;
+
+      }
+
+      const next = { ...previous };
+
+      delete next[timerId];
+
+      timersRef.current = next;
+
+      return next;
+
+    });
+
+    setPausedTimers((previous) => {
+
+      const next = { ...previous, [timerId]: pausedTimer };
+
+      pausedTimersRef.current = next;
+
+      return next;
+
+    });
+
+  }, []);
+
+
+
+  const resumeTimer = useCallback((timerId: string) => {
+
+    const paused = pausedTimersRef.current[timerId];
+
+    if (!paused) {
+
+      return;
+
+    }
+
+    const startedAt = Date.now() - paused.pausedElapsedSeconds * 1000;
+
+    setPausedTimers((previous) => {
+
+      if (!(timerId in previous)) {
+
+        return previous;
+
+      }
+
+      const next = { ...previous };
+
+      delete next[timerId];
+
+      pausedTimersRef.current = next;
+
+      return next;
+
+    });
+
+    setTimers((previous) => {
+
+      const next = {
+
+        ...previous,
+
+        [timerId]: {
+
+          startedAt,
+
+          durationUnit: paused.durationUnit,
+
+          mode: paused.mode,
+
+          targetSeconds: paused.targetSeconds,
+
+          exerciseLabel: paused.exerciseLabel,
+
+          countdownLogSession: paused.countdownLogSession,
+
+          notificationScheduled: false,
+
+          returnAlertShown: paused.returnAlertShown,
+
+          clampCountdownAtZero: paused.clampCountdownAtZero,
+
+        },
+
+      };
 
       timersRef.current = next;
 
@@ -699,6 +915,8 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
       isRunning,
 
+      isPaused,
+
       getTimerSnapshot,
 
       getElapsedSeconds,
@@ -711,13 +929,17 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
       cancelTimer,
 
+      pauseTimer,
+
+      resumeTimer,
+
       finishTimer,
 
       hasRunningTimerForLogSession,
 
     }),
 
-    [tick, isRunning, getTimerSnapshot, getElapsedSeconds, getDurationUnit, startTimer, setTimerNotificationScheduled, cancelTimer, finishTimer, hasRunningTimerForLogSession],
+    [tick, isRunning, isPaused, getTimerSnapshot, getElapsedSeconds, getDurationUnit, startTimer, setTimerNotificationScheduled, cancelTimer, pauseTimer, resumeTimer, finishTimer, hasRunningTimerForLogSession],
 
   );
 

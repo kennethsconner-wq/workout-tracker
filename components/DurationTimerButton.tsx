@@ -1,6 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentRef } from 'react';
 import { Modal, Pressable, StyleSheet, Vibration, View as RNView } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { useDurationTimer } from '@/components/DurationTimerProvider';
 import { Text } from '@/components/Themed';
@@ -14,6 +22,12 @@ import {
   scheduleCountdownExpiryNotification,
   type CountdownLogSession,
 } from '@/lib/countdownNotifications';
+import {
+  clearCountdownTimerVisibility,
+  isRectVisibleInWindow,
+  setCountdownTimerVisibleOnScreen,
+  subscribeCountdownTimerVisibilityRecheck,
+} from '@/lib/countdownTimerVisibility';
 import type { DurationUnit } from '@/lib/durationUnits';
 
 type Props = {
@@ -27,6 +41,10 @@ type Props = {
   clampCountdownAtZero?: boolean;
   /** When false, expiry does not vibrate (e.g. rest timers). Defaults to true for countdown. */
   notifyOnExpire?: boolean;
+  /** When true, the first tap starts the timer; later taps open the timer modal. */
+  startOnPress?: boolean;
+  /** When true, shows Stop while the timer is active to save elapsed time to the field. */
+  showStopButton?: boolean;
   onComplete: (formattedValue: string) => void;
   disabled?: boolean;
   activeScheme: 'light' | 'dark';
@@ -48,6 +66,8 @@ export function DurationTimerButton({
   countdownLogSession,
   clampCountdownAtZero = false,
   notifyOnExpire,
+  startOnPress = false,
+  showStopButton = false,
   onComplete,
   disabled = false,
   activeScheme,
@@ -60,14 +80,18 @@ export function DurationTimerButton({
   const runningHighlight = activeScheme === 'dark' ? 'rgba(35, 213, 213, 0.22)' : 'rgba(57, 170, 170, 0.18)';
   const expiredHighlight = activeScheme === 'dark' ? 'rgba(212, 0, 120, 0.24)' : 'rgba(212, 0, 120, 0.14)';
 
-  const { isRunning, getTimerSnapshot, getDurationUnit, startTimer, setTimerNotificationScheduled, cancelTimer, finishTimer } =
+  const { tick, isRunning, isPaused, getTimerSnapshot, getDurationUnit, startTimer, setTimerNotificationScheduled, cancelTimer, pauseTimer, resumeTimer } =
     useDurationTimer();
 
   const [open, setOpen] = useState(false);
   const wasExpiredRef = useRef(false);
+  const buttonRef = useRef<ComponentRef<typeof Pressable>>(null);
+  const iconRotation = useSharedValue(0);
 
   const running = isRunning(timerId);
-  const snapshot = running ? getTimerSnapshot(timerId) : null;
+  const paused = isPaused(timerId);
+  const active = running || paused;
+  const snapshot = active ? getTimerSnapshot(timerId) : null;
   const activeMode = snapshot?.mode ?? timerMode;
   const isCountdown = activeMode === 'countdown';
   const expired = snapshot?.expired ?? false;
@@ -88,10 +112,92 @@ export function DurationTimerButton({
     if (!running) {
       wasExpiredRef.current = false;
     }
-  }, [running]);
+  }, [running, paused]);
+
+  const scheduleCountdownNotificationIfNeeded = (remainingSeconds: number | null) => {
+    if (
+      timerMode !== 'countdown' ||
+      countdownTargetSeconds === null ||
+      countdownTargetSeconds <= 0 ||
+      remainingSeconds === null ||
+      remainingSeconds <= 0
+    ) {
+      return;
+    }
+
+    const fireAtMs = Date.now() + remainingSeconds * 1000;
+    void (async () => {
+      const notificationScheduled = await scheduleCountdownExpiryNotification({
+        timerId,
+        exerciseName: countdownExerciseLabel ?? 'exercise',
+        fireAtMs,
+        logSession: countdownLogSession,
+      });
+      if (notificationScheduled) {
+        setTimerNotificationScheduled(timerId, true);
+      }
+    })();
+  };
+
+  useEffect(() => {
+    if (!running) {
+      clearCountdownTimerVisibility(timerId);
+      return;
+    }
+
+    const measureVisibility = () => {
+      buttonRef.current?.measureInWindow((x, y, width, height) => {
+        setCountdownTimerVisibleOnScreen(timerId, isRectVisibleInWindow(x, y, width, height));
+      });
+    };
+
+    measureVisibility();
+    const unsubscribe = subscribeCountdownTimerVisibilityRecheck(measureVisibility);
+    return () => {
+      unsubscribe();
+      clearCountdownTimerVisibility(timerId);
+    };
+  }, [timerId, running]);
+
+  useEffect(() => {
+    if (!running) {
+      return;
+    }
+
+    buttonRef.current?.measureInWindow((x, y, width, height) => {
+      setCountdownTimerVisibleOnScreen(timerId, isRectVisibleInWindow(x, y, width, height));
+    });
+  }, [tick, timerId, running]);
+
+  useEffect(() => {
+    if (running && !expired && isCountdown) {
+      iconRotation.value = 0;
+      iconRotation.value = withRepeat(
+        withTiming(360, { duration: 1800, easing: Easing.linear }),
+        -1,
+        false,
+      );
+      return;
+    }
+
+    cancelAnimation(iconRotation);
+    iconRotation.value = 0;
+  }, [running, expired, isCountdown, iconRotation]);
+
+  const iconAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${iconRotation.value}deg` }],
+  }));
 
   const openModal = () => {
     setOpen(true);
+  };
+
+  const handleButtonPress = () => {
+    if (startOnPress && !active) {
+      startTimerRun();
+      return;
+    }
+    openModal();
   };
 
   const startTimerRun = () => {
@@ -105,109 +211,156 @@ export function DurationTimerButton({
       clampCountdownAtZero,
     });
 
-    if (
-      startedAt !== null &&
-      timerMode === 'countdown' &&
-      countdownTargetSeconds !== null &&
-      countdownTargetSeconds > 0
-    ) {
-      const fireAtMs = startedAt + countdownTargetSeconds * 1000;
-      void (async () => {
-        const notificationScheduled = await scheduleCountdownExpiryNotification({
-          timerId,
-          exerciseName: countdownExerciseLabel ?? 'exercise',
-          fireAtMs,
-          logSession: countdownLogSession,
-        });
-        if (notificationScheduled) {
-          setTimerNotificationScheduled(timerId, true);
-        }
-      })();
+    if (startedAt !== null && timerMode === 'countdown') {
+      scheduleCountdownNotificationIfNeeded(countdownTargetSeconds);
     }
   };
 
-  const toggleStartStop = () => {
-    if (running) {
-      stopAndSave();
-    } else {
-      startTimerRun();
-    }
-  };
-
-  const closeModal = () => {
-    setOpen(false);
-  };
-
-  const cancelTimerAndClose = () => {
+  const resetTimerAndClose = () => {
     cancelTimer(timerId);
     setOpen(false);
   };
 
-  const stopAndSave = () => {
-    const unit = getDurationUnit(timerId) ?? durationUnit;
-    const finalSeconds = snapshot?.elapsedSeconds ?? 0;
-    finishTimer(timerId);
-    setOpen(false);
-    const formatted = elapsedSecondsToDurationInput(finalSeconds, unit);
-    if (formatted.length > 0) {
-      onComplete(formatted);
+  const restartTimerRun = () => {
+    cancelTimer(timerId);
+    startTimerRun();
+  };
+
+  const pauseOrResumeOrStart = () => {
+    if (expired && active) {
+      restartTimerRun();
+      setOpen(false);
+      return;
+    }
+
+    if (running) {
+      pauseTimer(timerId);
+      return;
+    }
+
+    if (paused) {
+      const remainingSeconds = snapshot?.remainingSeconds ?? null;
+      resumeTimer(timerId);
+      scheduleCountdownNotificationIfNeeded(remainingSeconds);
+      setOpen(false);
+      return;
+    }
+
+    startTimerRun();
+    if (!startOnPress) {
+      setOpen(false);
     }
   };
 
-  const buttonBorderColor = expired ? EXPIRED_ACCENT : running ? tint : borderColor;
+  const stopAndSave = () => {
+    const elapsedSeconds = snapshot?.elapsedSeconds ?? 0;
+    if (running) {
+      pauseTimer(timerId);
+    }
+    const unit = getDurationUnit(timerId) ?? durationUnit;
+    const formatted = elapsedSecondsToDurationInput(elapsedSeconds, unit);
+    if (formatted.length > 0) {
+      onComplete(formatted);
+    }
+    setOpen(false);
+  };
+
+  const buttonBorderColor = expired ? EXPIRED_ACCENT : active ? tint : borderColor;
   const buttonBackground = expired
     ? expiredHighlight
     : running
       ? runningHighlight
-      : activeScheme === 'dark'
-        ? '#171717'
-        : '#fafafa';
+      : paused
+        ? activeScheme === 'dark'
+          ? 'rgba(35, 213, 213, 0.12)'
+          : 'rgba(57, 170, 170, 0.1)'
+        : activeScheme === 'dark'
+          ? '#171717'
+          : '#fafafa';
+  const iconColor = disabled ? '#737373' : expired ? EXPIRED_ACCENT : tint;
+  const showRunningCountdown = running && isCountdown && !expired;
+  const iconName = isCountdown
+    ? active
+      ? 'hourglass'
+      : 'hourglass-outline'
+    : active
+      ? 'timer'
+      : 'timer-outline';
+  const runningTimeLabel = active && isCountdown ? formatStopwatchDisplay(displaySeconds) : null;
 
-  const runningLabel = expired
-    ? 'Countdown finished. Overtime shown as negative time.'
-    : isCountdown
-      ? 'Countdown keeps running in the background when closed.'
-      : 'Timer keeps running in the background when closed.';
+  const runningLabel = paused
+    ? 'Timer paused. Resume to continue or Cancel to reset.'
+    : expired
+      ? 'Countdown finished. Overtime shown as negative time.'
+      : isCountdown
+        ? 'Countdown keeps running in the background when closed.'
+        : 'Timer keeps running in the background when closed.';
+
+  const primaryActionLabel = expired && active ? 'Restart' : running ? 'Pause' : paused ? 'Resume' : 'Start';
+  const primaryAccessibilityLabel =
+    expired && active ? 'Restart timer' : running ? 'Pause timer' : paused ? 'Resume timer' : 'Start timer';
 
   return (
     <>
       <Pressable
+        ref={buttonRef}
         accessibilityRole="button"
         accessibilityLabel={
           expired
-            ? `${accessibilityLabel}. Countdown finished.`
-            : running
-              ? `${accessibilityLabel}. Timer running.`
+            ? `${accessibilityLabel}. Countdown finished. Tap to view timer.`
+            : active
+              ? `${accessibilityLabel}. Timer ${paused ? 'paused' : 'running'}${runningTimeLabel ? `, ${runningTimeLabel} remaining` : ''}.${
+                  startOnPress ? ' Tap to view timer.' : ''
+                }`
               : accessibilityLabel
         }
-        accessibilityState={{ selected: running }}
+        accessibilityState={{ selected: active }}
         disabled={disabled}
-        onPress={openModal}
+        onPress={handleButtonPress}
         hitSlop={6}
         style={({ pressed }) => [
           styles.timerButton,
+          showRunningCountdown && styles.timerButtonRunningCountdown,
           {
             borderColor: buttonBorderColor,
             backgroundColor: buttonBackground,
+            borderWidth: active && !expired ? 2 : 1,
           },
           disabled && styles.timerButtonDisabled,
           pressed && !disabled && styles.timerButtonPressed,
         ]}>
-        <Ionicons
-          name={isCountdown ? 'hourglass-outline' : running ? 'timer' : 'timer-outline'}
-          size={22}
-          color={disabled ? '#737373' : expired ? EXPIRED_ACCENT : tint}
-        />
+        <RNView style={styles.iconStack}>
+          {runningTimeLabel ? (
+            <>
+              <Animated.View style={showRunningCountdown ? iconAnimatedStyle : undefined}>
+                <Ionicons name={iconName} size={18} color={iconColor} />
+              </Animated.View>
+              <Text style={[styles.runningTimeLabel, { color: iconColor }]}>{runningTimeLabel}</Text>
+            </>
+          ) : (
+            <Ionicons name={iconName} size={22} color={iconColor} />
+          )}
+        </RNView>
       </Pressable>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={closeModal}>
-        <Pressable style={styles.backdrop} onPress={closeModal}>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
           <Pressable
             style={[styles.sheet, { backgroundColor: sheetBackground, borderColor }]}
             onPress={(event) => event.stopPropagation()}>
-            <Text style={[styles.sheetTitle, { color: textColor }]}>
-              {isCountdown ? 'Countdown' : 'Timer'}
-            </Text>
+            <RNView style={styles.sheetHeader}>
+              <Text style={[styles.sheetTitle, { color: textColor }]}>
+                {isCountdown ? 'Countdown' : 'Timer'}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close timer modal"
+                onPress={() => setOpen(false)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.sheetCloseButton, pressed && styles.actionPressed]}>
+                <Ionicons name="close" size={24} color={textColor} />
+              </Pressable>
+            </RNView>
             <Text
               style={[
                 styles.elapsedDisplay,
@@ -219,7 +372,7 @@ export function DurationTimerButton({
             {expired ? (
               <Text style={[styles.expiredMessage, { color: EXPIRED_ACCENT }]}>Time&apos;s up!</Text>
             ) : null}
-            {running ? (
+            {active ? (
               <Text style={[styles.runningHint, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
                 {runningLabel}
               </Text>
@@ -227,8 +380,8 @@ export function DurationTimerButton({
             <RNView style={styles.actionsRow}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Cancel timer without saving"
-                onPress={cancelTimerAndClose}
+                accessibilityLabel="Cancel timer and reset"
+                onPress={resetTimerAndClose}
                 style={({ pressed }) => [
                   styles.secondaryAction,
                   { borderColor: EXPIRED_ACCENT, borderWidth: 1 },
@@ -240,34 +393,43 @@ export function DurationTimerButton({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={running ? 'Stop timer and use elapsed time' : 'Start timer'}
-                onPress={toggleStartStop}
+                accessibilityLabel={primaryAccessibilityLabel}
+                onPress={pauseOrResumeOrStart}
                 style={({ pressed }) => [
-                  styles.primaryAction,
-                  { backgroundColor: running ? EXPIRED_ACCENT : tint },
+                  showStopButton && active ? styles.secondaryAction : styles.primaryAction,
+                  showStopButton && active
+                    ? { borderColor: tint, borderWidth: 1 }
+                    : { backgroundColor: tint },
                   pressed && styles.actionPressed,
                 ]}>
                 <Text
                   style={[
-                    styles.primaryActionLabel,
-                    { color: running ? '#fff' : Colors[activeScheme].background },
+                    showStopButton && active ? styles.secondaryActionLabel : styles.primaryActionLabel,
+                    {
+                      color:
+                        showStopButton && active
+                          ? activeScheme === 'dark'
+                            ? '#a3a3a3'
+                            : '#737373'
+                          : Colors[activeScheme].background,
+                    },
                   ]}>
-                  {running ? 'Stop' : 'Start'}
+                  {primaryActionLabel}
                 </Text>
               </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close timer and keep running in background"
-                onPress={closeModal}
-                style={({ pressed }) => [
-                  styles.secondaryAction,
-                  { borderColor: tint, borderWidth: 1 },
-                  pressed && styles.actionPressed,
-                ]}>
-                <Text style={[styles.secondaryActionLabel, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                  Close
-                </Text>
-              </Pressable>
+              {showStopButton && active ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop timer and use elapsed time"
+                  onPress={stopAndSave}
+                  style={({ pressed }) => [
+                    styles.primaryAction,
+                    { backgroundColor: tint },
+                    pressed && styles.actionPressed,
+                  ]}>
+                  <Text style={[styles.primaryActionLabel, { color: Colors[activeScheme].background }]}>Stop</Text>
+                </Pressable>
+              ) : null}
             </RNView>
           </Pressable>
         </Pressable>
@@ -286,6 +448,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
+  timerButtonRunningCountdown: {
+    width: 52,
+    height: 52,
+  },
+  iconStack: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  runningTimeLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+    lineHeight: 12,
+  },
   timerButtonDisabled: {
     opacity: 0.45,
   },
@@ -303,6 +480,19 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     gap: 16,
+  },
+  sheetHeader: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 28,
+    paddingHorizontal: 32,
+  },
+  sheetCloseButton: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    padding: 4,
   },
   sheetTitle: {
     fontSize: 18,

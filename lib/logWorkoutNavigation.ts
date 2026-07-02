@@ -13,6 +13,7 @@ export type LogWorkoutSession = {
  * screen often lag or reset; this is the source of truth until cleared.
  */
 let pendingSession: LogWorkoutSession | null = null;
+let pendingFocusExerciseId: string | null = null;
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -24,6 +25,13 @@ export function beginLogWorkoutSession(session: LogWorkoutSession): void {
 
 export function clearLogWorkoutSession(): void {
   pendingSession = null;
+  pendingFocusExerciseId = null;
+}
+
+export function consumePendingFocusExerciseId(): string | null {
+  const exerciseId = pendingFocusExerciseId;
+  pendingFocusExerciseId = null;
+  return exerciseId;
 }
 
 export function resolveLogWorkoutSession(
@@ -67,25 +75,39 @@ export function navigateToNewLogWorkout(workoutId: string): void {
 
 /** Focus an in-progress log session without pushing a duplicate screen (e.g. notification tap). */
 export function focusLogWorkoutSession(session: LogWorkoutSession): void {
+  focusLogWorkoutExercise(session, null);
+}
+
+export function focusLogWorkoutExercise(session: LogWorkoutSession, exerciseId: string | null): void {
   beginLogWorkoutSession(session);
+  pendingFocusExerciseId = exerciseId;
   router.navigate({
     pathname: '/log-workout',
-    params: logWorkoutRouteParams(session),
+    params: logWorkoutRouteParams(session, exerciseId),
   });
 }
 
-function logWorkoutRouteParams(session: LogWorkoutSession): Record<string, string> {
-  if (session.intent === 'edit' && session.loggedWorkoutId) {
-    return {
-      workoutId: session.workoutId,
-      loggedWorkoutId: session.loggedWorkoutId,
-      logIntent: 'edit',
-    };
+function logWorkoutRouteParams(
+  session: LogWorkoutSession,
+  focusExerciseId?: string | null,
+): Record<string, string> {
+  const base =
+    session.intent === 'edit' && session.loggedWorkoutId
+      ? {
+          workoutId: session.workoutId,
+          loggedWorkoutId: session.loggedWorkoutId,
+          logIntent: 'edit',
+        }
+      : {
+          workoutId: session.workoutId,
+          logIntent: 'new',
+        };
+
+  if (focusExerciseId) {
+    return { ...base, focusExerciseId, t: String(Date.now()) };
   }
-  return {
-    workoutId: session.workoutId,
-    logIntent: 'new',
-  };
+
+  return base;
 }
 
 /** Clears the saved draft, then opens a blank log for this workout template. */

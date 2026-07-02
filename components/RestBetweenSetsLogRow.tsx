@@ -2,6 +2,7 @@ import { StyleSheet, View as RNView } from 'react-native';
 
 import { DurationTimerButton } from '@/components/DurationTimerButton';
 import { Text } from '@/components/Themed';
+import type { CountdownLogSession } from '@/lib/countdownNotifications';
 import {
   hasRestBetweenSetsConfigured,
   resolveRestBetweenSetsTimerConfig,
@@ -14,9 +15,12 @@ type Props = {
   exerciseId: string;
   afterSetIndex: number;
   rest: RestBetweenSetsFields;
+  exerciseName: string;
+  countdownLogSession?: CountdownLogSession;
   activeScheme: 'light' | 'dark';
   borderColor: string;
   textColor: string;
+  disabled?: boolean;
 };
 
 export function RestBetweenSetsLogRow({
@@ -24,9 +28,12 @@ export function RestBetweenSetsLogRow({
   exerciseId,
   afterSetIndex,
   rest,
+  exerciseName,
+  countdownLogSession,
   activeScheme,
   borderColor,
   textColor,
+  disabled = false,
 }: Props) {
   if (!hasRestBetweenSetsConfigured(rest)) {
     return null;
@@ -43,8 +50,12 @@ export function RestBetweenSetsLogRow({
           durationUnit={rest.restDurationUnit ?? 'seconds'}
           timerMode={timerConfig.timerMode}
           countdownTargetSeconds={timerConfig.countdownTargetSeconds}
+          countdownExerciseLabel={`Rest — ${exerciseName.trim() || 'exercise'}`}
+          countdownLogSession={countdownLogSession}
           clampCountdownAtZero
           notifyOnExpire={false}
+          startOnPress
+          disabled={disabled}
           onComplete={() => {}}
           activeScheme={activeScheme}
           accessibilityLabel={`Start rest timer after set ${afterSetIndex + 1}`}

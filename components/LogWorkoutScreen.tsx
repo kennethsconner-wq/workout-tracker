@@ -18,7 +18,11 @@ import { useDurationTimer } from '@/components/DurationTimerProvider';
 import { SessionDateTimeField } from '@/components/SessionDateTimeField';
 import { CardioDistanceUnitPicker } from '@/components/CardioDistanceUnitPicker';
 import { DurationUnitPicker } from '@/components/DurationUnitPicker';
-import { NumericTextInput } from '@/components/NumericTextInput';
+import {
+  LogWorkoutKeyboardScrollProvider,
+  LogWorkoutNumericInput,
+  type LogWorkoutKeyboardScrollHandle,
+} from '@/components/LogWorkoutKeyboardScroll';
 import { ScoreUnitPicker } from '@/components/ScoreUnitPicker';
 import { WeightUnitPicker } from '@/components/WeightUnitPicker';
 import { StickySaveFooter } from '@/components/StickySaveFooter';
@@ -28,6 +32,7 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import {
   clearLogWorkoutSession,
+  consumePendingFocusExerciseId,
   resolveLogWorkoutSession,
   type LogWorkoutSession,
 } from '@/lib/logWorkoutNavigation';
@@ -82,9 +87,20 @@ import {
 import { DEFAULT_WEIGHT_UNIT, formatWeightValue, normalizeWeightUnit, type WeightUnit } from '@/lib/weightUnits';
 import { formatPlannedExerciseSummary } from '@/lib/exerciseDisplay';
 import { formatRestBetweenSetsPlanLine } from '@/lib/restBetweenSets';
+import { notifyCountdownTimerVisibilityRecheck } from '@/lib/countdownTimerVisibility';
 import { resolveCardioDurationLogTimerConfig, resolveSportDurationLogTimerConfig, resolveStretchDurationLogTimerConfig } from '@/lib/durationTimer';
 import type { CountdownLogSession } from '@/lib/countdownNotifications';
-import { hasLoggedExerciseInput, parseLoggedExerciseFromDraft } from '@/lib/logExerciseDraft';
+import { hasLoggedExerciseInput, parseLoggedExerciseFromDraft, type LogExerciseDraftFields } from '@/lib/logExerciseDraft';
+import {
+  canAddStrengthSet,
+  canAddStretchSet,
+  getExerciseSetLockState,
+  isCardioPerSegmentObjectiveEditable,
+  isCardioPerSegmentSetEditable,
+  isRestAfterSetEditable,
+  isStrengthSetEditable,
+  isStretchSetEditable,
+} from '@/lib/logSetCompletion';
 import { resolveExerciseSetCount } from '@/lib/exerciseDraft';
 import { clearNewLogDraft, newLogDraftStorageKey, shouldPersistNewLogDraft } from '@/lib/logWorkoutDraft';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
@@ -308,6 +324,40 @@ function plannedStretchSetForSetIndex(
   return {
     duration: plannedSet?.duration ?? exercise.duration,
     durationUnit: plannedSet?.durationUnit ?? exercise.durationUnit,
+  };
+}
+
+function draftExerciseToLogFields(ex: DraftExercise): LogExerciseDraftFields {
+  return {
+    activityType: ex.activityType,
+    actualSets: ex.actualSets,
+    actualWeightUnit: ex.weightUnit,
+    actualStretchSets: ex.actualStretchSets.map((set, setIndex) => ({
+      actualDurationInput: set.actualDurationInput,
+      actualDurationUnit: plannedStretchDurationUnitForSet(ex, setIndex),
+    })),
+    actualCardioPerSets: ex.actualCardioPerSets.map((set) => ({
+      actualDurationInput: set.actualDurationInput,
+      actualDurationUnit: set.actualDurationUnit,
+      actualDistanceInput: set.actualDistanceInput,
+      actualDistanceUnit: set.actualDistanceUnit,
+    })),
+    cardioObjective: ex.cardioObjective,
+    cardioDurationTracking: ex.cardioDurationTracking,
+    cardioDistanceTracking: ex.cardioDistanceTracking,
+    cardioDistanceMode: ex.cardioDistanceMode,
+    cardioPaceDuration: ex.cardioPaceDuration,
+    cardioPaceDurationUnit: ex.cardioPaceDurationUnit,
+    cardioPaceDistance: ex.cardioPaceDistance,
+    cardioPaceDistanceUnit: ex.cardioPaceDistanceUnit,
+    plannedDuration: ex.duration,
+    plannedDistance: ex.distance,
+    actualDurationInput: ex.actualDurationInput,
+    actualDurationUnit: ex.durationUnit,
+    actualDistanceInput: ex.actualDistanceInput,
+    actualDistanceUnit: ex.distanceUnit,
+    actualScoreInput: ex.actualScoreInput,
+    actualScoreUnit: ex.scoreUnit,
   };
 }
 
@@ -939,6 +989,7 @@ export default function LogWorkoutScreen() {
     workoutId?: string | string[];
     loggedWorkoutId?: string | string[];
     logIntent?: string | string[];
+    focusExerciseId?: string | string[];
     t?: string | string[];
   }>();
   const session: LogWorkoutSession | null = useMemo(
@@ -971,6 +1022,16 @@ export default function LogWorkoutScreen() {
     session: null as LogWorkoutSession | null,
     hasActiveLogTimers: false,
   });
+  const scrollRef = useRef<ScrollView>(null);
+  const keyboardScrollRef = useRef<LogWorkoutKeyboardScrollHandle>(null);
+  const exerciseLayoutYRef = useRef(new Map<string, number>());
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [highlightedExerciseId, setHighlightedExerciseId] = useState<string | null>(null);
+
+  const focusExerciseId = useMemo(() => {
+    const raw = Array.isArray(params.focusExerciseId) ? params.focusExerciseId[0] : params.focusExerciseId;
+    return raw ?? consumePendingFocusExerciseId();
+  }, [params.focusExerciseId, params.t]);
 
   const hasActiveLogTimers = useMemo(() => {
     if (!session) {
@@ -982,6 +1043,30 @@ export default function LogWorkoutScreen() {
       intent: session.intent,
     });
   }, [session, hasRunningTimerForLogSession]);
+
+  useEffect(() => {
+    if (!focusExerciseId || loading) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      const y = exerciseLayoutYRef.current.get(focusExerciseId);
+      if (y == null) {
+        return;
+      }
+      scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+      setHighlightedExerciseId(focusExerciseId);
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+      highlightTimeoutRef.current = setTimeout(() => {
+        setHighlightedExerciseId(null);
+        highlightTimeoutRef.current = null;
+      }, 3000);
+    }, 120);
+
+    return () => clearTimeout(timeoutId);
+  }, [focusExerciseId, loading, exercises]);
 
   useEffect(() => {
     if (!session) {
@@ -1607,40 +1692,7 @@ export default function LogWorkoutScreen() {
     const parsedExercises: LoggedWorkoutExercise[] = [];
 
     for (const ex of exercises) {
-      const parsedActual = parseLoggedExerciseFromDraft(
-        {
-          activityType: ex.activityType,
-          actualSets: ex.actualSets,
-          actualWeightUnit: ex.weightUnit,
-          actualStretchSets: ex.actualStretchSets.map((set, setIndex) => ({
-            actualDurationInput: set.actualDurationInput,
-            actualDurationUnit: plannedStretchDurationUnitForSet(ex, setIndex),
-          })),
-          actualCardioPerSets: ex.actualCardioPerSets.map((set) => ({
-            actualDurationInput: set.actualDurationInput,
-            actualDurationUnit: set.actualDurationUnit,
-            actualDistanceInput: set.actualDistanceInput,
-            actualDistanceUnit: set.actualDistanceUnit,
-          })),
-          cardioObjective: ex.cardioObjective,
-          cardioDurationTracking: ex.cardioDurationTracking,
-          cardioDistanceTracking: ex.cardioDistanceTracking,
-          cardioDistanceMode: ex.cardioDistanceMode,
-          cardioPaceDuration: ex.cardioPaceDuration,
-          cardioPaceDurationUnit: ex.cardioPaceDurationUnit,
-          cardioPaceDistance: ex.cardioPaceDistance,
-          cardioPaceDistanceUnit: ex.cardioPaceDistanceUnit,
-          plannedDuration: ex.duration,
-          plannedDistance: ex.distance,
-          actualDurationInput: ex.actualDurationInput,
-          actualDurationUnit: ex.durationUnit,
-          actualDistanceInput: ex.actualDistanceInput,
-          actualDistanceUnit: ex.distanceUnit,
-          actualScoreInput: ex.actualScoreInput,
-          actualScoreUnit: ex.scoreUnit,
-        },
-        ex.name,
-      );
+      const parsedActual = parseLoggedExerciseFromDraft(draftExerciseToLogFields(ex), ex.name);
       if (!parsedActual.ok) {
         themedAlert(parsedActual.title, parsedActual.message);
         return null;
@@ -1792,11 +1844,22 @@ export default function LogWorkoutScreen() {
           ...stackHeaderHideIosBackLabel,
         }}
       />
+      <LogWorkoutKeyboardScrollProvider ref={keyboardScrollRef} scrollRef={scrollRef}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
-        keyboardVerticalOffset={80}>
-        <ScrollView style={styles.flex} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={Platform.select({ ios: 80, android: 24 })}>
+        <ScrollView
+          ref={scrollRef}
+          style={styles.flex}
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          scrollEventThrottle={16}
+          onScroll={(event) => {
+            keyboardScrollRef.current?.onScroll(event);
+            notifyCountdownTimerVisibilityRecheck();
+          }}>
         <View style={styles.workoutTitleRow} lightColor="transparent" darkColor="transparent">
           <View style={styles.workoutTitleTextRow} lightColor="transparent" darkColor="transparent">
             <View style={styles.workoutTitleWithIcon} lightColor="transparent" darkColor="transparent">
@@ -1830,8 +1893,25 @@ export default function LogWorkoutScreen() {
           textColor={textColor}
         />
 
-        {exercises.map((exercise, exIndex) => (
-          <View key={exercise.id} style={[styles.card, { borderColor }]}>
+        {exercises.map((exercise, exIndex) => {
+          const setLockingEnabled = session?.intent !== 'edit';
+          const logFields = draftExerciseToLogFields(exercise);
+          const setLock = getExerciseSetLockState(logFields, setLockingEnabled);
+          const lockedSetFieldStyle = styles.lockedSetField;
+
+          return (
+          <View
+            key={exercise.id}
+            onLayout={(event) => {
+              exerciseLayoutYRef.current.set(exercise.id, event.nativeEvent.layout.y);
+            }}
+            style={[
+              styles.card,
+              {
+                borderColor: highlightedExerciseId === exercise.id ? Colors[activeScheme].tint : borderColor,
+                borderWidth: highlightedExerciseId === exercise.id ? 2 : 1,
+              },
+            ]}>
             <View style={styles.cardTitleRow} lightColor="transparent" darkColor="transparent">
               <Text style={styles.cardHeading}>Exercise {exIndex + 1}</Text>
               <Pressable
@@ -1868,29 +1948,35 @@ export default function LogWorkoutScreen() {
             {exercise.activityType === 'strength' ? (
               <>
                 <View style={styles.actualSetsContainer}>
-                  {exercise.actualSets.map((actualSet, setIndex) => (
+                  {exercise.actualSets.map((actualSet, setIndex) => {
+                    const setEditable = isStrengthSetEditable(setLock, setIndex);
+                    const isLastSet = setIndex === exercise.actualSets.length - 1;
+                    const canDeleteSet = isLastSet && setEditable && exercise.actualSets.length > 1;
+                    return (
                     <View key={actualSet.id}>
-                    <View style={styles.actualSetRow}>
+                    <View style={[styles.actualSetRow, !setEditable && styles.lockedSetRow]}>
                       <Text style={[styles.setLabel, { color: textColor }]}>Set {setIndex + 1}</Text>
                       <View style={styles.setRowWithCheckbox}>
                         <Pressable
                           accessibilityRole="checkbox"
                           accessibilityLabel={`Use planned reps and weight for set ${setIndex + 1}`}
                           accessibilityState={{ checked: hasActualSetValues(actualSet) }}
+                          disabled={!setEditable}
                           onPress={() => toggleActualSetPlannedValues(exercise.id, actualSet.id)}
-                          style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                          style={({ pressed }) => [styles.checkboxButton, pressed && setEditable && styles.checkboxButtonPressed]}
                           hitSlop={8}>
                           <Ionicons
                             name={hasActualSetValues(actualSet) ? 'checkbox' : 'square-outline'}
                             size={22}
-                            color={Colors[activeScheme].tint}
+                            color={setEditable ? Colors[activeScheme].tint : borderColor}
                           />
                         </Pressable>
                         <View style={styles.setRow}>
                           <View style={styles.strengthRepsInputWrap}>
-                            <NumericTextInput
+                            <LogWorkoutNumericInput
                               value={actualSet.actualRepsInput}
                               onChangeText={(value) => updateActualSetField(exercise.id, actualSet.id, 'actualRepsInput', value)}
+                              editable={setEditable}
                               placeholder="0"
                               maxDecimalPlaces={INTEGER_DECIMAL_PLACES}
                               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
@@ -1899,16 +1985,18 @@ export default function LogWorkoutScreen() {
                                 styles.strengthRepsLogInput,
                                 styles.unitInput,
                                 { color: textColor, borderColor, backgroundColor: inputBackground },
+                                !setEditable && lockedSetFieldStyle,
                               ]}
                             />
                             <Text style={[styles.unitSuffix, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>reps</Text>
                           </View>
                           <View style={styles.strengthWeightWrap}>
-                            <NumericTextInput
+                            <LogWorkoutNumericInput
                               value={actualSet.actualWeightInput}
                               onChangeText={(value) =>
                                 updateActualSetField(exercise.id, actualSet.id, 'actualWeightInput', value)
                               }
+                              editable={setEditable}
                               placeholder="Weight"
                               placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                               style={[
@@ -1916,6 +2004,7 @@ export default function LogWorkoutScreen() {
                                 styles.setInput,
                                 styles.strengthWeightLogInput,
                                 { color: textColor, borderColor, backgroundColor: inputBackground },
+                                !setEditable && lockedSetFieldStyle,
                               ]}
                             />
                             <WeightUnitPicker
@@ -1927,14 +2016,19 @@ export default function LogWorkoutScreen() {
                             />
                           </View>
                         </View>
+                        {canDeleteSet ? (
                         <Pressable
                           onPress={() => deleteActualSet(exercise.id, actualSet.id)}
                           hitSlop={8}
                           accessibilityRole="button"
                           accessibilityLabel={`Delete set ${setIndex + 1}`}
-                          style={({ pressed }) => [styles.deleteSetButton, pressed && styles.checkboxButtonPressed]}>
+                          style={({ pressed }) => [
+                            styles.deleteSetButton,
+                            pressed && styles.checkboxButtonPressed,
+                          ]}>
                           <Ionicons name="close" size={20} color="#ef4444" />
                         </Pressable>
+                        ) : null}
                       </View>
                     </View>
                     {setIndex < exercise.actualSets.length - 1 ? (
@@ -1943,17 +2037,35 @@ export default function LogWorkoutScreen() {
                         exerciseId={exercise.id}
                         afterSetIndex={setIndex}
                         rest={exercise}
+                        exerciseName={exercise.name}
+                        disabled={!isRestAfterSetEditable(setLock, setIndex, 'strength')}
+                        countdownLogSession={
+                          session
+                            ? {
+                                workoutId: session.workoutId,
+                                loggedWorkoutId: session.loggedWorkoutId,
+                                intent: session.intent,
+                              }
+                            : undefined
+                        }
                         activeScheme={activeScheme}
                         borderColor={borderColor}
                         textColor={textColor}
                       />
                     ) : null}
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
                 <Pressable
                   onPress={() => addActualSet(exercise.id)}
-                  style={({ pressed }) => [styles.addSetButton, { borderColor }, pressed && styles.checkboxButtonPressed]}>
+                  disabled={!canAddStrengthSet(setLock, logFields)}
+                  style={({ pressed }) => [
+                    styles.addSetButton,
+                    { borderColor },
+                    !canAddStrengthSet(setLock, logFields) && styles.controlDisabled,
+                    pressed && canAddStrengthSet(setLock, logFields) && styles.checkboxButtonPressed,
+                  ]}>
                   <Text style={[styles.addSetButtonLabel, { color: textColor }]}>+ Add set</Text>
                 </Pressable>
               </>
@@ -1961,7 +2073,10 @@ export default function LogWorkoutScreen() {
 
             {exercise.activityType === 'cardio' && getCardioLogLayout(exercise) === 'per_segment' ? (
               <View style={styles.actualSetsContainer}>
-                <View style={styles.actualSetRow}>
+                {(() => {
+                  const objectiveEditable = isCardioPerSegmentObjectiveEditable(setLock);
+                  return (
+                <View style={[styles.actualSetRow, !objectiveEditable && styles.lockedSetRow]}>
                   <Text style={[styles.setLabel, { color: textColor }]}>
                     {isCardioDurationPerDistance(exercise) ? 'Total distance' : 'Total duration'}
                   </Text>
@@ -1970,20 +2085,22 @@ export default function LogWorkoutScreen() {
                       accessibilityRole="checkbox"
                       accessibilityLabel="Use planned total"
                       accessibilityState={{ checked: hasCardioPerSegmentObjectiveValue(exercise) }}
+                      disabled={!objectiveEditable}
                       onPress={() => toggleCardioPerSegmentObjectivePlannedValues(exercise.id)}
-                      style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                      style={({ pressed }) => [styles.checkboxButton, pressed && objectiveEditable && styles.checkboxButtonPressed]}
                       hitSlop={8}>
                       <Ionicons
                         name={hasCardioPerSegmentObjectiveValue(exercise) ? 'checkbox' : 'square-outline'}
                         size={22}
-                        color={Colors[activeScheme].tint}
+                        color={objectiveEditable ? Colors[activeScheme].tint : borderColor}
                       />
                     </Pressable>
                     {isCardioDurationPerDistance(exercise) ? (
                       <View style={[styles.cardioDistanceRow, styles.flexField]}>
-                        <NumericTextInput
+                        <LogWorkoutNumericInput
                           value={exercise.actualDistanceInput}
                           onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDistanceInput', value)}
+                          editable={objectiveEditable}
                           placeholder="Distance"
                           placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                           style={[
@@ -1991,6 +2108,7 @@ export default function LogWorkoutScreen() {
                             styles.setInput,
                             styles.cardioDistanceInput,
                             { color: textColor, borderColor, backgroundColor: inputBackground },
+                            !objectiveEditable && lockedSetFieldStyle,
                           ]}
                         />
                         <CardioDistanceUnitPicker
@@ -2009,8 +2127,15 @@ export default function LogWorkoutScreen() {
                         value={exercise.actualDurationInput}
                         onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDurationInput', value)}
                         durationUnit={exercise.durationUnit}
+                        editable={objectiveEditable}
+                        timerDisabled={!objectiveEditable}
                         rowStyle={[styles.cardioDurationRow, styles.flexField]}
-                        inputStyle={[styles.input, styles.setInput, styles.cardioDurationInput]}
+                        inputStyle={[
+                          styles.input,
+                          styles.setInput,
+                          styles.cardioDurationInput,
+                          !objectiveEditable && lockedSetFieldStyle,
+                        ]}
                         activeScheme={activeScheme}
                         borderColor={borderColor}
                         textColor={textColor}
@@ -2020,7 +2145,10 @@ export default function LogWorkoutScreen() {
                     )}
                   </View>
                 </View>
+                  );
+                })()}
                 {exercise.actualCardioPerSets.map((actualSet, setIndex) => {
+                  const segmentEditable = isCardioPerSegmentSetEditable(setLock, setIndex);
                   const objectiveTotal = resolveCardioPerSegmentObjectiveTotal(
                     exercise,
                     perSegmentObjectiveInputForExercise(exercise),
@@ -2033,20 +2161,21 @@ export default function LogWorkoutScreen() {
                   );
                   const plannedFieldLabel = 'duration';
                   return (
-                    <View key={actualSet.id} style={styles.actualSetRow}>
+                    <View key={actualSet.id} style={[styles.actualSetRow, !segmentEditable && styles.lockedSetRow]}>
                       <Text style={[styles.setLabel, { color: textColor }]}>{segmentLabel}</Text>
                       <View style={styles.setRowWithCheckbox}>
                         <Pressable
                           accessibilityRole="checkbox"
                           accessibilityLabel={`Use planned ${plannedFieldLabel} for ${segmentLabel}`}
                           accessibilityState={{ checked: hasCardioPerActualSetValues(exercise, actualSet) }}
+                          disabled={!segmentEditable}
                           onPress={() => toggleCardioPerActualSetPlannedValues(exercise.id, actualSet.id)}
-                          style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                          style={({ pressed }) => [styles.checkboxButton, pressed && segmentEditable && styles.checkboxButtonPressed]}
                           hitSlop={8}>
                           <Ionicons
                             name={hasCardioPerActualSetValues(exercise, actualSet) ? 'checkbox' : 'square-outline'}
                             size={22}
-                            color={Colors[activeScheme].tint}
+                            color={segmentEditable ? Colors[activeScheme].tint : borderColor}
                           />
                         </Pressable>
                         <CardioDurationLogField
@@ -2057,7 +2186,14 @@ export default function LogWorkoutScreen() {
                             updateCardioPerActualSetField(exercise.id, actualSet.id, 'actualDurationInput', value)
                           }
                           durationUnit={actualSet.actualDurationUnit}
-                          inputStyle={[styles.input, styles.setInput, styles.stretchDurationLogInput]}
+                          editable={segmentEditable}
+                          timerDisabled={!segmentEditable}
+                          inputStyle={[
+                            styles.input,
+                            styles.setInput,
+                            styles.stretchDurationLogInput,
+                            !segmentEditable && lockedSetFieldStyle,
+                          ]}
                           activeScheme={activeScheme}
                           borderColor={borderColor}
                           textColor={textColor}
@@ -2092,7 +2228,7 @@ export default function LogWorkoutScreen() {
                     'distance' ? (
                       <>
                         <View style={styles.cardioDistanceRow}>
-                          <NumericTextInput
+                          <LogWorkoutNumericInput
                             value={exercise.actualDistanceInput}
                             onChangeText={(value) =>
                               updateExerciseActualField(exercise.id, 'actualDistanceInput', value)
@@ -2151,7 +2287,7 @@ export default function LogWorkoutScreen() {
                           timerAccessibilityLabel="Start timer for duration"
                         />
                         <View style={styles.cardioDistanceRow}>
-                          <NumericTextInput
+                          <LogWorkoutNumericInput
                             value={exercise.actualDistanceInput}
                             onChangeText={(value) =>
                               updateExerciseActualField(exercise.id, 'actualDistanceInput', value)
@@ -2199,7 +2335,7 @@ export default function LogWorkoutScreen() {
                   {normalizeCardioPlanFields({ ...exercise, activityType: 'cardio' }).cardioObjective ===
                   'distance' ? (
                     <View style={[styles.cardioDistanceRow, styles.flexField]}>
-                      <NumericTextInput
+                      <LogWorkoutNumericInput
                         value={exercise.actualDistanceInput}
                         onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualDistanceInput', value)}
                         placeholder="Distance"
@@ -2278,7 +2414,7 @@ export default function LogWorkoutScreen() {
                       />
                     ) : (
                       <>
-                        <NumericTextInput
+                        <LogWorkoutNumericInput
                           value={exercise.actualDurationInput}
                           onChangeText={(value) =>
                             updateExerciseActualField(exercise.id, 'actualDurationInput', value)
@@ -2303,7 +2439,7 @@ export default function LogWorkoutScreen() {
                     )}
                   </View>
                   <View style={styles.sportScoreRow}>
-                    <NumericTextInput
+                    <LogWorkoutNumericInput
                       value={exercise.actualScoreInput}
                       onChangeText={(value) => updateExerciseActualField(exercise.id, 'actualScoreInput', value)}
                       placeholder="Score"
@@ -2330,22 +2466,27 @@ export default function LogWorkoutScreen() {
             {exercise.activityType === 'stretch' ? (
               <>
                 <View style={styles.actualSetsContainer}>
-                  {exercise.actualStretchSets.map((actualSet, setIndex) => (
+                  {exercise.actualStretchSets.map((actualSet, setIndex) => {
+                    const setEditable = isStretchSetEditable(setLock, setIndex);
+                    const isLastSet = setIndex === exercise.actualStretchSets.length - 1;
+                    const canDeleteSet = isLastSet && setEditable && exercise.actualStretchSets.length > 1;
+                    return (
                     <View key={actualSet.id}>
-                    <View style={styles.actualSetRow}>
+                    <View style={[styles.actualSetRow, !setEditable && styles.lockedSetRow]}>
                       <Text style={[styles.setLabel, { color: textColor }]}>Set {setIndex + 1}</Text>
                       <View style={styles.setRowWithCheckbox}>
                         <Pressable
                           accessibilityRole="checkbox"
                           accessibilityLabel={`Use planned duration for set ${setIndex + 1}`}
                           accessibilityState={{ checked: hasStretchActualSetValues(actualSet) }}
+                          disabled={!setEditable}
                           onPress={() => toggleStretchActualSetPlannedValues(exercise.id, actualSet.id)}
-                          style={({ pressed }) => [styles.checkboxButton, pressed && styles.checkboxButtonPressed]}
+                          style={({ pressed }) => [styles.checkboxButton, pressed && setEditable && styles.checkboxButtonPressed]}
                           hitSlop={8}>
                           <Ionicons
                             name={hasStretchActualSetValues(actualSet) ? 'checkbox' : 'square-outline'}
                             size={22}
-                            color={Colors[activeScheme].tint}
+                            color={setEditable ? Colors[activeScheme].tint : borderColor}
                           />
                         </Pressable>
                         <View style={styles.stretchDurationLogWrap}>
@@ -2362,7 +2503,14 @@ export default function LogWorkoutScreen() {
                               }
                               durationUnit={actualSet.actualDurationUnit}
                               units={STRETCH_DURATION_UNITS}
-                              inputStyle={[styles.input, styles.setInput, styles.stretchDurationLogInput]}
+                              editable={setEditable}
+                              timerDisabled={!setEditable}
+                              inputStyle={[
+                                styles.input,
+                                styles.setInput,
+                                styles.stretchDurationLogInput,
+                                !setEditable && lockedSetFieldStyle,
+                              ]}
                               activeScheme={activeScheme}
                               borderColor={borderColor}
                               textColor={textColor}
@@ -2371,11 +2519,12 @@ export default function LogWorkoutScreen() {
                             />
                           ) : (
                             <>
-                              <NumericTextInput
+                              <LogWorkoutNumericInput
                                 value={actualSet.actualDurationInput}
                                 onChangeText={(value) =>
                                   updateStretchActualSetField(exercise.id, actualSet.id, value)
                                 }
+                                editable={setEditable}
                                 placeholder="Duration"
                                 placeholderTextColor={activeScheme === 'dark' ? '#737373' : '#a3a3a3'}
                                 style={[
@@ -2383,6 +2532,7 @@ export default function LogWorkoutScreen() {
                                   styles.setInput,
                                   styles.stretchDurationLogInput,
                                   { color: textColor, borderColor, backgroundColor: inputBackground },
+                                  !setEditable && lockedSetFieldStyle,
                                 ]}
                               />
                               <DurationUnitPicker
@@ -2395,14 +2545,19 @@ export default function LogWorkoutScreen() {
                             </>
                           )}
                         </View>
+                        {canDeleteSet ? (
                         <Pressable
                           onPress={() => deleteStretchActualSet(exercise.id, actualSet.id)}
                           hitSlop={8}
                           accessibilityRole="button"
                           accessibilityLabel={`Delete set ${setIndex + 1}`}
-                          style={({ pressed }) => [styles.deleteSetButton, pressed && styles.checkboxButtonPressed]}>
+                          style={({ pressed }) => [
+                            styles.deleteSetButton,
+                            pressed && styles.checkboxButtonPressed,
+                          ]}>
                           <Ionicons name="close" size={20} color="#ef4444" />
                         </Pressable>
+                        ) : null}
                       </View>
                     </View>
                     {setIndex < exercise.actualStretchSets.length - 1 ? (
@@ -2411,26 +2566,46 @@ export default function LogWorkoutScreen() {
                         exerciseId={exercise.id}
                         afterSetIndex={setIndex}
                         rest={exercise}
+                        exerciseName={exercise.name}
+                        disabled={!isRestAfterSetEditable(setLock, setIndex, 'stretch')}
+                        countdownLogSession={
+                          session
+                            ? {
+                                workoutId: session.workoutId,
+                                loggedWorkoutId: session.loggedWorkoutId,
+                                intent: session.intent,
+                              }
+                            : undefined
+                        }
                         activeScheme={activeScheme}
                         borderColor={borderColor}
                         textColor={textColor}
                       />
                     ) : null}
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
                 <Pressable
                   onPress={() => addStretchActualSet(exercise.id)}
-                  style={({ pressed }) => [styles.addSetButton, { borderColor }, pressed && styles.checkboxButtonPressed]}>
+                  disabled={!canAddStretchSet(setLock, logFields)}
+                  style={({ pressed }) => [
+                    styles.addSetButton,
+                    { borderColor },
+                    !canAddStretchSet(setLock, logFields) && styles.controlDisabled,
+                    pressed && canAddStretchSet(setLock, logFields) && styles.checkboxButtonPressed,
+                  ]}>
                   <Text style={[styles.addSetButtonLabel, { color: textColor }]}>+ Add set</Text>
                 </Pressable>
               </>
             ) : null}
           </View>
-        ))}
+          );
+        })}
         </ScrollView>
         <StickySaveFooter onPress={onSave} activeScheme={activeScheme} />
       </KeyboardAvoidingView>
+      </LogWorkoutKeyboardScrollProvider>
     </RNView>
   );
 }
@@ -2664,6 +2839,15 @@ const styles = StyleSheet.create({
   },
   checkboxButtonPressed: {
     opacity: 0.65,
+  },
+  lockedSetField: {
+    opacity: 0.62,
+  },
+  lockedSetRow: {
+    opacity: 0.85,
+  },
+  controlDisabled: {
+    opacity: 0.45,
   },
   addSetButton: {
     marginTop: 2,
