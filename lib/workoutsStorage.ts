@@ -713,8 +713,8 @@ export async function propagateExerciseDefinitionsAcrossWorkouts(
 export { matchesExerciseDefinition } from '@/lib/exerciseSnapshot';
 
 /**
- * Updates every template exercise whose definition matches `oldDef` to `nextDef` (preserving each exercise `id`),
- * then updates matching planned fields on logged exercises with the same `workoutExerciseId`.
+ * Updates every template exercise whose definition matches `oldDef` to `nextDef` (preserving each exercise `id`).
+ * Logged workout exercises are left unchanged so execution score and other metrics stay tied to the plan at log time.
  */
 export async function updateExercisesMatchingSignatureAcrossWorkouts(
   oldDef: Pick<
@@ -734,7 +734,6 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
       'id' | 'activityType' | 'name' | 'sets' | 'reps' | 'weight' | 'weightUnit' | 'duration' | 'durationUnit' | 'distance' | 'distanceUnit' | 'cardioObjective' | 'cardioDurationTracking' | 'cardioDistanceTracking' | 'cardioPaceDuration' | 'cardioPaceDurationUnit' | 'cardioPaceDistance' | 'cardioPaceDistanceUnit' | 'cardioDistanceMode' | 'score' | 'scoreUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit' | 'restBetweenSetsEnabled' | 'restDuration' | 'restDurationUnit'
     >
   > = [];
-  const affectedIds = new Set<string>();
   for (const w of all) {
     for (const ex of w.exercises) {
       const matches =
@@ -743,7 +742,6 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
           : matchesExerciseDefinition(ex, oldDef);
       if (matches) {
         updates.push({ id: ex.id, ...nextDef });
-        affectedIds.add(ex.id);
       }
     }
   }
@@ -751,65 +749,6 @@ export async function updateExercisesMatchingSignatureAcrossWorkouts(
   const catalogReplace = await replaceExerciseLibraryEntry(oldDef, nextDef, {
     catalogEntryId: options?.catalogEntryId,
   });
-  const cleanNext = sanitizeWorkoutExercise({
-    id: 'sanitize',
-    activityType: nextDef.activityType,
-    name: nextDef.name,
-    sets: nextDef.sets,
-    reps: nextDef.reps,
-    weight: nextDef.weight,
-    weightUnit: nextDef.weightUnit,
-    duration: nextDef.duration,
-    durationUnit: nextDef.durationUnit,
-    distance: nextDef.distance,
-    distanceUnit: nextDef.distanceUnit,
-    cardioObjective: nextDef.cardioObjective,
-    cardioDurationTracking: nextDef.cardioDurationTracking,
-    cardioDistanceTracking: nextDef.cardioDistanceTracking,
-    cardioPaceDuration: nextDef.cardioPaceDuration,
-    cardioPaceDurationUnit: nextDef.cardioPaceDurationUnit,
-    cardioPaceDistance: nextDef.cardioPaceDistance,
-    cardioPaceDistanceUnit: nextDef.cardioPaceDistanceUnit,
-    score: nextDef.score,
-    scoreUnit: nextDef.scoreUnit,
-    restBetweenSetsEnabled: nextDef.restBetweenSetsEnabled,
-    restDuration: nextDef.restDuration,
-    restDurationUnit: nextDef.restDurationUnit,
-  });
-  const logs = await loadLoggedWorkouts();
-  const nextLogs = logs.map((log) => ({
-    ...log,
-    exercises: log.exercises.map((lex) =>
-      affectedIds.has(lex.workoutExerciseId) || matchesExerciseDefinition(lex, oldDef)
-        ? {
-            ...lex,
-            activityType: cleanNext.activityType,
-            name: cleanNext.name,
-            sets: cleanNext.sets,
-            reps: cleanNext.reps,
-            weight: cleanNext.weight,
-            weightUnit: cleanNext.weightUnit,
-            duration: cleanNext.duration,
-            durationUnit: cleanNext.durationUnit,
-            distance: cleanNext.distance,
-            distanceUnit: cleanNext.distanceUnit,
-            cardioObjective: cleanNext.cardioObjective,
-            cardioDurationTracking: cleanNext.cardioDurationTracking,
-            cardioDistanceTracking: cleanNext.cardioDistanceTracking,
-            cardioPaceDuration: cleanNext.cardioPaceDuration,
-            cardioPaceDurationUnit: cleanNext.cardioPaceDurationUnit,
-            cardioPaceDistance: cleanNext.cardioPaceDistance,
-            cardioPaceDistanceUnit: cleanNext.cardioPaceDistanceUnit,
-            score: cleanNext.score,
-            scoreUnit: cleanNext.scoreUnit,
-            restBetweenSetsEnabled: cleanNext.restBetweenSetsEnabled,
-            restDuration: cleanNext.restDuration,
-            restDurationUnit: cleanNext.restDurationUnit,
-          }
-        : lex,
-    ),
-  }));
-  await saveLoggedWorkouts(nextLogs);
   return {
     catalogEntryId: catalogReplace.entryId,
     removedCatalogIds: catalogReplace.removedIds,

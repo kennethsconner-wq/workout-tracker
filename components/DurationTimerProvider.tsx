@@ -225,6 +225,37 @@ function buildPausedSnapshot(timer: PausedTimer): DurationTimerSnapshot {
   };
 }
 
+function armCountdownNotificationForTimer(
+  timerId: string,
+  timer: RunningTimer,
+  onScheduled: (timerId: string) => void,
+): void {
+  if (
+    timer.mode !== 'countdown' ||
+    timer.targetSeconds === null ||
+    timer.returnAlertShown ||
+    !countdownNotificationsSupported()
+  ) {
+    return;
+  }
+
+  const fireAtMs = timer.startedAt + timer.targetSeconds * 1000;
+  if (Date.now() >= fireAtMs) {
+    return;
+  }
+
+  void scheduleCountdownExpiryNotification({
+    timerId,
+    exerciseName: timer.exerciseLabel ?? 'exercise',
+    fireAtMs,
+    logSession: timer.countdownLogSession,
+  }).then((scheduled) => {
+    if (scheduled) {
+      onScheduled(timerId);
+    }
+  });
+}
+
 function handleCountdownTimerExpired(timerId: string, timer: RunningTimer): void {
   void cancelCountdownExpiryNotification(timerId);
 
@@ -258,6 +289,8 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
   const timersRef = useRef(timers);
 
   const pausedTimersRef = useRef(pausedTimers);
+
+  const setTimerNotificationScheduledRef = useRef<(timerId: string, notificationScheduled: boolean) => void>(() => {});
 
   const [tick, setTick] = useState(0);
 
@@ -564,6 +597,13 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
     setTimers(next);
 
+    const startedTimer = next[timerId];
+    if (startedTimer) {
+      armCountdownNotificationForTimer(timerId, startedTimer, (armedTimerId) => {
+        setTimerNotificationScheduledRef.current(armedTimerId, true);
+      });
+    }
+
     return startedAt;
 
   }, []);
@@ -598,6 +638,10 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
 
   }, []);
 
+  useEffect(() => {
+    setTimerNotificationScheduledRef.current = setTimerNotificationScheduled;
+  }, [setTimerNotificationScheduled]);
+
 
 
   useEffect(() => {
@@ -606,11 +650,6 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
         for (const [timerId, timer] of Object.entries(timersRef.current)) {
           if (timer.mode !== 'countdown' || timer.targetSeconds === null) {
             continue;
-          }
-
-          void cancelCountdownExpiryNotification(timerId);
-          if (timer.notificationScheduled) {
-            setTimerNotificationScheduled(timerId, false);
           }
 
           if (timer.returnAlertShown) {
@@ -653,19 +692,12 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
         }
 
         const fireAtMs = timer.startedAt + timer.targetSeconds * 1000;
-        if (Date.now() >= fireAtMs || timer.notificationScheduled) {
+        if (Date.now() >= fireAtMs) {
           continue;
         }
 
-        void scheduleCountdownExpiryNotification({
-          timerId,
-          exerciseName: timer.exerciseLabel ?? 'exercise',
-          fireAtMs,
-          logSession: timer.countdownLogSession,
-        }).then((scheduled) => {
-          if (scheduled) {
-            setTimerNotificationScheduled(timerId, true);
-          }
+        armCountdownNotificationForTimer(timerId, timer, (armedTimerId) => {
+          setTimerNotificationScheduled(armedTimerId, true);
         });
       }
     });
@@ -860,6 +892,13 @@ export function DurationTimerProvider({ children }: { children: ReactNode }) {
       return next;
 
     });
+
+    const resumedTimer = timersRef.current[timerId];
+    if (resumedTimer) {
+      armCountdownNotificationForTimer(timerId, resumedTimer, (armedTimerId) => {
+        setTimerNotificationScheduledRef.current(armedTimerId, true);
+      });
+    }
 
   }, []);
 

@@ -99,15 +99,12 @@ export function getWorkoutDueIndicator(
   const todayDay = getDeviceDayOfWeek(now);
   const loggedToday = isLoggedOnOrAfterDay(lastLoggedAt, today);
 
-  if (daysOfWeek.includes(todayDay)) {
-    if (!loggedToday) {
-      return { tone: 'due_today', label: 'Due today' };
-    }
-    const next = findScheduledDayFrom(daysOfWeek, now, 'future', false);
-    if (next) {
-      return formatUpcomingDue(next.date, today, next.day);
-    }
+  if (loggedToday) {
     return { tone: 'completed_today', label: 'Logged today' };
+  }
+
+  if (daysOfWeek.includes(todayDay)) {
+    return { tone: 'due_today', label: 'Due today' };
   }
 
   const upcoming = findScheduledDayFrom(daysOfWeek, now, 'future', false);

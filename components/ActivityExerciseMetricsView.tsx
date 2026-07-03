@@ -78,9 +78,10 @@ type Props = {
 
 const EXECUTION_SCORE_INFO_MESSAGE =
   'For each time this exercise appears in your log (including duplicate slots in the same workout):\n\n' +
-  '• Actual score = (average reps across sets) × (average weight across sets) × (number of sets logged)\n' +
+  '• Actual score = sum of (reps × weight) for every set you logged\n' +
   '• Planned score = planned sets × planned reps × planned weight from that session\n' +
   '• Execution for that entry = actual score ÷ planned score\n\n' +
+  'Logging more or fewer sets than planned changes execution (for example, 4 sets at the planned reps/weight scores higher than 3 planned sets). ' +
   'The percentage shown is the average of those execution values across all logged appearances. It can go above 100% if you beat the plan.';
 
 const TOTAL_WEIGHT_MOVED_INFO_MESSAGE =
