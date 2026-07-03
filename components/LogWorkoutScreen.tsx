@@ -37,6 +37,7 @@ import {
   type LogWorkoutSession,
 } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
+import { queueWorkoutSaveCelebration } from '@/lib/workoutSaveCelebration';
 import { newId } from '@/lib/ids';
 import { stackHeaderHideIosBackLabel } from '@/constants/stackHeader';
 import {
@@ -101,7 +102,7 @@ import {
   isStrengthSetEditable,
   isStretchSetEditable,
 } from '@/lib/logSetCompletion';
-import { resolveExerciseSetCount } from '@/lib/exerciseDraft';
+import { readStrengthPlannedSnapshotFromDraft, resolveExerciseSetCount } from '@/lib/exerciseDraft';
 import { clearNewLogDraft, newLogDraftStorageKey, shouldPersistNewLogDraft } from '@/lib/logWorkoutDraft';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { useDataRepository } from '@/lib/data/DataRepositoryContext';
@@ -860,41 +861,42 @@ function normalizeDraftExercises(
     .filter((exercise) => !omit.has(exercise.id))
     .map((exercise) => {
       const saved = takeSavedDraftForTemplateExercise(savedQueues, exercise.id);
+      const plannedSets = saved?.sets ?? exercise.sets;
       const savedStrengthLen = saved?.actualSets?.length ?? 0;
       const strengthSetCount =
-        exercise.activityType === 'strength' ? Math.max(exercise.sets, savedStrengthLen, 1) : 0;
-      const plannedStretch = readStretchSetsFromExercise(exercise);
+        exercise.activityType === 'strength' ? Math.max(plannedSets, savedStrengthLen, 1) : 0;
+      const plannedStretch = saved?.stretchSets ?? readStretchSetsFromExercise(exercise);
       const savedStretchLen = saved?.actualStretchSets?.length ?? 0;
       const stretchSetCount =
         exercise.activityType === 'stretch'
-          ? Math.max(plannedStretch.length, exercise.sets, savedStretchLen, 1)
+          ? Math.max(plannedStretch.length, plannedSets, savedStretchLen, 1)
           : 0;
       return {
         id: saved?.id && typeof saved.id === 'string' ? saved.id : newId(),
         workoutExerciseId: exercise.id,
         activityType: saved?.activityType ?? exercise.activityType,
-        name: exercise.name,
-        sets: exercise.sets,
-        reps: exercise.reps,
-        weight: exercise.weight,
-        weightUnit: exercise.weightUnit,
-        duration: exercise.duration,
-        durationUnit: exercise.durationUnit,
-        distance: exercise.distance,
-        distanceUnit: exercise.distanceUnit,
-        cardioObjective: exercise.cardioObjective,
-        cardioDurationTracking: exercise.cardioDurationTracking,
-        cardioDistanceTracking: exercise.cardioDistanceTracking,
-        cardioPaceDuration: exercise.cardioPaceDuration,
-        cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
-        cardioPaceDistance: exercise.cardioPaceDistance,
-        cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
-        score: exercise.score,
-        scoreUnit: exercise.scoreUnit,
-        stretchSets: exercise.stretchSets,
-        restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
-        restDuration: exercise.restDuration,
-        restDurationUnit: exercise.restDurationUnit,
+        name: saved?.name ?? exercise.name,
+        sets: plannedSets,
+        reps: saved?.reps ?? exercise.reps,
+        weight: saved?.weight ?? exercise.weight,
+        weightUnit: saved?.weightUnit ?? exercise.weightUnit,
+        duration: saved?.duration ?? exercise.duration,
+        durationUnit: saved?.durationUnit ?? exercise.durationUnit,
+        distance: saved?.distance ?? exercise.distance,
+        distanceUnit: saved?.distanceUnit ?? exercise.distanceUnit,
+        cardioObjective: saved?.cardioObjective ?? exercise.cardioObjective,
+        cardioDurationTracking: saved?.cardioDurationTracking ?? exercise.cardioDurationTracking,
+        cardioDistanceTracking: saved?.cardioDistanceTracking ?? exercise.cardioDistanceTracking,
+        cardioPaceDuration: saved?.cardioPaceDuration ?? exercise.cardioPaceDuration,
+        cardioPaceDurationUnit: saved?.cardioPaceDurationUnit ?? exercise.cardioPaceDurationUnit,
+        cardioPaceDistance: saved?.cardioPaceDistance ?? exercise.cardioPaceDistance,
+        cardioPaceDistanceUnit: saved?.cardioPaceDistanceUnit ?? exercise.cardioPaceDistanceUnit,
+        score: saved?.score ?? exercise.score,
+        scoreUnit: saved?.scoreUnit ?? exercise.scoreUnit,
+        stretchSets: plannedStretch,
+        restBetweenSetsEnabled: saved?.restBetweenSetsEnabled ?? exercise.restBetweenSetsEnabled,
+        restDuration: saved?.restDuration ?? exercise.restDuration,
+        restDurationUnit: saved?.restDurationUnit ?? exercise.restDurationUnit,
         actualSets:
           exercise.activityType === 'strength'
             ? Array.from({ length: strengthSetCount }, (_, setIndex) => {
@@ -1026,12 +1028,21 @@ export default function LogWorkoutScreen() {
   const keyboardScrollRef = useRef<LogWorkoutKeyboardScrollHandle>(null);
   const exerciseLayoutYRef = useRef(new Map<string, number>());
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handledFocusScrollKeyRef = useRef<string | null>(null);
   const [highlightedExerciseId, setHighlightedExerciseId] = useState<string | null>(null);
 
   const focusExerciseId = useMemo(() => {
     const raw = Array.isArray(params.focusExerciseId) ? params.focusExerciseId[0] : params.focusExerciseId;
     return raw ?? consumePendingFocusExerciseId();
   }, [params.focusExerciseId, params.t]);
+
+  const focusScrollKey = useMemo(() => {
+    if (!focusExerciseId) {
+      return null;
+    }
+    const timestamp = Array.isArray(params.t) ? params.t[0] : params.t;
+    return `${focusExerciseId}:${timestamp ?? '0'}`;
+  }, [focusExerciseId, params.t]);
 
   const hasActiveLogTimers = useMemo(() => {
     if (!session) {
@@ -1045,15 +1056,31 @@ export default function LogWorkoutScreen() {
   }, [session, hasRunningTimerForLogSession]);
 
   useEffect(() => {
-    if (!focusExerciseId || loading) {
+    if (!focusExerciseId || !focusScrollKey || loading) {
+      return;
+    }
+    if (handledFocusScrollKeyRef.current === focusScrollKey) {
       return;
     }
 
-    const timeoutId = setTimeout(() => {
-      const y = exerciseLayoutYRef.current.get(focusExerciseId);
-      if (y == null) {
+    let cancelled = false;
+    let attempts = 0;
+
+    const tryScrollToFocus = () => {
+      if (cancelled || handledFocusScrollKeyRef.current === focusScrollKey) {
         return;
       }
+
+      const y = exerciseLayoutYRef.current.get(focusExerciseId);
+      if (y == null) {
+        attempts += 1;
+        if (attempts < 8) {
+          setTimeout(tryScrollToFocus, 50);
+        }
+        return;
+      }
+
+      handledFocusScrollKeyRef.current = focusScrollKey;
       scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
       setHighlightedExerciseId(focusExerciseId);
       if (highlightTimeoutRef.current) {
@@ -1063,10 +1090,19 @@ export default function LogWorkoutScreen() {
         setHighlightedExerciseId(null);
         highlightTimeoutRef.current = null;
       }, 3000);
-    }, 120);
 
-    return () => clearTimeout(timeoutId);
-  }, [focusExerciseId, loading, exercises]);
+      if (params.focusExerciseId) {
+        router.setParams({ focusExerciseId: undefined, t: undefined });
+      }
+    };
+
+    const timeoutId = setTimeout(tryScrollToFocus, 120);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [focusExerciseId, focusScrollKey, loading, params.focusExerciseId]);
 
   useEffect(() => {
     if (!session) {
@@ -1698,18 +1734,21 @@ export default function LogWorkoutScreen() {
         return null;
       }
 
+      const plannedStrength =
+        ex.activityType === 'strength' ? readStrengthPlannedSnapshotFromDraft(ex) : null;
+
       parsedExercises.push({
         id: ex.id,
         workoutExerciseId: ex.workoutExerciseId,
         activityType: ex.activityType,
         name: ex.name,
         sets:
-          ex.activityType === 'strength' || ex.activityType === 'stretch'
+          ex.activityType === 'stretch'
             ? resolveExerciseSetCount(ex.sets)
-            : ex.sets,
-        reps: ex.reps,
-        weight: ex.weight,
-        weightUnit: ex.weightUnit,
+            : (plannedStrength?.sets ?? ex.sets),
+        reps: plannedStrength?.reps ?? ex.reps,
+        weight: plannedStrength?.weight ?? ex.weight,
+        weightUnit: plannedStrength?.weightUnit ?? ex.weightUnit,
         duration: ex.duration,
         durationUnit: ex.durationUnit,
         distance: ex.distance,
@@ -1789,7 +1828,21 @@ export default function LogWorkoutScreen() {
           });
           await AsyncStorage.removeItem(newLogDraftStorageKey(parsed.workout.id));
         }
+
         clearLogWorkoutSession();
+
+        if (intent === 'edit') {
+          queueWorkoutSaveCelebration({
+            title: 'Saved!',
+            message: 'Your workout log has been updated.',
+          });
+        } else {
+          queueWorkoutSaveCelebration({
+            title: 'Great job!',
+            message: `${parsed.workout.title} has been logged. Keep it up!`,
+          });
+        }
+
         router.replace('/');
       } catch {
         skipAutosaveRef.current = false;
@@ -2603,7 +2656,7 @@ export default function LogWorkoutScreen() {
           );
         })}
         </ScrollView>
-        <StickySaveFooter onPress={onSave} activeScheme={activeScheme} />
+        <StickySaveFooter label="Finish Workout" onPress={onSave} activeScheme={activeScheme} />
       </KeyboardAvoidingView>
       </LogWorkoutKeyboardScrollProvider>
     </RNView>

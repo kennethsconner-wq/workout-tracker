@@ -33,14 +33,21 @@ export type LoggedWorkoutExercise = {
   id: string;
   /** Template exercise id this log row was recorded against. */
   workoutExerciseId: string;
+  /** Snapshot of the exercise definition at log time (not updated when templates change). */
   activityType: ActivityType;
+  /** Snapshot of the exercise name at log time. */
   name: string;
+  /** Planned sets at log time — used for execution score and historical display. */
   sets: number;
+  /** Planned reps at log time. */
   reps: number;
+  /** Planned weight at log time. */
   weight: number;
   weightUnit: WeightUnit;
+  /** Planned duration at log time. */
   duration: number;
   durationUnit: DurationUnit;
+  /** Planned distance at log time. */
   distance: number;
   distanceUnit: CardioDistanceUnit;
   /** Cardio only: primary plan objective. */

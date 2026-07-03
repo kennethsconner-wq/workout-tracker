@@ -729,6 +729,18 @@ export function resolveExerciseSetCount(raw: string | number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
+/** Planned strength fields saved on a log row — uses draft snapshot, not logged set count. */
+export function readStrengthPlannedSnapshotFromDraft(
+  exercise: Pick<WorkoutExercise, 'sets' | 'reps' | 'weight' | 'weightUnit'>,
+): Pick<WorkoutExercise, 'sets' | 'reps' | 'weight' | 'weightUnit'> {
+  return {
+    sets: resolveExerciseSetCount(exercise.sets),
+    reps: exercise.reps,
+    weight: exercise.weight,
+    weightUnit: exercise.weightUnit,
+  };
+}
+
 
 
 export function parseWorkoutExerciseFromDraft(ex: ExerciseDraftRow, id: string): ParseExerciseDraftResult {

@@ -8,6 +8,7 @@ import {
   BackHandler,
   Easing,
   FlatList,
+  InteractionManager,
   LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -15,11 +16,13 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Vibration,
   View as RNView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text, View } from '@/components/Themed';
+import { WorkoutSaveCelebrationOverlay } from '@/components/WorkoutSaveCelebrationOverlay';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { WorkoutIconGlyph } from '@/components/WorkoutIconGlyph';
@@ -39,6 +42,11 @@ import {
   navigateToResumeLogWorkout,
 } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
+import {
+  hasPendingWorkoutSaveCelebration,
+  takeWorkoutSaveCelebration,
+  type WorkoutSaveCelebration,
+} from '@/lib/workoutSaveCelebration';
 import { buildWorkoutLogStatsByWorkoutId, formatWorkoutLastLogged, formatWorkoutSessionCount, formatWorkoutTrackingSince } from '@/lib/loggedWorkoutAnalytics';
 import { findWorkoutById } from '@/lib/workoutsStorage';
 import { useDataRepository } from '@/lib/data/DataRepositoryContext';
@@ -50,6 +58,7 @@ const DROPDOWN_TITLE_FONT_SIZE = Platform.select({ ios: 17, android: 20, default
 const ACTION_SHEET_SLIDE = 320;
 const WORKOUT_CARD_GAP = 12;
 const WORKOUT_CARD_PEEK = 18;
+const WORKOUT_SAVE_CELEBRATION_DELAY_MS = 450;
 
 const WORKOUT_DUE_TONE_COLORS: Record<WorkoutDueTone, string> = {
   due_today: '#D40078',
@@ -97,8 +106,10 @@ export function WorkoutsList() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
   const [maxCardHeight, setMaxCardHeight] = useState(0);
+  const [cardLayoutKey, setCardLayoutKey] = useState(0);
   const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
   const [draftWorkoutIds, setDraftWorkoutIds] = useState<Set<string>>(() => new Set());
+  const [saveCelebration, setSaveCelebration] = useState<WorkoutSaveCelebration | null>(null);
   const sheetTranslateY = useRef(new Animated.Value(ACTION_SHEET_SLIDE)).current;
   const carouselRef = useRef<FlatList<Workout>>(null);
 
@@ -123,8 +134,48 @@ export function WorkoutsList() {
     [fonts],
   );
 
+  const resetWorkoutCardMeasure = useCallback(() => {
+    setMaxCardHeight(0);
+    setCardLayoutKey((key) => key + 1);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
+      if (!hasPendingWorkoutSaveCelebration()) {
+        return;
+      }
+
+      let cancelled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const interaction = InteractionManager.runAfterInteractions(() => {
+        timeoutId = setTimeout(() => {
+          if (cancelled) {
+            return;
+          }
+          const celebration = takeWorkoutSaveCelebration();
+          if (!celebration) {
+            return;
+          }
+          if (Platform.OS !== 'web') {
+            Vibration.vibrate(100);
+          }
+          setSaveCelebration(celebration);
+        }, WORKOUT_SAVE_CELEBRATION_DELAY_MS);
+      });
+
+      return () => {
+        cancelled = true;
+        interaction.cancel();
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      };
+    }, []),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      resetWorkoutCardMeasure();
       let cancelled = false;
       void (async () => {
         const [next, nextLogged, draftIds] = await Promise.all([
@@ -135,7 +186,11 @@ export function WorkoutsList() {
         if (!cancelled) {
           setWorkouts(next);
           setLoggedWorkouts(nextLogged);
-          setDraftWorkoutIds(draftIds);
+          setDraftWorkoutIds((prev) => {
+            const unchanged =
+              prev.size === draftIds.size && [...prev].every((workoutId) => draftIds.has(workoutId));
+            return unchanged ? prev : draftIds;
+          });
           setSelectedId((prev) => pickWorkoutIdForDeviceCalendarDay(next, prev));
           setLoading(false);
         }
@@ -143,7 +198,7 @@ export function WorkoutsList() {
       return () => {
         cancelled = true;
       };
-    }, [repo]),
+    }, [repo, resetWorkoutCardMeasure]),
   );
 
   const selected = useMemo(() => {
@@ -190,8 +245,12 @@ export function WorkoutsList() {
   );
 
   useEffect(() => {
-    setMaxCardHeight(0);
-  }, [dropdownWorkouts, draftWorkoutIds, cardWidth]);
+    resetWorkoutCardMeasure();
+  }, [dropdownWorkouts, cardWidth, resetWorkoutCardMeasure]);
+
+  useEffect(() => {
+    resetWorkoutCardMeasure();
+  }, [draftWorkoutIds, resetWorkoutCardMeasure]);
 
   const reportWorkoutCardHeight = useCallback((height: number) => {
     const nextHeight = Math.ceil(height);
@@ -357,7 +416,7 @@ export function WorkoutsList() {
                 removeClippedSubviews={false}
                 showsHorizontalScrollIndicator={hasMultipleWorkouts}
                 keyboardShouldPersistTaps="handled"
-                extraData={{ selectedId, maxCardHeight, draftWorkoutIds }}
+                extraData={{ selectedId, maxCardHeight, draftWorkoutIds, cardLayoutKey }}
                 initialNumToRender={dropdownWorkouts.length}
                 maxToRenderPerBatch={dropdownWorkouts.length}
                 windowSize={Math.max(5, dropdownWorkouts.length)}
@@ -386,11 +445,8 @@ export function WorkoutsList() {
                   const isLastCard = index === dropdownWorkouts.length - 1;
                   return (
                     <RNView
-                      onLayout={
-                        maxCardHeight > 0
-                          ? undefined
-                          : (event) => reportWorkoutCardHeight(event.nativeEvent.layout.height)
-                      }
+                      key={`${w.id}:${cardLayoutKey}`}
+                      onLayout={(event) => reportWorkoutCardHeight(event.nativeEvent.layout.height)}
                       style={[
                         styles.workoutCard,
                         {
@@ -524,6 +580,20 @@ export function WorkoutsList() {
                           />
                         ) : null}
                         <View style={styles.detailLeadingActions} lightColor="transparent" darkColor="transparent">
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Start workout"
+                            onPress={() => onStartWorkout(w.id)}
+                            style={({ pressed }) => [
+                              styles.detailPrimaryButton,
+                              { backgroundColor: Colors[activeScheme].tint, opacity: pressed ? 0.85 : 1 },
+                            ]}
+                            hitSlop={6}>
+                            <Text
+                              style={[styles.detailPrimaryButtonLabel, { color: Colors[activeScheme].background }]}>
+                              Start
+                            </Text>
+                          </Pressable>
                           {draftWorkoutIds.has(w.id) ? (
                             <Pressable
                               accessibilityRole="button"
@@ -540,20 +610,6 @@ export function WorkoutsList() {
                               </Text>
                             </Pressable>
                           ) : null}
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Start workout"
-                            onPress={() => onStartWorkout(w.id)}
-                            style={({ pressed }) => [
-                              styles.detailPrimaryButton,
-                              { backgroundColor: Colors[activeScheme].tint, opacity: pressed ? 0.85 : 1 },
-                            ]}
-                            hitSlop={6}>
-                            <Text
-                              style={[styles.detailPrimaryButtonLabel, { color: Colors[activeScheme].background }]}>
-                              Start
-                            </Text>
-                          </Pressable>
                         </View>
                       </View>
                     </RNView>
@@ -682,6 +738,13 @@ export function WorkoutsList() {
             </Pressable>
           </Animated.View>
         </View>
+      ) : null}
+      {saveCelebration ? (
+        <WorkoutSaveCelebrationOverlay
+          celebration={saveCelebration}
+          activeScheme={activeScheme}
+          onDismiss={() => setSaveCelebration(null)}
+        />
       ) : null}
     </View>
   );

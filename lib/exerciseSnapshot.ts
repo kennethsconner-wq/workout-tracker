@@ -279,8 +279,9 @@ export function getTotalWeightMovedForExercise(
 export type LoggedExecutionSnapshot = {
   /** Log session timestamp (when the workout was saved). */
   createdAt: string;
-  /** LoggedExerciseActualScore = avg(actualReps) × avg(actualWeight) × setsCompleted. */
+  /** Sum of (actualReps × actualWeight) across logged sets for this appearance. */
   actualScore: number;
+  /** Planned sets × planned reps × planned weight from the log snapshot. */
   plannedScore: number;
   /** actualScore / plannedScore (same ratio used for Execution Score per session on Metrics). */
   executionRatio: number;
@@ -324,6 +325,44 @@ export function getLoggedExerciseWeightSnapshots(
   return out;
 }
 
+/** Planned volume for a strength exercise from the log snapshot (not the live template). */
+export function strengthPlannedScore(
+  exercise: Pick<LoggedWorkoutExercise, 'sets' | 'reps' | 'weight'>,
+): number {
+  return exercise.sets * exercise.reps * exercise.weight;
+}
+
+/** Logged volume for a strength exercise: sum of reps × weight for each set logged. */
+export function strengthActualScore(exercise: Pick<LoggedWorkoutExercise, 'actualSets'>): number {
+  let total = 0;
+  for (const set of exercise.actualSets) {
+    total += set.actualReps * set.actualWeight;
+  }
+  return total;
+}
+
+/** Execution ratio for one logged strength appearance; extra/fewer sets than planned affect the score. */
+export function strengthSessionExecutionRatio(
+  exercise: Pick<LoggedWorkoutExercise, 'sets' | 'reps' | 'weight' | 'actualSets'>,
+): number | null {
+  if (exercise.actualSets.length === 0) {
+    return null;
+  }
+
+  const plannedScore = strengthPlannedScore(exercise);
+  if (plannedScore <= 0) {
+    return null;
+  }
+
+  const actualScore = strengthActualScore(exercise);
+  if (actualScore <= 0) {
+    return null;
+  }
+
+  const executionRatio = actualScore / plannedScore;
+  return Number.isFinite(executionRatio) ? executionRatio : null;
+}
+
 /**
  * One row per logged appearance of this exercise with valid actual + planned scores.
  * Sorted by `createdAt` ascending (chronological).
@@ -334,31 +373,15 @@ export function getLoggedExerciseExecutionSnapshots(
 ): LoggedExecutionSnapshot[] {
   const out: LoggedExecutionSnapshot[] = [];
   forEachLoggedExerciseForTarget(logged, target, (ex, createdAt) => {
-    const setsCompleted = ex.actualSets.length;
-    if (setsCompleted === 0) {
+    const executionRatio = strengthSessionExecutionRatio(ex);
+    if (executionRatio === null) {
       return;
     }
-    const plannedScore = ex.sets * ex.reps * ex.weight;
-    if (plannedScore <= 0) {
-      return;
-    }
-    let sumReps = 0;
-    let sumWeight = 0;
-    for (const set of ex.actualSets) {
-      sumReps += set.actualReps;
-      sumWeight += set.actualWeight;
-    }
-    const avgReps = sumReps / setsCompleted;
-    const avgWeight = sumWeight / setsCompleted;
-    const actualScore = avgReps * avgWeight * setsCompleted;
-    const executionRatio = actualScore / plannedScore;
-    if (!Number.isFinite(executionRatio)) {
-      return;
-    }
+
     out.push({
       createdAt,
-      actualScore,
-      plannedScore,
+      actualScore: strengthActualScore(ex),
+      plannedScore: strengthPlannedScore(ex),
       executionRatio,
     });
   });

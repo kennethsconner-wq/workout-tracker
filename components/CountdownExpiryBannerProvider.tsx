@@ -77,7 +77,7 @@ export function CountdownExpiryBannerProvider({ children }: { children: ReactNod
       {alert ? (
         <Animated.View
           pointerEvents="box-none"
-          style={[styles.overlay, { paddingBottom: Math.max(insets.bottom, 16) + 8, opacity }]}>
+          style={[styles.overlay, { paddingTop: Math.max(insets.top, 12) + 8, opacity }]}>
           <RNView
             style={[
               styles.banner,
@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
+    top: 0,
     paddingHorizontal: 16,
     gap: 10,
   },
@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOpacity: 0.2,
     shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     elevation: 4,
   },
   icon: {

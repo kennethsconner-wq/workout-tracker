@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
 import { AppState, Linking, Platform } from 'react-native';
 
 import {
@@ -15,8 +16,11 @@ const ANDROID_CHANNEL_ID = 'countdown-timers-v2';
 const EXACT_ALARM_PROMPT_KEY = 'countdown-exact-alarm-prompted@v2';
 
 let initialized = false;
-let notificationsModulePromise: Promise<typeof import('expo-notifications') | null> | null = null;
+let exactAlarmPromptShownThisSession = false;
+let androidChannelReadyPromise: Promise<void> | null = null;
 let countdownExpiryHandledListener: ((timerId: string) => void) | null = null;
+
+type NotificationsModule = typeof Notifications;
 
 export type CountdownLogSession = Pick<LogWorkoutSession, 'workoutId' | 'loggedWorkoutId' | 'intent'>;
 
@@ -56,19 +60,27 @@ export function countdownNotificationIdentifier(timerId: string): string {
   return `countdown-${timerId}`;
 }
 
-async function loadNotificationsModule(): Promise<typeof import('expo-notifications') | null> {
+function loadNotificationsModule(): NotificationsModule | null {
   if (!countdownNotificationsSupported()) {
     return null;
   }
-  if (!notificationsModulePromise) {
-    notificationsModulePromise = import('expo-notifications').catch(() => null);
-  }
-  return notificationsModulePromise;
+  return Notifications;
 }
 
-/** Warm the notifications module so the first countdown does not wait on a dynamic import. */
+/** Warm the notifications module so the first countdown does not wait on lazy loading. */
 export function preloadCountdownNotificationsModule(): void {
-  void loadNotificationsModule();
+  loadNotificationsModule();
+}
+
+async function isCountdownNotificationScheduled(timerId: string): Promise<boolean> {
+  const NotificationsModule = loadNotificationsModule();
+  if (!NotificationsModule) {
+    return false;
+  }
+
+  const identifier = countdownNotificationIdentifier(timerId);
+  const scheduled = await NotificationsModule.getAllScheduledNotificationsAsync();
+  return scheduled.some((request) => request.identifier === identifier);
 }
 
 function isCountdownExpiryNotificationData(data: Record<string, unknown> | undefined): boolean {
@@ -117,6 +129,27 @@ function handleCountdownNotificationResponse(data: Record<string, unknown> | und
   focusLogWorkoutExercise(session, exerciseId);
 }
 
+async function ensureAndroidNotificationChannel(
+  NotificationsModule: NotificationsModule,
+): Promise<void> {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+
+  if (!androidChannelReadyPromise) {
+    androidChannelReadyPromise = NotificationsModule.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
+      name: 'Countdown timers',
+      importance: NotificationsModule.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 150, 250],
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: false,
+    }).then(() => undefined);
+  }
+
+  await androidChannelReadyPromise;
+}
+
 export function initializeCountdownNotifications(): void {
   preloadCountdownNotificationsModule();
 
@@ -126,13 +159,13 @@ export function initializeCountdownNotifications(): void {
   initialized = true;
 
   void (async () => {
-    const Notifications = await loadNotificationsModule();
-    if (!Notifications) {
+    const NotificationsModule = loadNotificationsModule();
+    if (!NotificationsModule) {
       initialized = false;
       return;
     }
 
-    Notifications.setNotificationHandler({
+    NotificationsModule.setNotificationHandler({
       handleNotification: async (notification) => {
         const data = notification.request.content.data as Record<string, unknown> | undefined;
         if (isCountdownExpiryNotificationData(data) && isAppForegroundForCountdownNotifications()) {
@@ -154,42 +187,43 @@ export function initializeCountdownNotifications(): void {
     });
 
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
-        name: 'Countdown timers',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 150, 250],
-        sound: 'default',
-      });
+      await ensureAndroidNotificationChannel(NotificationsModule);
     }
 
-    Notifications.addNotificationResponseReceivedListener((response) => {
+    NotificationsModule.addNotificationResponseReceivedListener((response) => {
       handleCountdownNotificationResponse(response.notification.request.content.data);
     });
 
-    Notifications.addNotificationReceivedListener((notification) => {
-      notifyCountdownExpiryHandled(notification.request.content.data);
+    NotificationsModule.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data as Record<string, unknown> | undefined;
+      // Foreground expiry is handled by DurationTimerProvider (in-app banner). Marking handled
+      // here would suppress that banner while the notification handler hides the system alert.
+      if (isCountdownExpiryNotificationData(data) && isAppForegroundForCountdownNotifications()) {
+        return;
+      }
+      notifyCountdownExpiryHandled(data);
     });
 
-    const initialResponse = await Notifications.getLastNotificationResponseAsync();
+    const initialResponse = await NotificationsModule.getLastNotificationResponseAsync();
     if (initialResponse) {
       handleCountdownNotificationResponse(initialResponse.notification.request.content.data);
-      Notifications.clearLastNotificationResponse();
+      NotificationsModule.clearLastNotificationResponse();
     }
   })();
 }
 
 export async function ensureCountdownNotificationPermissions(): Promise<boolean> {
-  const Notifications = await loadNotificationsModule();
-  if (!Notifications) {
+  const NotificationsModule = loadNotificationsModule();
+  if (!NotificationsModule) {
     return false;
   }
 
-  const current = await Notifications.getPermissionsAsync();
-  if (current.granted || current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+  const current = await NotificationsModule.getPermissionsAsync();
+  if (current.granted || current.ios?.status === NotificationsModule.IosAuthorizationStatus.PROVISIONAL) {
     return true;
   }
 
-  const requested = await Notifications.requestPermissionsAsync({
+  const requested = await NotificationsModule.requestPermissionsAsync({
     ios: {
       allowAlert: true,
       allowBadge: false,
@@ -198,34 +232,49 @@ export async function ensureCountdownNotificationPermissions(): Promise<boolean>
   });
 
   return (
-    requested.granted || requested.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+    requested.granted || requested.ios?.status === NotificationsModule.IosAuthorizationStatus.PROVISIONAL
   );
 }
 
-/** Android 12+ needs the Alarms & reminders permission for sub-minute precise countdown alerts. */
-export async function promptForExactAlarmPermissionIfNeeded(): Promise<void> {
-  if (Platform.OS !== 'android') {
+/** Android 12+ needs the Alarms & reminders permission for precise countdown alerts. */
+export async function promptForExactAlarmPermissionIfNeeded(options?: { force?: boolean }): Promise<void> {
+  if (Platform.OS !== 'android' || Platform.Version < 31) {
     return;
   }
 
-  const alreadyPrompted = await AsyncStorage.getItem(EXACT_ALARM_PROMPT_KEY);
-  if (alreadyPrompted === '1') {
+  const dismissedPermanently = await AsyncStorage.getItem(EXACT_ALARM_PROMPT_KEY);
+  if (dismissedPermanently === '1' && !options?.force) {
+    return;
+  }
+  if (exactAlarmPromptShownThisSession && !options?.force) {
     return;
   }
 
-  await AsyncStorage.setItem(EXACT_ALARM_PROMPT_KEY, '1');
+  exactAlarmPromptShownThisSession = true;
 
   themedAlert(
-    'Enable precise countdown alerts',
-    'On the next screen, allow Alarms & reminders for Axios Workouts so stretch and cardio timers notify you on time. If the app is not listed, reinstall the latest build and try again.',
+    'Enable background timer alerts',
+    'For countdown timers to notify you when the app is in the background, allow Alarms & reminders for Axios Workouts on the next screen.',
     [
       {
-        text: 'Open settings',
+        text: 'Alarms & reminders',
         onPress: () => {
           void openExactAlarmSettings();
         },
       },
-      { text: 'Not now', style: 'cancel' },
+      {
+        text: 'App settings',
+        onPress: () => {
+          void openAppSettings();
+        },
+      },
+      {
+        text: 'Not now',
+        style: 'cancel',
+        onPress: () => {
+          void AsyncStorage.setItem(EXACT_ALARM_PROMPT_KEY, '1');
+        },
+      },
     ],
   );
 }
@@ -236,6 +285,15 @@ async function openExactAlarmSettings(): Promise<void> {
     await Linking.sendIntent('android.settings.REQUEST_SCHEDULE_EXACT_ALARM', [
       { key: 'android.provider.extra.APP_PACKAGE', value: pkg },
     ]);
+  } catch {
+    await openAppSettings();
+  }
+}
+
+async function openAppSettings(): Promise<void> {
+  const pkg = Constants.expoConfig?.android?.package ?? 'com.kconsoft.workouttracker';
+  try {
+    await Linking.sendIntent('android.settings.APPLICATION_DETAILS_SETTINGS', [{ key: 'package', value: pkg }]);
   } catch {
     try {
       await Linking.openSettings();
@@ -274,21 +332,12 @@ type ScheduleCountdownExpiryNotificationInput = CountdownNotificationContentInpu
   fireAtMs: number;
 };
 
-export async function scheduleCountdownExpiryNotification(
+async function scheduleCountdownExpiryNotificationInternal(
   input: ScheduleCountdownExpiryNotificationInput,
+  options?: { skipExactAlarmPrompt?: boolean },
 ): Promise<boolean> {
-  if (isAppForegroundForCountdownNotifications()) {
-    return false;
-  }
-
-  const secondsUntilFire = Math.ceil((input.fireAtMs - Date.now()) / 1000);
-  if (secondsUntilFire <= 0) {
-    await presentCountdownExpiryNotificationNow(input);
-    return true;
-  }
-
-  const Notifications = await loadNotificationsModule();
-  if (!Notifications) {
+  const NotificationsModule = loadNotificationsModule();
+  if (!NotificationsModule) {
     return false;
   }
 
@@ -298,23 +347,58 @@ export async function scheduleCountdownExpiryNotification(
   }
 
   if (Platform.OS === 'android') {
-    await promptForExactAlarmPermissionIfNeeded();
+    await ensureAndroidNotificationChannel(NotificationsModule);
+    if (!options?.skipExactAlarmPrompt) {
+      await promptForExactAlarmPermissionIfNeeded();
+    }
   }
 
   const identifier = countdownNotificationIdentifier(input.timerId);
 
-  await Notifications.cancelScheduledNotificationAsync(identifier);
+  await NotificationsModule.cancelScheduledNotificationAsync(identifier);
 
-  await Notifications.scheduleNotificationAsync({
+  await NotificationsModule.scheduleNotificationAsync({
     identifier,
     content: buildCountdownNotificationContent(input),
     trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      type: NotificationsModule.SchedulableTriggerInputTypes.DATE,
       date: new Date(input.fireAtMs),
+      ...(Platform.OS === 'android' ? { channelId: ANDROID_CHANNEL_ID } : {}),
     },
   });
 
-  return true;
+  return isCountdownNotificationScheduled(input.timerId);
+}
+
+export async function scheduleCountdownExpiryNotification(
+  input: ScheduleCountdownExpiryNotificationInput,
+): Promise<boolean> {
+  const secondsUntilFire = Math.ceil((input.fireAtMs - Date.now()) / 1000);
+  if (secondsUntilFire <= 0) {
+    if (!isAppForegroundForCountdownNotifications()) {
+      await presentCountdownExpiryNotificationNow(input);
+    }
+    return true;
+  }
+
+  try {
+    const scheduled = await scheduleCountdownExpiryNotificationInternal(input);
+    if (scheduled) {
+      return true;
+    }
+
+    if (Platform.OS === 'android') {
+      await promptForExactAlarmPermissionIfNeeded({ force: true });
+      return scheduleCountdownExpiryNotificationInternal(input, { skipExactAlarmPrompt: true });
+    }
+
+    return false;
+  } catch {
+    if (Platform.OS === 'android') {
+      await promptForExactAlarmPermissionIfNeeded({ force: true });
+    }
+    return false;
+  }
 }
 
 /** Immediate alert used when the app detects expiry while backgrounded (avoids inexact-alarm delay). */
@@ -325,8 +409,8 @@ export async function presentCountdownExpiryNotificationNow(
     return;
   }
 
-  const Notifications = await loadNotificationsModule();
-  if (!Notifications) {
+  const NotificationsModule = loadNotificationsModule();
+  if (!NotificationsModule) {
     return;
   }
 
@@ -335,7 +419,11 @@ export async function presentCountdownExpiryNotificationNow(
     return;
   }
 
-  await Notifications.scheduleNotificationAsync({
+  if (Platform.OS === 'android') {
+    await ensureAndroidNotificationChannel(NotificationsModule);
+  }
+
+  await NotificationsModule.scheduleNotificationAsync({
     identifier: `${countdownNotificationIdentifier(input.timerId)}-now-${Date.now()}`,
     content: buildCountdownNotificationContent(input),
     trigger: null,
@@ -343,9 +431,9 @@ export async function presentCountdownExpiryNotificationNow(
 }
 
 export async function cancelCountdownExpiryNotification(timerId: string): Promise<void> {
-  const Notifications = await loadNotificationsModule();
-  if (!Notifications) {
+  const NotificationsModule = loadNotificationsModule();
+  if (!NotificationsModule) {
     return;
   }
-  await Notifications.cancelScheduledNotificationAsync(countdownNotificationIdentifier(timerId));
+  await NotificationsModule.cancelScheduledNotificationAsync(countdownNotificationIdentifier(timerId));
 }

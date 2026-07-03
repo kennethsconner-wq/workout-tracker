@@ -11,6 +11,7 @@ function withAndroidExactAlarmPermission(config) {
       config.modResults,
       'android.permission.POST_NOTIFICATIONS',
     );
+    AndroidConfig.Permissions.ensurePermission(config.modResults, 'android.permission.WAKE_LOCK');
     return config;
   });
 }
