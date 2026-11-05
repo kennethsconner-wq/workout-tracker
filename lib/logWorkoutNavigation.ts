@@ -1,6 +1,13 @@
 import { router } from 'expo-router';
 
 import { clearNewLogDraft } from '@/lib/logWorkoutDraft';
+import type { WorkoutExercise } from '@/lib/types';
+
+export type PendingLogExercise = {
+  exercise: WorkoutExercise;
+  /** Library catalog id, when this row was copied from an existing exercise. */
+  libraryExerciseId?: string;
+};
 
 export type LogWorkoutSession = {
   intent: 'new' | 'edit';
@@ -14,6 +21,17 @@ export type LogWorkoutSession = {
  */
 let pendingSession: LogWorkoutSession | null = null;
 let pendingFocusExerciseId: string | null = null;
+let pendingLogExercises: PendingLogExercise[] | null = null;
+
+export function queuePendingLogExercises(exercises: PendingLogExercise[]): void {
+  pendingLogExercises = exercises;
+}
+
+export function consumePendingLogExercises(): PendingLogExercise[] | null {
+  const pending = pendingLogExercises;
+  pendingLogExercises = null;
+  return pending;
+}
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -26,6 +44,7 @@ export function beginLogWorkoutSession(session: LogWorkoutSession): void {
 export function clearLogWorkoutSession(): void {
   pendingSession = null;
   pendingFocusExerciseId = null;
+  pendingLogExercises = null;
 }
 
 export function consumePendingFocusExerciseId(): string | null {

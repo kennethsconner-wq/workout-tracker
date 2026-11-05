@@ -17,7 +17,7 @@ import { activityTypeLabel, getLogExerciseLogDisplay } from '@/lib/exerciseDispl
 import { navigateToEditLoggedWorkout } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
 import { useDataRepository } from '@/lib/data/DataRepositoryContext';
-import type { LoggedWorkout } from '@/lib/types';
+import type { LoggedWorkout, Workout } from '@/lib/types';
 
 /** Local calendar date key `YYYY-MM-DD` from an ISO timestamp. */
 function localDateKeyFromIso(iso: string): string {
@@ -53,6 +53,7 @@ export function LoggedWorkoutLogList() {
   const textColor = Colors[activeScheme].text;
 
   const [workouts, setWorkouts] = useState<LoggedWorkout[]>([]);
+  const [templates, setTemplates] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
@@ -62,9 +63,10 @@ export function LoggedWorkoutLogList() {
     useCallback(() => {
       let cancelled = false;
       void (async () => {
-        const next = await repo.loadLoggedWorkouts();
+        const [nextLogs, nextTemplates] = await Promise.all([repo.loadLoggedWorkouts(), repo.loadWorkouts()]);
         if (!cancelled) {
-          setWorkouts(next);
+          setWorkouts(nextLogs);
+          setTemplates(nextTemplates);
           setLoading(false);
         }
       })();
@@ -166,6 +168,14 @@ export function LoggedWorkoutLogList() {
     year: 'numeric',
   });
 
+  const templateExerciseIds = useMemo(() => {
+    const byWorkoutId = new Map<string, Set<string>>();
+    for (const template of templates) {
+      byWorkoutId.set(template.id, new Set(template.exercises.map((exercise) => exercise.id)));
+    }
+    return byWorkoutId;
+  }, [templates]);
+
   const selectedDayLogs = selectedDateKey ? (logsByDate.get(selectedDateKey) ?? []) : [];
   const selectedDayLabel = selectedDateKey
     ? new Date(
@@ -214,12 +224,15 @@ export function LoggedWorkoutLogList() {
       </Text>
       {item.exercises.map((ex) => {
         const display = getLogExerciseLogDisplay(ex);
+        const templateIds = templateExerciseIds.get(item.workoutId);
+        const sessionOnly = templateIds != null && !templateIds.has(ex.workoutExerciseId);
         return (
           <View key={ex.id} style={styles.exerciseBlock}>
             <Text style={[styles.exerciseName, { color: textColor }]}>
               {ex.name}
               <Text style={styles.activityTypeMeta}> · {activityTypeLabel(ex.activityType)}</Text>
             </Text>
+            {sessionOnly ? <Text style={styles.sessionOnlyLabel}>This Session Only</Text> : null}
             <Text style={[styles.setLine, { color: textColor }]}>Planned: {display.plannedSummary}</Text>
             {display.rows.length > 0 ? (
               display.rows.map((row) => (
@@ -528,6 +541,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     opacity: 0.65,
+  },
+  sessionOnlyLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    opacity: 0.7,
   },
   setLine: {
     fontSize: 16,
