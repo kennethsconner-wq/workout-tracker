@@ -11,7 +11,8 @@
     "web": "expo start --web",
     "prebuild": "npm run generate:android-icon && expo prebuild",
     "prebuild:ios": "expo prebuild --platform ios",
-    "generate:android-icon": "node scripts/generate-android-adaptive-foreground.js"
+    "generate:android-icon": "node scripts/generate-android-adaptive-foreground.js",
+    "eas-build-post-install": "bash scripts/write-xcode-node-binary.sh"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

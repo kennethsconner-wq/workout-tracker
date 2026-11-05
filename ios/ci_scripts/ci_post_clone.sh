@@ -17,3 +17,6 @@ npm install
 
 echo "Installing CocoaPods dependencies..."
 pod install --repo-update
+
+echo "Recording the Node binary for Xcode script phases..."
+bash "${CI_PRIMARY_REPOSITORY_PATH:-$(cd "$(dirname "$0")/../.." && pwd)}/scripts/write-xcode-node-binary.sh"
