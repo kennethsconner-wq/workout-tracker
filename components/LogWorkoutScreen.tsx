@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,6 +12,12 @@ import {
   StyleSheet,
   View as RNView,
 } from 'react-native';
+
+import {
+  ADD_TO_WORKOUT_HELP,
+  ADD_TO_WORKOUT_LABEL,
+  AddExerciseDuringLogModal,
+} from '@/components/AddExerciseDuringLogModal';
 
 import { CardioDurationLogField } from '@/components/CardioDurationLogField';
 import { RestBetweenSetsLogRow } from '@/components/RestBetweenSetsLogRow';
@@ -33,8 +40,10 @@ import { useColorScheme } from '@/components/useColorScheme';
 import {
   clearLogWorkoutSession,
   consumePendingFocusExerciseId,
+  consumePendingLogExercises,
   resolveLogWorkoutSession,
   type LogWorkoutSession,
+  type PendingLogExercise,
 } from '@/lib/logWorkoutNavigation';
 import { themedAlert } from '@/lib/themedAlert';
 import { queueWorkoutSaveCelebration } from '@/lib/workoutSaveCelebration';
@@ -64,7 +73,7 @@ import {
   type LegacyCardioDistanceMode,
 } from '@/lib/cardioPlan';
 import { readStretchSetsFromExercise, stretchActualSetsFromLogged } from '@/lib/stretchSets';
-import type { LoggedWorkout, LoggedWorkoutExercise, StretchSet, Workout } from '@/lib/types';
+import type { LoggedWorkout, LoggedWorkoutExercise, StretchSet, Workout, WorkoutExercise } from '@/lib/types';
 import { normalizeActivityType } from '@/lib/activityTypes';
 import {
   formatCardioDistanceValue,
@@ -103,6 +112,8 @@ import {
   isStretchSetEditable,
 } from '@/lib/logSetCompletion';
 import { readStrengthPlannedSnapshotFromDraft, resolveExerciseSetCount } from '@/lib/exerciseDraft';
+import { exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
+import { validateExerciseNamesForWorkoutSave } from '@/lib/exerciseNameValidation';
 import { clearNewLogDraft, newLogDraftStorageKey, shouldPersistNewLogDraft } from '@/lib/logWorkoutDraft';
 import { DEFAULT_WORKOUT_ICON_ID, type WorkoutIconId } from '@/lib/workoutIcons';
 import { useDataRepository } from '@/lib/data/DataRepositoryContext';
@@ -151,6 +162,12 @@ type DraftExercise = Omit<
   restBetweenSetsEnabled?: boolean;
   restDuration?: number;
   restDurationUnit?: DurationUnit;
+  /** Added from the library or created during this log, rather than loaded from the workout template. */
+  addedDuringLog?: boolean;
+  /** When added during the log, also append this exercise to the workout template on save. */
+  addToWorkout?: boolean;
+  /** Library catalog id when this row was copied from an existing exercise. */
+  libraryExerciseId?: string;
 };
 
 type LogWorkoutDraft = {
@@ -459,10 +476,17 @@ function loggedExerciseToDraftExercise(loggedExercise: LoggedWorkoutExercise): D
   };
 }
 
-function emptyDraftForTemplateExercise(exercise: Workout['exercises'][number]): DraftExercise {
+function emptyDraftForTemplateExercise(
+  exercise: Workout['exercises'][number],
+  options?: { addedDuringLog?: boolean; addToWorkout?: boolean; libraryExerciseId?: string },
+): DraftExercise {
+  const addedDuringLog = options?.addedDuringLog === true;
   const base: DraftExercise = {
     id: newId(),
     workoutExerciseId: exercise.id,
+    addedDuringLog,
+    addToWorkout: addedDuringLog ? options?.addToWorkout !== false : undefined,
+    libraryExerciseId: options?.libraryExerciseId,
     activityType: exercise.activityType,
     name: exercise.name,
     sets: exercise.sets,
@@ -573,6 +597,13 @@ function resolveTemplateExerciseIdForLogged(
   index: number,
   usedTemplateIds: Set<string>,
 ): string {
+  if (
+    typeof le.workoutExerciseId === 'string' &&
+    le.workoutExerciseId.length > 0 &&
+    !template.exercises.some((exercise) => exercise.id === le.workoutExerciseId)
+  ) {
+    return le.workoutExerciseId;
+  }
   const candidates = [le.workoutExerciseId, le.id].filter(
     (id, candidateIndex, all): id is string =>
       typeof id === 'string' &&
@@ -614,18 +645,22 @@ function buildDraftExercisesFromLogged(logged: LoggedWorkout, template: Workout)
         templateExerciseId !== le.workoutExerciseId ? { ...le, workoutExerciseId: templateExerciseId } : le;
       const draft = loggedExerciseToDraftExercise(normalized);
       const templateExercise = templateById.get(templateExerciseId);
+      const sessionOnly = !templateExercise;
+      const withMembership: DraftExercise = sessionOnly
+        ? { ...draft, addedDuringLog: true, addToWorkout: false }
+        : draft;
       if (
         templateExercise &&
         (templateExercise.activityType === 'strength' || templateExercise.activityType === 'stretch')
       ) {
         return {
-          ...draft,
+          ...withMembership,
           restBetweenSetsEnabled: templateExercise.restBetweenSetsEnabled,
           restDuration: templateExercise.restDuration,
           restDurationUnit: templateExercise.restDurationUnit,
         };
       }
-      return draft;
+      return withMembership;
     }),
   );
 }
@@ -843,9 +878,88 @@ function parseDraftExercisesFromStorage(raw: unknown): DraftExercise[] | null {
           : typeof o.weightUnit === 'string'
             ? normalizeWeightUnit(o.weightUnit)
             : DEFAULT_WEIGHT_UNIT,
+      addedDuringLog: o.addedDuringLog === true,
+      addToWorkout: o.addedDuringLog === true ? o.addToWorkout !== false : undefined,
+      libraryExerciseId: typeof o.libraryExerciseId === 'string' ? o.libraryExerciseId : undefined,
     });
   }
   return out;
+}
+
+function workoutExerciseFromLogDraft(exercise: DraftExercise): WorkoutExercise {
+  return {
+    id: exercise.workoutExerciseId,
+    activityType: exercise.activityType,
+    name: exercise.name,
+    sets: exercise.sets,
+    reps: exercise.reps,
+    weight: exercise.weight,
+    weightUnit: exercise.weightUnit,
+    duration: exercise.duration,
+    durationUnit: exercise.durationUnit,
+    distance: exercise.distance,
+    distanceUnit: exercise.distanceUnit,
+    cardioObjective: exercise.cardioObjective,
+    cardioDurationTracking: exercise.cardioDurationTracking,
+    cardioDistanceTracking: exercise.cardioDistanceTracking,
+    cardioPaceDuration: exercise.cardioPaceDuration,
+    cardioPaceDurationUnit: exercise.cardioPaceDurationUnit,
+    cardioPaceDistance: exercise.cardioPaceDistance,
+    cardioPaceDistanceUnit: exercise.cardioPaceDistanceUnit,
+    score: exercise.score,
+    scoreUnit: exercise.scoreUnit,
+    stretchSets:
+      exercise.activityType === 'stretch'
+        ? readStretchSetsFromExercise({
+            sets: exercise.sets,
+            duration: exercise.duration,
+            durationUnit: exercise.durationUnit,
+            stretchSets: exercise.stretchSets,
+          })
+        : undefined,
+    restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
+    restDuration: exercise.restDuration,
+    restDurationUnit: exercise.restDurationUnit,
+  };
+}
+
+function mergePendingLogExercises(
+  workout: Workout,
+  current: DraftExercise[],
+  omittedWorkoutExerciseIds: readonly string[],
+  pending: PendingLogExercise[],
+): { exercises: DraftExercise[]; omittedWorkoutExerciseIds: string[] } {
+  const exercises = [...current];
+  let omitted = [...omittedWorkoutExerciseIds];
+  const signatures = new Set(exercises.map((exercise) => exerciseDefinitionSignatureKey(exercise)));
+
+  for (const item of pending) {
+    const signature = exerciseDefinitionSignatureKey(item.exercise);
+    if (signatures.has(signature)) {
+      continue;
+    }
+    const templateMatch = workout.exercises.find(
+      (exercise) => exerciseDefinitionSignatureKey(exercise) === signature,
+    );
+    if (templateMatch) {
+      omitted = omitted.filter((id) => id !== templateMatch.id);
+      if (!exercises.some((exercise) => exercise.workoutExerciseId === templateMatch.id)) {
+        exercises.push(emptyDraftForTemplateExercise(templateMatch));
+      }
+      signatures.add(signature);
+      continue;
+    }
+    exercises.push(
+      emptyDraftForTemplateExercise(item.exercise, {
+        addedDuringLog: true,
+        addToWorkout: true,
+        libraryExerciseId: item.libraryExerciseId,
+      }),
+    );
+    signatures.add(signature);
+  }
+
+  return { exercises, omittedWorkoutExerciseIds: omitted };
 }
 
 function normalizeDraftExercises(
@@ -856,8 +970,8 @@ function normalizeDraftExercises(
   const omit = new Set(omittedWorkoutExerciseIds);
   const savedList = Array.isArray(savedExercises) ? (savedExercises as DraftExercise[]) : [];
   const savedQueues = buildSavedDraftQueues(savedList);
-  return ensureUniqueDraftExerciseIds(
-    workout.exercises
+  const templateIds = new Set(workout.exercises.map((exercise) => exercise.id));
+  const fromTemplate = workout.exercises
     .filter((exercise) => !omit.has(exercise.id))
     .map((exercise) => {
       const saved = takeSavedDraftForTemplateExercise(savedQueues, exercise.id);
@@ -975,8 +1089,22 @@ function normalizeDraftExercises(
         actualScoreUnit: exercise.scoreUnit,
         actualWeightUnit: exercise.weightUnit,
       };
-    }),
-  );
+    });
+  const addedDuringLog: DraftExercise[] = [];
+  for (const [workoutExerciseId, queue] of savedQueues) {
+    if (templateIds.has(workoutExerciseId) || omit.has(workoutExerciseId)) {
+      continue;
+    }
+    for (const saved of queue) {
+      addedDuringLog.push({
+        ...saved,
+        addedDuringLog: true,
+        addToWorkout: saved.addToWorkout !== false,
+        libraryExerciseId: typeof saved.libraryExerciseId === 'string' ? saved.libraryExerciseId : undefined,
+      });
+    }
+  }
+  return ensureUniqueDraftExerciseIds([...fromTemplate, ...addedDuringLog]);
 }
 
 function toDraftExercises(workout: Workout): DraftExercise[] {
@@ -1009,6 +1137,7 @@ export default function LogWorkoutScreen() {
   const [workout, setWorkout] = useState<Workout | null>(null);
   const [exercises, setExercises] = useState<DraftExercise[]>([]);
   const [omittedWorkoutExerciseIds, setOmittedWorkoutExerciseIds] = useState<string[]>([]);
+  const [createExerciseOpen, setCreateExerciseOpen] = useState(false);
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [loadedFromDraft, setLoadedFromDraft] = useState(false);
   const [displayIconId, setDisplayIconId] = useState<WorkoutIconId>(DEFAULT_WORKOUT_ICON_ID);
@@ -1199,6 +1328,13 @@ export default function LogWorkoutScreen() {
         return;
       }
 
+      const pendingExercises = consumePendingLogExercises();
+      if (pendingExercises && pendingExercises.length > 0) {
+        const merged = mergePendingLogExercises(selectedWorkout, nextExercises, nextOmitted, pendingExercises);
+        nextExercises = merged.exercises;
+        nextOmitted = merged.omittedWorkoutExerciseIds;
+      }
+
       setWorkout(selectedWorkout);
       setDisplayIconId(iconIdForHeader);
       setOmittedWorkoutExerciseIds(nextOmitted);
@@ -1211,6 +1347,31 @@ export default function LogWorkoutScreen() {
       skipAutosaveRef.current = false;
     })();
   }, [session?.workoutId, session?.loggedWorkoutId, session?.intent]);
+
+  const exercisesRef = useRef(exercises);
+  const omittedRef = useRef(omittedWorkoutExerciseIds);
+  exercisesRef.current = exercises;
+  omittedRef.current = omittedWorkoutExerciseIds;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!draftHydrated || !workout) {
+        return;
+      }
+      const pendingExercises = consumePendingLogExercises();
+      if (!pendingExercises || pendingExercises.length === 0) {
+        return;
+      }
+      const merged = mergePendingLogExercises(
+        workout,
+        exercisesRef.current,
+        omittedRef.current,
+        pendingExercises,
+      );
+      setExercises(merged.exercises);
+      setOmittedWorkoutExerciseIds(merged.omittedWorkoutExerciseIds);
+    }, [draftHydrated, workout]),
+  );
 
   useEffect(() => {
     if (
@@ -1803,6 +1964,62 @@ export default function LogWorkoutScreen() {
         }
         const { loggedWorkoutId, intent } = session;
         const createdAt = sessionDate.toISOString();
+        const latestWorkout = await repo.getWorkoutById(parsed.workout.id);
+        if (!latestWorkout) {
+          skipAutosaveRef.current = false;
+          themedAlert('Workout not found', 'Could not update this workout.');
+          return;
+        }
+        const templateIds = new Set(latestWorkout.exercises.map((exercise) => exercise.id));
+        const templateSignatures = new Set(
+          latestWorkout.exercises.map((exercise) => exerciseDefinitionSignatureKey(exercise)),
+        );
+        const permanentAdditions = exercises.filter(
+          (exercise) =>
+            exercise.addedDuringLog &&
+            exercise.addToWorkout !== false &&
+            !templateIds.has(exercise.workoutExerciseId) &&
+            !templateSignatures.has(exerciseDefinitionSignatureKey(exercise)),
+        );
+        const createdForLibrary = exercises.filter(
+          (exercise) => exercise.addedDuringLog && !exercise.libraryExerciseId,
+        );
+        if (permanentAdditions.length > 0 || createdForLibrary.length > 0) {
+          const additions = permanentAdditions.map(workoutExerciseFromLogDraft);
+          const sessionOnlyCreated = createdForLibrary
+            .filter((exercise) => !permanentAdditions.some((item) => item.id === exercise.id))
+            .map(workoutExerciseFromLogDraft);
+          const allWorkouts = await repo.loadWorkouts();
+          const nameCheck = validateExerciseNamesForWorkoutSave(allWorkouts, latestWorkout.id, [
+            ...latestWorkout.exercises,
+            ...additions,
+            ...sessionOnlyCreated,
+          ]);
+          if (!nameCheck.ok) {
+            skipAutosaveRef.current = false;
+            themedAlert(nameCheck.title, nameCheck.message);
+            return;
+          }
+        }
+        if (permanentAdditions.length > 0) {
+          const additions = permanentAdditions.map(workoutExerciseFromLogDraft);
+          const updatedWorkout = await repo.updateWorkout(latestWorkout.id, {
+            title: latestWorkout.title,
+            daysOfWeek: latestWorkout.daysOfWeek,
+            iconId: latestWorkout.iconId,
+            exercises: [...latestWorkout.exercises, ...additions],
+          });
+          if (!updatedWorkout) {
+            skipAutosaveRef.current = false;
+            themedAlert('Save failed', 'Could not add the exercise to this workout.');
+            return;
+          }
+        }
+        if (createdForLibrary.length > 0) {
+          await repo.upsertExerciseLibraryFromDefinitions(
+            createdForLibrary.map((exercise) => workoutExerciseFromLogDraft(exercise)),
+          );
+        }
         if (intent === 'edit' && loggedWorkoutId) {
           const updated = await repo.updateLoggedWorkout(loggedWorkoutId, {
             workoutId: parsed.workout.id,
@@ -1977,6 +2194,37 @@ export default function LogWorkoutScreen() {
               </Pressable>
             </View>
             <Text style={[styles.exerciseName, { color: textColor }]}>{exercise.name}</Text>
+            {exercise.addedDuringLog ? (
+              <View style={styles.addToWorkoutRow} lightColor="transparent" darkColor="transparent">
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: exercise.addToWorkout !== false }}
+                  accessibilityLabel={`${ADD_TO_WORKOUT_LABEL}: ${exercise.name}`}
+                  onPress={() =>
+                    setExercises((prev) =>
+                      prev.map((item) =>
+                        item.id === exercise.id ? { ...item, addToWorkout: item.addToWorkout === false } : item,
+                      ),
+                    )
+                  }
+                  style={styles.addToWorkoutToggle}>
+                  <Ionicons
+                    name={exercise.addToWorkout !== false ? 'checkbox' : 'square-outline'}
+                    size={22}
+                    color={Colors[activeScheme].tint}
+                  />
+                  <Text style={[styles.addToWorkoutLabel, { color: textColor }]}>{ADD_TO_WORKOUT_LABEL}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`About ${ADD_TO_WORKOUT_LABEL}`}
+                  hitSlop={10}
+                  onPress={() => themedAlert(ADD_TO_WORKOUT_LABEL, ADD_TO_WORKOUT_HELP, [{ text: 'OK' }])}
+                  style={({ pressed }) => [styles.addToWorkoutInfo, { opacity: pressed ? 0.55 : 1 }]}>
+                  <Ionicons name="information-circle-outline" size={20} color={Colors[activeScheme].tint} />
+                </Pressable>
+              </View>
+            ) : null}
             <Text style={styles.plannedLine}>
               Planned:{' '}
               {exercise.activityType === 'cardio'
@@ -2655,10 +2903,71 @@ export default function LogWorkoutScreen() {
           </View>
           );
         })}
+        <View style={styles.exerciseActionsRow} lightColor="transparent" darkColor="transparent">
+          <Pressable onPress={() => setCreateExerciseOpen(true)} style={styles.secondaryButton}>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Create Exercise</Text>
+          </Pressable>
+          <Text style={styles.orLabel}>or</Text>
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/exercise-library',
+                params: {
+                  source: 'log',
+                  excludeIds: JSON.stringify(
+                    exercises.flatMap((exercise) =>
+                      [exercise.workoutExerciseId, exercise.libraryExerciseId].filter(
+                        (id): id is string => typeof id === 'string' && id.length > 0,
+                      ),
+                    ),
+                  ),
+                  excludeSignatures: JSON.stringify(
+                    exercises.map((exercise) => exerciseDefinitionSignatureKey(exercise)),
+                  ),
+                },
+              })
+            }
+            style={styles.secondaryButton}>
+            <Text style={[styles.secondaryButtonLabel, { color: Colors[activeScheme].tint }]}>Add Existing</Text>
+          </Pressable>
+        </View>
         </ScrollView>
         <StickySaveFooter label="Finish Workout" onPress={onSave} activeScheme={activeScheme} />
       </KeyboardAvoidingView>
       </LogWorkoutKeyboardScrollProvider>
+      <AddExerciseDuringLogModal
+        visible={createExerciseOpen}
+        activeScheme={activeScheme}
+        onClose={() => setCreateExerciseOpen(false)}
+        onAdd={(exercise, addToWorkout) => {
+          if (!workout) {
+            return;
+          }
+          const signature = exerciseDefinitionSignatureKey(exercise);
+          if (exercises.some((item) => exerciseDefinitionSignatureKey(item) === signature)) {
+            themedAlert('Already in this log', `"${exercise.name}" is already part of this logged workout.`);
+            return;
+          }
+          const templateMatch = workout.exercises.find(
+            (item) => exerciseDefinitionSignatureKey(item) === signature,
+          );
+          if (templateMatch) {
+            setOmittedWorkoutExerciseIds((prev) => prev.filter((id) => id !== templateMatch.id));
+            setExercises((prev) =>
+              prev.some((item) => item.workoutExerciseId === templateMatch.id)
+                ? prev
+                : [...prev, emptyDraftForTemplateExercise(templateMatch)],
+            );
+            setCreateExerciseOpen(false);
+            return;
+          }
+          setExercises((prev) => [
+            ...prev,
+            emptyDraftForTemplateExercise(exercise, { addedDuringLog: true, addToWorkout }),
+          ]);
+          setCreateExerciseOpen(false);
+        }}
+      />
     </RNView>
   );
 }
@@ -2916,6 +3225,47 @@ const styles = StyleSheet.create({
   exerciseName: {
     fontSize: 20,
     fontWeight: '700',
+  },
+  addToWorkoutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  addToWorkoutToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 1,
+  },
+  addToWorkoutLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  addToWorkoutInfo: {
+    padding: 2,
+  },
+  exerciseActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    paddingVertical: 4,
+  },
+  secondaryButton: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  secondaryButtonLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  orLabel: {
+    fontSize: 15,
+    opacity: 0.7,
+    fontWeight: '600',
   },
   plannedLine: {
     fontSize: 16,

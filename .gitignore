@@ -39,6 +39,9 @@ ios/xcuserdata/
 !.env.example
 .env*.local
 
+# Supabase CLI temp files
+supabase/.temp/
+
 # typescript
 *.tsbuildinfo
 

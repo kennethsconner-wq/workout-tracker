@@ -30,13 +30,16 @@ import {
   type ExerciseDraftRow,
   type ExerciseDraftSeed,
 } from '@/lib/exerciseDraft';
+import { queuePendingLogExercises } from '@/lib/logWorkoutNavigation';
+import { exerciseDefinitionSignatureKey } from '@/lib/exerciseSnapshot';
+import { newId } from '@/lib/ids';
 import { normalizeWorkoutIconId, type WorkoutIconId } from '@/lib/workoutIcons';
 import { validateExerciseNamesAfterLibraryEdit } from '@/lib/exerciseNameValidation';
 import { useDataRepository } from '@/lib/data/DataRepositoryContext';
 import { themedAlert } from '@/lib/themedAlert';
 import { DAYS_OF_WEEK, type DayOfWeek, type WorkoutExercise } from '@/lib/types';
 
-type RouteSource = 'create' | 'edit';
+type RouteSource = 'create' | 'edit' | 'log';
 type ExerciseListItem = Pick<
   WorkoutExercise,
   | 'id'
@@ -63,6 +66,7 @@ type ExerciseListItem = Pick<
   | 'restBetweenSetsEnabled'
   | 'restDuration'
   | 'restDurationUnit'
+  | 'stretchSets'
 > & { key: string };
 type CreateDraftPayload = { title: string; daysOfWeek: DayOfWeek[]; iconId: WorkoutIconId };
 type ImportExercisesPayload = {
@@ -98,6 +102,18 @@ function parseCreateDraft(serialized: string | undefined): CreateDraftPayload | 
   }
 }
 
+function parseStringList(serialized: string | undefined): string[] {
+  if (!serialized) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(serialized) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function parseExistingSeeds(serialized: string | undefined): ExerciseDraftSeed[] {
   if (!serialized) {
     return [];
@@ -112,12 +128,15 @@ function parseExistingSeeds(serialized: string | undefined): ExerciseDraftSeed[]
 
 export default function ExerciseLibraryScreen() {
   const repo = useDataRepository();
-  const { source, workoutId, existingExercises, createDraft, libraryEntry } = useLocalSearchParams<{
+  const { source, workoutId, existingExercises, createDraft, libraryEntry, excludeSignatures, excludeIds } =
+    useLocalSearchParams<{
     source?: RouteSource;
     workoutId?: string | string[];
     existingExercises?: string | string[];
     createDraft?: string | string[];
     libraryEntry?: string | string[];
+    excludeSignatures?: string | string[];
+    excludeIds?: string | string[];
   }>();
   const colorScheme = useColorScheme();
   const activeScheme = colorScheme ?? 'light';
@@ -161,6 +180,7 @@ export default function ExerciseLibraryScreen() {
       restBetweenSetsEnabled: exercise.restBetweenSetsEnabled,
       restDuration: exercise.restDuration,
       restDurationUnit: exercise.restDurationUnit,
+      stretchSets: exercise.stretchSets,
     }));
     setItems(itemsFromCatalog);
     setLoading(false);
@@ -204,6 +224,25 @@ export default function ExerciseLibraryScreen() {
     () => parseExistingSeeds(normalizedExistingExercises),
     [normalizedExistingExercises],
   );
+
+  const excludedSignatures = useMemo(() => {
+    const raw = Array.isArray(excludeSignatures) ? excludeSignatures[0] : excludeSignatures;
+    return new Set(parseStringList(raw));
+  }, [excludeSignatures]);
+
+  const excludedIds = useMemo(() => {
+    const raw = Array.isArray(excludeIds) ? excludeIds[0] : excludeIds;
+    return new Set(parseStringList(raw));
+  }, [excludeIds]);
+
+  const visibleItems = useMemo(() => {
+    if (source !== 'log') {
+      return items;
+    }
+    return items.filter(
+      (item) => !excludedIds.has(item.id) && !excludedSignatures.has(exerciseDefinitionSignatureKey(item)),
+    );
+  }, [excludedIds, excludedSignatures, items, source]);
 
   const normalizedCreateDraftJson = useMemo(
     () => (Array.isArray(createDraft) ? createDraft[0] : createDraft),
@@ -374,6 +413,19 @@ export default function ExerciseLibraryScreen() {
     const newSeeds: ExerciseDraftSeed[] = selected.map((exercise) =>
       exerciseDraftSeedFromRow(workoutExerciseToDraftRow(exercise, { clientId: exercise.id })),
     );
+    if (source === 'log') {
+      queuePendingLogExercises(
+        selected.map((exercise) => ({
+          libraryExerciseId: exercise.id,
+          exercise: {
+            ...exercise,
+            id: newId(),
+          },
+        })),
+      );
+      router.back();
+      return;
+    }
     const importPayload: ImportExercisesPayload = {
       nonce,
       exercises: [...existingSeeds, ...newSeeds],
@@ -417,17 +469,21 @@ export default function ExerciseLibraryScreen() {
           ...stackHeaderHideIosBackLabel,
         }}
       />
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <View style={styles.centered}>
-          <Text style={styles.emptyTitle}>No saved exercises found</Text>
+          <Text style={styles.emptyTitle}>
+            {source === 'log' && items.length > 0 ? 'Nothing Left To Add' : 'No saved exercises found'}
+          </Text>
           <Text style={styles.emptySubtitle}>
-            Exercises you add to workouts appear here and stay until you delete them from the library.
+            {source === 'log' && items.length > 0
+              ? 'Every exercise in your library is already part of this log.'
+              : 'Exercises you add to workouts appear here and stay until you delete them from the library.'}
           </Text>
         </View>
       ) : (
         <>
           <FlatList
-            data={items}
+            data={visibleItems}
             keyExtractor={(item) => item.key}
             contentContainerStyle={
               browseOnly
@@ -437,7 +493,9 @@ export default function ExerciseLibraryScreen() {
             ListHeaderComponent={
               browseOnly ? null : (
                 <Text style={[styles.hint, { color: activeScheme === 'dark' ? '#a3a3a3' : '#737373' }]}>
-                  Tap exercises to select them, then add them to your workout.
+                  {source === 'log'
+                    ? 'Choose exercises that are not already in this log. You can decide on the log whether each one stays on the workout.'
+                    : 'Tap exercises to select them, then add them to your workout.'}
                 </Text>
               )
             }
@@ -532,7 +590,11 @@ export default function ExerciseLibraryScreen() {
                     styles.addButtonLabel,
                     selectedCount === 0 && { color: activeScheme === 'dark' ? '#a3a3a3' : '#525252' },
                   ]}>
-                  {selectedCount === 0 ? 'Select exercises to add' : `Add ${selectedCount} exercise${selectedCount === 1 ? '' : 's'}`}
+                  {selectedCount === 0
+                    ? 'Select exercises to add'
+                    : source === 'log'
+                      ? `Add ${selectedCount} To This Log`
+                      : `Add ${selectedCount} exercise${selectedCount === 1 ? '' : 's'}`}
                 </Text>
               </Pressable>
             </View>
