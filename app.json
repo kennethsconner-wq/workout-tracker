@@ -74,6 +74,7 @@
         }
       ],
       "./plugins/withAndroidExactAlarmPermission.js",
+      "./plugins/with-scene-lifecycle.js",
       "expo-secure-store",
       "expo-asset"
     ],

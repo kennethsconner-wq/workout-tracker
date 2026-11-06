@@ -21,13 +21,7 @@ public class AppDelegate: ExpoAppDelegate {
     reactNativeFactory = factory
     bindReactNativeFactory(factory)
 
-#if os(iOS) || os(tvOS)
-    window = UIWindow(frame: UIScreen.main.bounds)
-    factory.startReactNative(
-      withModuleName: "main",
-      in: window,
-      launchOptions: launchOptions)
-#endif
+    // The window is created by SceneDelegate under the UIScene life cycle.
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -66,5 +60,61 @@ class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
 #else
     return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif
+  }
+}
+
+// scene lifecycle (with-scene-lifecycle.js)
+@objc(SceneDelegate)
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+
+  func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions
+  ) {
+    guard
+      let windowScene = scene as? UIWindowScene,
+      let appDelegate = UIApplication.shared.delegate as? AppDelegate,
+      let factory = appDelegate.reactNativeFactory
+    else { return }
+
+    // Cold-launch links arrive here, not in the app delegate launch options.
+    var launchOptions: [UIApplication.LaunchOptionsKey: Any] = [:]
+    if let url = connectionOptions.urlContexts.first?.url {
+      launchOptions[.url] = url
+      _ = appDelegate.application(UIApplication.shared, open: url, options: [:])
+    } else if let activity = connectionOptions.userActivities.first(where: {
+      $0.activityType == NSUserActivityTypeBrowsingWeb
+    }), let url = activity.webpageURL {
+      launchOptions[.url] = url
+      _ = appDelegate.application(
+        UIApplication.shared,
+        continue: activity,
+        restorationHandler: { _ in })
+    }
+
+    let window = UIWindow(windowScene: windowScene)
+    self.window = window
+    appDelegate.window = window
+    factory.startReactNative(
+      withModuleName: "main",
+      in: window,
+      launchOptions: launchOptions.isEmpty ? nil : launchOptions)
+  }
+
+  func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    for context in URLContexts {
+      _ = appDelegate.application(UIApplication.shared, open: context.url, options: [:])
+    }
+  }
+
+  func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    _ = appDelegate.application(
+      UIApplication.shared,
+      continue: userActivity,
+      restorationHandler: { _ in })
   }
 }
